@@ -1,0 +1,16 @@
+output: dist/
+
+releases:
+  - name: macos
+    jobs:
+      - name: dev-orbit-macos-dmg
+        package:
+          platform: macos
+          target: dmg
+
+  - name: windows
+    jobs:
+      - name: dev-orbit-windows-exe
+        package:
+          platform: windows
+          target: exe

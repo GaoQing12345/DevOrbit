@@ -1,0 +1,13 @@
+app_id: "{0A2DFE0D-5E49-4D9E-8EAC-275FB5C3D1C1}"
+display_name: DevOrbit
+publisher_name: DevOrbit
+create_desktop_icon: true
+launch_at_startup: false
+install_dir_name: "{localappdata}\\Programs\\DevOrbit"
+setup_icon_file: windows/runner/resources/app_icon.ico
+privileges_required: lowest
+locales:
+  - en
+  - zh
+architectures_allowed: x64compatible
+architectures_install_in_64_bit_mode: x64compatible

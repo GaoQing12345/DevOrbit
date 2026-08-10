@@ -1,0 +1,57 @@
+name: Desktop Release
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            release_name: macos
+            artifact_name: DevOrbit-macOS
+          - os: windows-latest
+            release_name: windows
+            artifact_name: DevOrbit-Windows
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - run: flutter analyze
+      - run: flutter test
+      - run: dart pub global activate fastforge 0.6.12
+      - name: Install appdmg
+        if: runner.os == 'macOS'
+        run: npm install --global appdmg
+      - name: Install Inno Setup
+        if: runner.os == 'Windows'
+        run: choco install innosetup --no-progress --yes
+      - run: dart pub global run fastforge:fastforge release --name ${{ matrix.release_name }}
+      - name: Create checksums
+        if: runner.os == 'macOS'
+        run: |
+          find dist -type f -exec shasum -a 256 {} \; > "$RUNNER_TEMP/SHA256SUMS.txt"
+          mv "$RUNNER_TEMP/SHA256SUMS.txt" dist/SHA256SUMS.txt
+      - name: Create checksums
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $checksumPath = Join-Path $env:RUNNER_TEMP "SHA256SUMS.txt"
+          Get-ChildItem dist -File -Recurse | ForEach-Object {
+            $hash = Get-FileHash $_.FullName -Algorithm SHA256
+            "$($hash.Hash)  $($_.Name)" | Add-Content $checksumPath
+          }
+          Move-Item $checksumPath dist/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: dist/**

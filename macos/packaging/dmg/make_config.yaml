@@ -1,0 +1,15 @@
+title: DevOrbit
+icon-size: 96
+window:
+  size:
+    width: 600
+    height: 400
+contents:
+  - x: 160
+    y: 200
+    type: file
+    path: DevOrbit.app
+  - x: 440
+    y: 200
+    type: link
+    path: /Applications
