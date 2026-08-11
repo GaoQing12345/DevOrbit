@@ -108,7 +108,8 @@ class NativeDesktopShell
     }
     final cursor = await screenRetriever.getCursorScreenPoint();
     final workArea = await _workAreaFor(cursor);
-    final bounds = RadialGeometry.centerInWorkArea(
+    final bounds = RadialGeometry.clampToWorkArea(
+      cursor: cursor,
       windowSize: radialSize,
       workArea: workArea,
     );

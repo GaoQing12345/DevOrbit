@@ -11,6 +11,7 @@ import 'package:re_highlight/styles/atom-one-dark.dart';
 import 'package:re_highlight/styles/atom-one-light.dart';
 
 import '../../core/settings/settings_store.dart';
+import 'json_code_indicator.dart';
 import 'json_document_controller.dart';
 import 'json_editor_chrome.dart';
 import 'json_find_panel.dart';
@@ -264,7 +265,15 @@ class _JsonFormatterPageState extends State<JsonFormatterPage> {
         ),
       ),
       indicatorBuilder: (context, editing, chunk, notifier) =>
-          DefaultCodeLineNumber(controller: editing, notifier: notifier),
+          JsonCodeIndicator(
+            editingController: editing,
+            chunkController: chunk,
+            notifier: notifier,
+          ),
+      leadingDivider: ColoredBox(
+        color: theme.colorScheme.outlineVariant.withAlpha(145),
+        child: const SizedBox(width: 1),
+      ),
     );
   }
 }

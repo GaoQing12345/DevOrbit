@@ -16,14 +16,18 @@ class RadialGeometry {
     return center + Offset(math.cos(angle) * radius, math.sin(angle) * radius);
   }
 
-  static Rect centerInWorkArea({
+  static Rect clampToWorkArea({
+    required Offset cursor,
     required Size windowSize,
     required Rect workArea,
   }) {
-    return Rect.fromCenter(
-      center: workArea.center,
-      width: windowSize.width,
-      height: windowSize.height,
+    final maxLeft = math.max(workArea.left, workArea.right - windowSize.width);
+    final maxTop = math.max(workArea.top, workArea.bottom - windowSize.height);
+    final left = (cursor.dx - windowSize.width / 2).clamp(
+      workArea.left,
+      maxLeft,
     );
+    final top = (cursor.dy - windowSize.height / 2).clamp(workArea.top, maxTop);
+    return Rect.fromLTWH(left, top, windowSize.width, windowSize.height);
   }
 }

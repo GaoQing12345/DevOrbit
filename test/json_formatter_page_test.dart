@@ -20,6 +20,37 @@ void main() {
     await _disposeEditor(tester);
   });
 
+  testWidgets('shows and toggles nested JSON folding controls', (tester) async {
+    const nestedJson = '''
+{
+  "profile": {
+    "items": [
+      {
+        "id": 1
+      }
+    ]
+  }
+}
+''';
+    final fixture = await _PageFixture.create(text: nestedJson);
+    await tester.pumpWidget(fixture.widget);
+
+    await _waitForFoldChunks(tester, 4);
+    final indicator = tester.widget<DefaultCodeChunkIndicator>(
+      find.byType(DefaultCodeChunkIndicator),
+    );
+    expect(indicator.controller.value, hasLength(4));
+
+    indicator.controller.collapse(1);
+    await tester.pump();
+
+    final editor = tester.widget<CodeEditor>(find.byType(CodeEditor));
+    expect(editor.controller!.codeLines[1].chunkParent, isTrue);
+    expect(fixture.controller.text, nestedJson);
+    await tester.pump(const Duration(milliseconds: 350));
+    await _disposeEditor(tester);
+  });
+
   testWidgets('Control+F opens find for the whole formatter window', (
     tester,
   ) async {
@@ -92,6 +123,26 @@ Future<void> _waitForEnabled(WidgetTester tester, String tooltip) async {
     if (tester.widget<IconButton>(iconButton).onPressed != null) return;
   }
   fail('$tooltip 在等待搜索结果后仍不可用');
+}
+
+Future<void> _waitForFoldChunks(WidgetTester tester, int count) async {
+  for (var attempt = 0; attempt < 30; attempt++) {
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 20)),
+    );
+    await tester.pump();
+    final indicator = find.byType(DefaultCodeChunkIndicator);
+    if (indicator.evaluate().isEmpty) continue;
+    if (tester
+            .widget<DefaultCodeChunkIndicator>(indicator)
+            .controller
+            .value
+            .length >=
+        count) {
+      return;
+    }
+  }
+  fail('等待 JSON 折叠区分析超时');
 }
 
 Future<void> _disposeEditor(WidgetTester tester) async {
