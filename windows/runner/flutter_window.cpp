@@ -1,13 +1,45 @@
 #include "flutter_window.h"
 
+#include <dwmapi.h>
 #include <optional>
 
 #include "flutter/generated_plugin_registrant.h"
+#include "flutter/standard_method_codec.h"
 
 FlutterWindow::FlutterWindow(const flutter::DartProject& project)
     : project_(project) {}
 
 FlutterWindow::~FlutterWindow() {}
+
+void FlutterWindow::RegisterWindowEffectsChannel() {
+  window_effects_channel_ =
+      std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
+          flutter_controller_->engine()->messenger(),
+          "dev_orbit/window_effects",
+          &flutter::StandardMethodCodec::GetInstance());
+  window_effects_channel_->SetMethodCallHandler(
+      [this](const auto& call, auto result) {
+        if (call.method_name() != "setRadialMode") {
+          result->NotImplemented();
+          return;
+        }
+        const auto& args =
+            std::get<flutter::EncodableMap>(*call.arguments());
+        const auto enabled = std::get<bool>(
+            args.at(flutter::EncodableValue("enabled")));
+        SetRadialMode(enabled);
+        result->Success();
+      });
+}
+
+void FlutterWindow::SetRadialMode(bool enabled) {
+  const MARGINS margins = enabled ? MARGINS{-1, -1, -1, -1}
+                                  : MARGINS{0, 0, 0, 0};
+  DwmExtendFrameIntoClientArea(GetHandle(), &margins);
+  SetWindowPos(GetHandle(), nullptr, 0, 0, 0, 0,
+               SWP_NOACTIVATE | SWP_NOZORDER | SWP_NOMOVE | SWP_NOSIZE |
+                   SWP_FRAMECHANGED);
+}
 
 bool FlutterWindow::OnCreate() {
   if (!Win32Window::OnCreate()) {
@@ -26,6 +58,7 @@ bool FlutterWindow::OnCreate() {
   }
   RegisterPlugins(flutter_controller_->engine());
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
+  RegisterWindowEffectsChannel();
 
   flutter_controller_->engine()->SetNextFrameCallback([&]() {
     this->Show();
@@ -40,6 +73,9 @@ bool FlutterWindow::OnCreate() {
 }
 
 void FlutterWindow::OnDestroy() {
+  if (window_effects_channel_) {
+    window_effects_channel_ = nullptr;
+  }
   if (flutter_controller_) {
     flutter_controller_ = nullptr;
   }

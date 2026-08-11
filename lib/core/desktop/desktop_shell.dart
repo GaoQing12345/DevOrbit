@@ -6,6 +6,7 @@ import 'package:tray_manager/tray_manager.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../../features/launcher/radial_geometry.dart';
+import 'desktop_window_effects.dart';
 import 'launch_at_startup_service.dart';
 import 'window_blur_guard.dart';
 
@@ -39,6 +40,9 @@ abstract interface class DesktopShell {
 class NativeDesktopShell
     with WindowListener, TrayListener
     implements DesktopShell {
+  NativeDesktopShell({DesktopWindowEffects? windowEffects})
+    : _windowEffects = windowEffects ?? NativeDesktopWindowEffects();
+
   static const radialSize = Size.square(360);
   static const toolSize = Size(960, 700);
   static const toolMinimumSize = Size(760, 520);
@@ -47,6 +51,7 @@ class NativeDesktopShell
   DesktopShellCallbacks? _callbacks;
   HotKey? _hotKey;
   final LaunchAtStartupService _launchAtStartup = LaunchAtStartupService();
+  final DesktopWindowEffects _windowEffects;
   final WindowBlurGuard _windowBlurGuard = WindowBlurGuard(
     isFocused: windowManager.isFocused,
   );
@@ -110,13 +115,15 @@ class NativeDesktopShell
     await windowManager.setMinimumSize(const Size(1, 1));
     await windowManager.setMaximumSize(_maximumSize);
     await windowManager.setResizable(false);
-    await windowManager.setHasShadow(false);
     await windowManager.setAlwaysOnTop(true);
     await windowManager.setSkipTaskbar(true);
     await windowManager.setTitleBarStyle(
       TitleBarStyle.hidden,
       windowButtonVisibility: false,
     );
+    await windowManager.setHasShadow(false);
+    await _windowEffects.setRadialMode(true);
+    await windowManager.setBackgroundColor(Colors.transparent);
     await windowManager.setBounds(bounds);
     await windowManager.show();
     await windowManager.focus();
@@ -149,7 +156,6 @@ class NativeDesktopShell
     await windowManager.setMaximumSize(_maximumSize);
     await windowManager.setMinimumSize(toolMinimumSize);
     await windowManager.setResizable(true);
-    await windowManager.setHasShadow(true);
     await windowManager.setAlwaysOnTop(false);
     await windowManager.setSkipTaskbar(false);
     final useCustomWindowsTitleBar = Platform.isWindows;
@@ -157,6 +163,8 @@ class NativeDesktopShell
       useCustomWindowsTitleBar ? TitleBarStyle.hidden : TitleBarStyle.normal,
       windowButtonVisibility: !useCustomWindowsTitleBar,
     );
+    await _windowEffects.setRadialMode(false);
+    await windowManager.setHasShadow(true);
     await windowManager.setBounds(_lastToolBounds);
     await windowManager.show(inactive: !focus);
     if (focus) await windowManager.focus();
