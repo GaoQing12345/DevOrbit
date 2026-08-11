@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 
 import '../../app/app_controller.dart';
@@ -5,6 +7,7 @@ import '../../core/modules/tool_registry.dart';
 import '../../core/settings/settings_store.dart';
 import '../settings/settings_page.dart';
 import 'toolbox_home.dart';
+import 'windows_toolbox_title_bar.dart';
 
 class ToolboxShell extends StatelessWidget {
   const ToolboxShell({
@@ -12,14 +15,27 @@ class ToolboxShell extends StatelessWidget {
     required this.controller,
     required this.registry,
     required this.settings,
+    this.showWindowControls,
   });
 
   final AppController controller;
   final ToolRegistry registry;
   final SettingsStore settings;
+  final bool? showWindowControls;
 
   @override
   Widget build(BuildContext context) {
+    final content = _buildContent(context);
+    if (!(showWindowControls ?? Platform.isWindows)) return content;
+    return Column(
+      children: [
+        WindowsToolboxTitleBar(controller: controller),
+        Expanded(child: content),
+      ],
+    );
+  }
+
+  Widget _buildContent(BuildContext context) {
     final selectedIndex = _selectedIndex();
     return ColoredBox(
       color: Theme.of(context).colorScheme.surface,
@@ -89,11 +105,15 @@ class _Sidebar extends StatelessWidget {
                   children: [
                     _OrbitMark(),
                     SizedBox(width: 10),
-                    Text(
-                      'DevOrbit',
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w700,
+                    Expanded(
+                      child: Text(
+                        'DevOrbit',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w700,
+                        ),
                       ),
                     ),
                   ],

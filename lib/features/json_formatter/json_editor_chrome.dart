@@ -15,6 +15,7 @@ class JsonEditorToolbar extends StatelessWidget {
     required this.onOpen,
     required this.onSave,
     required this.onCopy,
+    required this.onFind,
   });
 
   final JsonDocumentController controller;
@@ -22,6 +23,7 @@ class JsonEditorToolbar extends StatelessWidget {
   final VoidCallback onOpen;
   final VoidCallback onSave;
   final VoidCallback onCopy;
+  final VoidCallback onFind;
 
   @override
   Widget build(BuildContext context) {
@@ -61,6 +63,11 @@ class JsonEditorToolbar extends StatelessWidget {
               tooltip: '复制',
               icon: Icons.content_copy_rounded,
               onPressed: onCopy,
+            ),
+            _ToolbarButton(
+              tooltip: '查找',
+              icon: Icons.search_rounded,
+              onPressed: onFind,
             ),
             const Spacer(),
             Text(

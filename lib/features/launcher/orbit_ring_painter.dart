@@ -9,7 +9,7 @@ class OrbitRingPainter extends CustomPainter {
   });
 
   static const slotCount = 8;
-  static const _lineColor = Color(0x2EFFFFFF);
+  static const _lineColor = Color(0x241C2A32);
 
   final int? hoveredIndex;
   final Color hoveredColor;
@@ -30,10 +30,10 @@ class OrbitRingPainter extends CustomPainter {
       ..shader = const RadialGradient(
         center: Alignment(-0.35, -0.45),
         radius: 1.05,
-        colors: [Color(0xF02A3239), Color(0xF0181E23)],
+        colors: [Color(0xE8FFFFFF), Color(0xB8E9F0EF)],
       ).createShader(outerRect);
 
-    canvas.drawShadow(ring, const Color(0xB0000000), 22, false);
+    canvas.drawShadow(ring, const Color(0x380B1B20), 20, false);
     canvas.drawPath(ring, trackPaint);
 
     if (hoveredIndex case final index?) {
@@ -53,7 +53,7 @@ class OrbitRingPainter extends CustomPainter {
       Paint()
         ..style = PaintingStyle.stroke
         ..strokeWidth = 1.2
-        ..color = const Color(0x52FFFFFF),
+        ..color = const Color(0xB8FFFFFF),
     );
     canvas.drawCircle(
       center,
@@ -61,7 +61,7 @@ class OrbitRingPainter extends CustomPainter {
       Paint()
         ..style = PaintingStyle.stroke
         ..strokeWidth = 1
-        ..color = const Color(0x3DFFFFFF),
+        ..color = const Color(0x521C2A32),
     );
   }
 

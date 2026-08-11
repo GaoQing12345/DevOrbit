@@ -30,6 +30,7 @@ abstract interface class DesktopShell {
   Future<void> showRadial();
   Future<void> showToolWindow({bool focus = true});
   Future<void> hide();
+  Future<void> minimize();
   Future<void> quit();
   Future<String?> updateHotKey(HotKey hotKey);
   Future<bool> setLaunchAtStartup(bool enabled);
@@ -102,8 +103,7 @@ class NativeDesktopShell
     }
     final cursor = await screenRetriever.getCursorScreenPoint();
     final workArea = await _workAreaFor(cursor);
-    final bounds = RadialGeometry.clampToWorkArea(
-      cursor: cursor,
+    final bounds = RadialGeometry.centerInWorkArea(
       windowSize: radialSize,
       workArea: workArea,
     );
@@ -152,9 +152,10 @@ class NativeDesktopShell
     await windowManager.setHasShadow(true);
     await windowManager.setAlwaysOnTop(false);
     await windowManager.setSkipTaskbar(false);
+    final useCustomWindowsTitleBar = Platform.isWindows;
     await windowManager.setTitleBarStyle(
-      TitleBarStyle.normal,
-      windowButtonVisibility: true,
+      useCustomWindowsTitleBar ? TitleBarStyle.hidden : TitleBarStyle.normal,
+      windowButtonVisibility: !useCustomWindowsTitleBar,
     );
     await windowManager.setBounds(_lastToolBounds);
     await windowManager.show(inactive: !focus);
@@ -165,6 +166,11 @@ class NativeDesktopShell
   Future<void> hide() async {
     if (await windowManager.isVisible()) await _rememberToolBounds();
     await windowManager.hide();
+  }
+
+  @override
+  Future<void> minimize() {
+    return windowManager.minimize();
   }
 
   @override

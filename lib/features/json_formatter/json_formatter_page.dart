@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:desktop_drop/desktop_drop.dart';
 import 'package:file_selector/file_selector.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:path/path.dart' as path;
@@ -12,6 +13,7 @@ import 'package:re_highlight/styles/atom-one-light.dart';
 import '../../core/settings/settings_store.dart';
 import 'json_document_controller.dart';
 import 'json_editor_chrome.dart';
+import 'json_find_panel.dart';
 
 class JsonFormatterPage extends StatefulWidget {
   const JsonFormatterPage({
@@ -29,6 +31,7 @@ class JsonFormatterPage extends StatefulWidget {
 
 class _JsonFormatterPageState extends State<JsonFormatterPage> {
   late final CodeLineEditingController _editor;
+  late final CodeFindController _findController;
   bool _syncing = false;
   bool _dragging = false;
 
@@ -36,12 +39,14 @@ class _JsonFormatterPageState extends State<JsonFormatterPage> {
   void initState() {
     super.initState();
     _editor = CodeLineEditingController.fromText(widget.controller.text);
+    _findController = CodeFindController(_editor);
     widget.controller.addListener(_syncFromDocument);
   }
 
   @override
   void dispose() {
     widget.controller.removeListener(_syncFromDocument);
+    _findController.dispose();
     _editor.dispose();
     super.dispose();
   }
@@ -164,76 +169,102 @@ class _JsonFormatterPageState extends State<JsonFormatterPage> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
+    return CallbackShortcuts(
+      bindings: {_findShortcut(): _findController.findMode},
+      child: _buildDropTarget(theme, isDark),
+    );
+  }
+
+  ShortcutActivator _findShortcut() {
+    final isMacOS = defaultTargetPlatform == TargetPlatform.macOS;
+    return SingleActivator(
+      LogicalKeyboardKey.keyF,
+      meta: isMacOS,
+      control: !isMacOS,
+    );
+  }
+
+  Widget _buildDropTarget(ThemeData theme, bool isDark) {
     return DropTarget(
       onDragEntered: (_) => setState(() => _dragging = true),
       onDragExited: (_) => setState(() => _dragging = false),
-      onDragDone: (details) async {
-        setState(() => _dragging = false);
-        if (details.files.isEmpty || !await _confirmReplace()) return;
-        final file = details.files.first;
-        if (!file.name.toLowerCase().endsWith('.json')) {
-          _showMessage('仅支持 .json 文件');
-          return;
-        }
-        await _loadFile(file);
-      },
+      onDragDone: _handleDrop,
       child: ColoredBox(
         color: theme.colorScheme.surface,
         child: Column(
           children: [
-            JsonEditorToolbar(
-              controller: widget.controller,
-              settings: widget.settings,
-              onOpen: _openFile,
-              onSave: _saveFile,
-              onCopy: _copy,
-            ),
-            Expanded(
-              child: Container(
-                margin: const EdgeInsets.fromLTRB(16, 0, 16, 0),
-                decoration: BoxDecoration(
-                  border: Border.all(
-                    color: _dragging
-                        ? theme.colorScheme.primary
-                        : theme.colorScheme.outlineVariant,
-                    width: _dragging ? 2 : 1,
-                  ),
-                  borderRadius: BorderRadius.circular(6),
-                ),
-                clipBehavior: Clip.antiAlias,
-                child: CodeEditor(
-                  controller: _editor,
-                  onChanged: (_) => _onEditorChanged(),
-                  wordWrap: false,
-                  autofocus: true,
-                  hint: '{\n  "name": "DevOrbit"\n}',
-                  style: CodeEditorStyle(
-                    fontSize: 14,
-                    fontFamily: 'Menlo',
-                    fontFamilyFallback: const ['Consolas', 'monospace'],
-                    backgroundColor: isDark
-                        ? const Color(0xFF15191E)
-                        : const Color(0xFFF8FAFA),
-                    cursorLineColor: theme.colorScheme.primary.withAlpha(30),
-                    codeTheme: CodeHighlightTheme(
-                      languages: {
-                        'json': CodeHighlightThemeMode(mode: langJson),
-                      },
-                      theme: isDark ? atomOneDarkTheme : atomOneLightTheme,
-                    ),
-                  ),
-                  indicatorBuilder: (context, editing, chunk, notifier) =>
-                      DefaultCodeLineNumber(
-                        controller: editing,
-                        notifier: notifier,
-                      ),
-                ),
-              ),
-            ),
+            _buildToolbar(),
+            Expanded(child: _buildEditor(theme, isDark)),
             JsonEditorStatusBar(controller: widget.controller),
           ],
         ),
       ),
+    );
+  }
+
+  Future<void> _handleDrop(DropDoneDetails details) async {
+    setState(() => _dragging = false);
+    if (details.files.isEmpty || !await _confirmReplace()) return;
+    final file = details.files.first;
+    if (!file.name.toLowerCase().endsWith('.json')) {
+      _showMessage('仅支持 .json 文件');
+      return;
+    }
+    await _loadFile(file);
+  }
+
+  Widget _buildToolbar() {
+    return JsonEditorToolbar(
+      controller: widget.controller,
+      settings: widget.settings,
+      onOpen: _openFile,
+      onSave: _saveFile,
+      onCopy: _copy,
+      onFind: _findController.findMode,
+    );
+  }
+
+  Widget _buildEditor(ThemeData theme, bool isDark) {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 0, 16, 0),
+      decoration: BoxDecoration(
+        border: Border.all(
+          color: _dragging
+              ? theme.colorScheme.primary
+              : theme.colorScheme.outlineVariant,
+          width: _dragging ? 2 : 1,
+        ),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: _buildCodeEditor(theme, isDark),
+    );
+  }
+
+  Widget _buildCodeEditor(ThemeData theme, bool isDark) {
+    return CodeEditor(
+      controller: _editor,
+      findController: _findController,
+      onChanged: (_) => _onEditorChanged(),
+      wordWrap: false,
+      autofocus: true,
+      findBuilder: (context, controller, readOnly) =>
+          JsonFindPanel(controller: controller, readOnly: readOnly),
+      style: CodeEditorStyle(
+        fontSize: 14,
+        fontFamily: 'Menlo',
+        fontFamilyFallback: const ['Consolas', 'monospace'],
+        backgroundColor: isDark
+            ? const Color(0xFF15191E)
+            : const Color(0xFFF8FAFA),
+        cursorLineColor: theme.colorScheme.primary.withAlpha(30),
+        codeTheme: CodeHighlightTheme(
+          languages: {'json': CodeHighlightThemeMode(mode: langJson)},
+          theme: isDark ? atomOneDarkTheme : atomOneLightTheme,
+        ),
+      ),
+      indicatorBuilder: (context, editing, chunk, notifier) =>
+          DefaultCodeLineNumber(controller: editing, notifier: notifier),
     );
   }
 }

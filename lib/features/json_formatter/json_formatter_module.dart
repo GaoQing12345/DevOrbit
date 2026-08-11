@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import '../../core/modules/tool_module.dart';
 import '../../core/settings/settings_store.dart';
@@ -28,11 +27,5 @@ class JsonFormatterModule implements ToolModule {
   }
 
   @override
-  Future<void> onLaunch(ToolLaunchContext context) async {
-    if (context.origin != ToolLaunchOrigin.radial) return;
-    final data = await Clipboard.getData(Clipboard.kTextPlain);
-    final text = data?.text;
-    if (text == null) return;
-    await controller.importClipboard(text, settings.value.indentSize);
-  }
+  Future<void> onLaunch(ToolLaunchContext context) async {}
 }

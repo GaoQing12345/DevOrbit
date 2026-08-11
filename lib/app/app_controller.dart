@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:hotkey_manager/hotkey_manager.dart';
 
 import '../core/desktop/desktop_shell.dart';
+import '../core/desktop/standalone_tool_window_launcher.dart';
 import '../core/modules/tool_module.dart';
 import '../core/modules/tool_registry.dart';
 import '../core/settings/settings_store.dart';
@@ -15,14 +16,15 @@ class AppController extends ChangeNotifier {
     required this.registry,
     required this.settings,
     required this.shell,
+    required this.standaloneLauncher,
   });
 
   final ToolRegistry registry;
   final SettingsStore settings;
   final DesktopShell shell;
+  final StandaloneToolWindowLauncher standaloneLauncher;
 
   AppViewMode _mode = AppViewMode.hidden;
-  AppViewMode _returnMode = AppViewMode.hidden;
   ToolboxSection _section = ToolboxSection.home;
   String? _selectedToolId;
   String? _hotKeyError;
@@ -59,20 +61,13 @@ class AppController extends ChangeNotifier {
       await dismissRadial();
       return;
     }
-    _returnMode = _mode;
     _mode = AppViewMode.radial;
     notifyListeners();
     await shell.showRadial();
   }
 
   Future<void> dismissRadial() async {
-    if (_returnMode == AppViewMode.hidden) {
-      await hide();
-      return;
-    }
-    _mode = _returnMode;
-    notifyListeners();
-    await shell.showToolWindow(focus: false);
+    await hide();
   }
 
   Future<void> showToolbox() async {
@@ -94,6 +89,11 @@ class AppController extends ChangeNotifier {
     ToolLaunchOrigin origin = ToolLaunchOrigin.toolbox,
   }) async {
     final module = registry.byId(id);
+    if (origin == ToolLaunchOrigin.radial &&
+        await standaloneLauncher.openTool(id)) {
+      await hide();
+      return;
+    }
     await module.onLaunch(ToolLaunchContext(origin: origin));
     _selectedToolId = id;
     _mode = AppViewMode.tool;
@@ -105,6 +105,10 @@ class AppController extends ChangeNotifier {
     _mode = AppViewMode.hidden;
     notifyListeners();
     await shell.hide();
+  }
+
+  Future<void> minimize() {
+    return shell.minimize();
   }
 
   Future<void> updateHotKey(HotKey hotKey) async {

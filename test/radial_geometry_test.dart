@@ -21,14 +21,13 @@ void main() {
     expect(position.dy, closeTo(150, 0.001));
   });
 
-  test('clamps the launcher inside a display work area', () {
-    final bounds = RadialGeometry.clampToWorkArea(
-      cursor: const Offset(10, 10),
+  test('centers the launcher in the selected display work area', () {
+    final bounds = RadialGeometry.centerInWorkArea(
       windowSize: const Size.square(360),
-      workArea: const Rect.fromLTWH(0, 0, 1440, 900),
+      workArea: const Rect.fromLTWH(1440, 24, 1920, 1056),
     );
 
-    expect(bounds.topLeft, Offset.zero);
+    expect(bounds.center, const Offset(2400, 552));
     expect(bounds.size, const Size.square(360));
   });
 }

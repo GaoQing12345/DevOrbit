@@ -2,6 +2,7 @@ import 'dart:ui';
 
 import 'package:dev_orbit/app/app_controller.dart';
 import 'package:dev_orbit/core/desktop/desktop_shell.dart';
+import 'package:dev_orbit/core/desktop/standalone_tool_window_launcher.dart';
 import 'package:dev_orbit/core/modules/tool_module.dart';
 import 'package:dev_orbit/core/modules/tool_registry.dart';
 import 'package:dev_orbit/features/launcher/orbit_ring_painter.dart';
@@ -23,6 +24,7 @@ void main() {
       registry: registry,
       settings: settings,
       shell: shell,
+      standaloneLauncher: _NoopStandaloneLauncher(),
     );
 
     await tester.pumpWidget(
@@ -51,6 +53,7 @@ void main() {
       registry: registry,
       settings: settings,
       shell: _FakeDesktopShell(),
+      standaloneLauncher: _NoopStandaloneLauncher(),
     );
 
     await tester.pumpWidget(
@@ -121,6 +124,9 @@ class _FakeDesktopShell implements DesktopShell {
   Future<void> hide() async {}
 
   @override
+  Future<void> minimize() async {}
+
+  @override
   Future<String?> initialize(
     DesktopShellCallbacks callbacks,
     HotKey hotKey,
@@ -142,4 +148,9 @@ class _FakeDesktopShell implements DesktopShell {
 
   @override
   Future<String?> updateHotKey(HotKey hotKey) async => null;
+}
+
+class _NoopStandaloneLauncher implements StandaloneToolWindowLauncher {
+  @override
+  Future<bool> openTool(String toolId) async => false;
 }

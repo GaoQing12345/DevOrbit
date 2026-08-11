@@ -23,7 +23,7 @@ class OrbitSlot extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final enabled = module != null;
-    final accent = module?.descriptor.accentColor ?? const Color(0xFF77818C);
+    final accent = module?.descriptor.accentColor ?? const Color(0xFF6D7A80);
     return MouseRegion(
       onEnter: (_) => onHover(),
       onExit: (_) => onExit(),
@@ -44,8 +44,8 @@ class OrbitSlot extends StatelessWidget {
               boxShadow: hovered
                   ? [
                       BoxShadow(
-                        color: accent.withAlpha(54),
-                        blurRadius: 14,
+                        color: accent.withAlpha(46),
+                        blurRadius: 12,
                         spreadRadius: 1,
                       ),
                     ]
@@ -55,7 +55,7 @@ class OrbitSlot extends StatelessWidget {
               onPressed: enabled ? () => onPressed(module!) : null,
               padding: EdgeInsets.zero,
               color: accent,
-              disabledColor: const Color(0xFF69727B),
+              disabledColor: const Color(0xFF7A868B),
               icon: _SlotIcon(index: index, module: module),
             ),
           ),
@@ -65,12 +65,14 @@ class OrbitSlot extends StatelessWidget {
   }
 
   Color _backgroundColor(bool enabled, Color accent) {
-    if (hovered) return accent.withAlpha(66);
-    return enabled ? const Color(0xF02A3037) : const Color(0xB823292F);
+    if (hovered) {
+      return Color.alphaBlend(accent.withAlpha(38), const Color(0xE8FFFFFF));
+    }
+    return enabled ? const Color(0xDEFFFFFF) : const Color(0xA8EEF2F1);
   }
 
   Color _borderColor(Color accent) {
-    return hovered ? accent.withAlpha(230) : const Color(0x4DFFFFFF);
+    return hovered ? accent.withAlpha(210) : const Color(0xA8FFFFFF);
   }
 }
 
@@ -94,7 +96,7 @@ class _SlotIcon extends StatelessWidget {
             style: const TextStyle(
               fontSize: 9,
               fontWeight: FontWeight.w600,
-              color: Color(0xFF9EA7B0),
+              color: Color(0xFF5F6B70),
             ),
           ),
         ),
@@ -117,16 +119,16 @@ class OrbitToolboxButton extends StatelessWidget {
         height: 58,
         decoration: BoxDecoration(
           shape: BoxShape.circle,
-          color: const Color(0xD91F252B),
-          border: Border.all(color: const Color(0x7022C7A9)),
+          color: const Color(0xE8FFFFFF),
+          border: Border.all(color: const Color(0x9922A98F)),
           boxShadow: const [
-            BoxShadow(color: Color(0x66000000), blurRadius: 16),
+            BoxShadow(color: Color(0x300B1B20), blurRadius: 14),
           ],
         ),
         child: IconButton(
           onPressed: onPressed,
           iconSize: 25,
-          color: const Color(0xFFB9F5E9),
+          color: const Color(0xFF168A76),
           icon: const Icon(Icons.grid_view_rounded),
         ),
       ),
