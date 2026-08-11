@@ -35,7 +35,7 @@ jobs:
       - name: Install Inno Setup
         if: runner.os == 'Windows'
         run: choco install innosetup --no-progress --yes
-      - run: dart pub global run fastforge:fastforge release --name ${{ matrix.release_name }}
+      - run: dart pub global run fastforge:main release --name ${{ matrix.release_name }}
       - name: Create checksums
         if: runner.os == 'macOS'
         run: |
