@@ -6,6 +6,7 @@ import 'package:tray_manager/tray_manager.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../../features/launcher/radial_geometry.dart';
+import 'desktop_cursor_locator.dart';
 import 'desktop_window_effects.dart';
 import 'launch_at_startup_service.dart';
 import 'window_blur_guard.dart';
@@ -40,8 +41,11 @@ abstract interface class DesktopShell {
 class NativeDesktopShell
     with WindowListener, TrayListener
     implements DesktopShell {
-  NativeDesktopShell({DesktopWindowEffects? windowEffects})
-    : _windowEffects = windowEffects ?? NativeDesktopWindowEffects();
+  NativeDesktopShell({
+    DesktopWindowEffects? windowEffects,
+    DesktopCursorLocator? cursorLocator,
+  }) : _windowEffects = windowEffects ?? NativeDesktopWindowEffects(),
+       _cursorLocator = cursorLocator ?? NativeDesktopCursorLocator();
 
   static const radialSize = Size.square(360);
   static const toolSize = Size(960, 700);
@@ -52,6 +56,7 @@ class NativeDesktopShell
   HotKey? _hotKey;
   final LaunchAtStartupService _launchAtStartup = LaunchAtStartupService();
   final DesktopWindowEffects _windowEffects;
+  final DesktopCursorLocator _cursorLocator;
   final WindowBlurGuard _windowBlurGuard = WindowBlurGuard(
     isFocused: windowManager.isFocused,
   );
@@ -106,7 +111,7 @@ class NativeDesktopShell
     if (await windowManager.isVisible()) {
       await _rememberToolBounds();
     }
-    final cursor = await screenRetriever.getCursorScreenPoint();
+    final cursor = await _cursorLocator.getPosition();
     final workArea = await _workAreaFor(cursor);
     final bounds = RadialGeometry.clampToWorkArea(
       cursor: cursor,
