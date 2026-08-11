@@ -117,10 +117,14 @@ class NativeDesktopShell
     await windowManager.setResizable(false);
     await windowManager.setAlwaysOnTop(true);
     await windowManager.setSkipTaskbar(true);
-    await windowManager.setTitleBarStyle(
-      TitleBarStyle.hidden,
-      windowButtonVisibility: false,
-    );
+    if (Platform.isWindows) {
+      await windowManager.setAsFrameless();
+    } else {
+      await windowManager.setTitleBarStyle(
+        TitleBarStyle.hidden,
+        windowButtonVisibility: false,
+      );
+    }
     await windowManager.setHasShadow(false);
     await _windowEffects.setRadialMode(true);
     await windowManager.setBackgroundColor(Colors.transparent);

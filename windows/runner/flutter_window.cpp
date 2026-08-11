@@ -33,9 +33,22 @@ void FlutterWindow::RegisterWindowEffectsChannel() {
 }
 
 void FlutterWindow::SetRadialMode(bool enabled) {
-  const MARGINS margins = enabled ? MARGINS{-1, -1, -1, -1}
-                                  : MARGINS{0, 0, 0, 0};
-  DwmExtendFrameIntoClientArea(GetHandle(), &margins);
+  constexpr auto kWindowCornerPreference =
+      static_cast<DWMWINDOWATTRIBUTE>(33);
+  constexpr auto kWindowBorderColor = static_cast<DWMWINDOWATTRIBUTE>(34);
+  constexpr int kDoNotRound = 1;
+  constexpr int kDefaultCornerPreference = 0;
+  constexpr COLORREF kNoBorderColor = 0xFFFFFFFE;
+  constexpr COLORREF kDefaultBorderColor = 0xFFFFFFFF;
+
+  const int corner_preference =
+      enabled ? kDoNotRound : kDefaultCornerPreference;
+  const COLORREF border_color =
+      enabled ? kNoBorderColor : kDefaultBorderColor;
+  DwmSetWindowAttribute(GetHandle(), kWindowCornerPreference,
+                        &corner_preference, sizeof(corner_preference));
+  DwmSetWindowAttribute(GetHandle(), kWindowBorderColor, &border_color,
+                        sizeof(border_color));
   SetWindowPos(GetHandle(), nullptr, 0, 0, 0, 0,
                SWP_NOACTIVATE | SWP_NOZORDER | SWP_NOMOVE | SWP_NOSIZE |
                    SWP_FRAMECHANGED);
