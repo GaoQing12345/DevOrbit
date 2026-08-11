@@ -7,6 +7,7 @@ import 'package:window_manager/window_manager.dart';
 
 import '../../features/launcher/radial_geometry.dart';
 import 'launch_at_startup_service.dart';
+import 'window_blur_guard.dart';
 
 class DesktopShellCallbacks {
   const DesktopShellCallbacks({
@@ -45,6 +46,9 @@ class NativeDesktopShell
   DesktopShellCallbacks? _callbacks;
   HotKey? _hotKey;
   final LaunchAtStartupService _launchAtStartup = LaunchAtStartupService();
+  final WindowBlurGuard _windowBlurGuard = WindowBlurGuard(
+    isFocused: windowManager.isFocused,
+  );
   Rect _lastToolBounds = const Rect.fromLTWH(120, 100, 960, 700);
 
   @override
@@ -209,8 +213,19 @@ class NativeDesktopShell
   }
 
   @override
+  void onWindowFocus() {
+    _windowBlurGuard.handleFocus();
+  }
+
+  @override
   void onWindowBlur() {
-    _callbacks?.onWindowBlur();
+    _confirmWindowBlur();
+  }
+
+  Future<void> _confirmWindowBlur() async {
+    if (await _windowBlurGuard.shouldDismissAfterBlur()) {
+      _callbacks?.onWindowBlur();
+    }
   }
 
   @override
