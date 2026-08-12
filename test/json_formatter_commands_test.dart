@@ -64,6 +64,128 @@ void main() {
     debugDefaultTargetPlatformOverride = null;
   });
 
+  testWidgets('find input restores focus after the clipboard panel closes', (
+    tester,
+  ) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    final fixture = await JsonFormatterFixture.create();
+    await tester.pumpWidget(fixture.widget);
+    mockClipboard(tester, initialText: 'restored-clipboard');
+
+    await tester.tap(find.byTooltip('查找'));
+    await tester.pump();
+    final fieldFinder = find.descendant(
+      of: find.byKey(const ValueKey('json-find-input')),
+      matching: find.byType(TextField),
+    );
+    final field = tester.widget<TextField>(fieldFinder);
+    expect(field.focusNode!.hasFocus, isTrue);
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    field.focusNode!.unfocus();
+    final editor = tester.widget<CodeEditor>(find.byType(CodeEditor));
+    editor.focusNode!.requestFocus();
+    await tester.pump();
+    expect(editor.focusNode!.hasFocus, isTrue);
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyV);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    await tester.pump();
+    expect(field.focusNode!.hasFocus, isTrue);
+    expect(field.controller!.text, 'restored-clipboard');
+
+    await disposeEditor(tester);
+    debugDefaultTargetPlatformOverride = null;
+  });
+
+  testWidgets('JSON editor restores focus after the clipboard panel closes', (
+    tester,
+  ) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    final fixture = await JsonFormatterFixture.create();
+    await tester.pumpWidget(fixture.widget);
+    mockClipboard(tester, initialText: '{"from":"clipboard"}');
+
+    final editor = tester.widget<CodeEditor>(find.byType(CodeEditor));
+    editor.focusNode!.requestFocus();
+    await tester.pump();
+    expect(editor.focusNode!.hasFocus, isTrue);
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    editor.focusNode!.unfocus();
+    await tester.pump();
+    expect(editor.focusNode!.hasFocus, isFalse);
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyV);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    await tester.pump();
+    await tester.pump();
+
+    expect(editor.focusNode!.hasFocus, isTrue);
+    expect(fixture.controller.text, '{"from":"clipboard"}');
+    await tester.pump(const Duration(milliseconds: 350));
+    await disposeEditor(tester);
+    debugDefaultTargetPlatformOverride = null;
+  });
+
+  testWidgets('Windows+V remains available to clipboard history', (
+    tester,
+  ) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    final fixture = await JsonFormatterFixture.create();
+    await tester.pumpWidget(fixture.widget);
+    mockClipboard(tester, initialText: '{"source":"history"}');
+
+    final editor = tester.widget<CodeEditor>(find.byType(CodeEditor));
+    editor.focusNode!.requestFocus();
+    await tester.pump();
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyV);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    await tester.pump();
+
+    expect(fixture.controller.text, isEmpty);
+    await disposeEditor(tester);
+    debugDefaultTargetPlatformOverride = null;
+  });
+
+  testWidgets('JSON editor restores focus and accepts Command+V on macOS', (
+    tester,
+  ) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    final fixture = await JsonFormatterFixture.create();
+    await tester.pumpWidget(fixture.widget);
+    mockClipboard(tester, initialText: '{"platform":"macOS"}');
+
+    final editor = tester.widget<CodeEditor>(find.byType(CodeEditor));
+    editor.focusNode!.requestFocus();
+    await tester.pump();
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    editor.focusNode!.unfocus();
+    await tester.pump();
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyV);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    await tester.pump();
+    await tester.pump();
+
+    expect(editor.focusNode!.hasFocus, isTrue);
+    expect(fixture.controller.text, '{"platform":"macOS"}');
+    await tester.pump(const Duration(milliseconds: 350));
+    await disposeEditor(tester);
+    debugDefaultTargetPlatformOverride = null;
+  });
+
   testWidgets('compact action copies the compact JSON', (tester) async {
     final fixture = await JsonFormatterFixture.create(
       text: '{\n  "value": 1\n}',

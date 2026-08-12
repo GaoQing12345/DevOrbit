@@ -15,6 +15,7 @@ import 'json_document_controller.dart';
 import 'json_editor_chrome.dart';
 import 'json_find_panel.dart';
 import 'json_fold_controller.dart';
+import 'json_focus_restorer.dart';
 import 'json_formatter_shortcuts.dart';
 import 'json_highlight_theme.dart';
 import 'json_transformer.dart';
@@ -36,21 +37,22 @@ class JsonFormatterPage extends StatefulWidget {
 class _JsonFormatterPageState extends State<JsonFormatterPage> {
   late final CodeLineEditingController _editor;
   late final CodeFindController _findController;
+  late final JsonFocusRestorer _focusRestorer;
   final _foldController = JsonFoldController();
-  bool _syncing = false;
-  bool _dragging = false;
-
+  bool _syncing = false, _dragging = false;
   @override
   void initState() {
     super.initState();
     _editor = CodeLineEditingController.fromText(widget.controller.text);
     _findController = CodeFindController(_editor);
+    _focusRestorer = JsonFocusRestorer(controller: _findController);
     widget.controller.addListener(_syncFromDocument);
   }
 
   @override
   void dispose() {
     widget.controller.removeListener(_syncFromDocument);
+    _focusRestorer.dispose();
     _findController.dispose();
     _editor.dispose();
     super.dispose();
@@ -259,9 +261,11 @@ class _JsonFormatterPageState extends State<JsonFormatterPage> {
     return CodeEditor(
       controller: _editor,
       findController: _findController,
+      focusNode: _focusRestorer.editorFocusNode,
       onChanged: (_) => _onEditorChanged(),
       wordWrap: false,
       autofocus: true,
+      shortcutsActivatorsBuilder: const JsonEditorShortcutsBuilder(),
       findBuilder: (context, controller, readOnly) =>
           JsonFindPanel(controller: controller, readOnly: readOnly),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),

@@ -208,6 +208,7 @@ class _PanelTextField extends StatelessWidget {
       text: nextText,
       selection: TextSelection.collapsed(offset: start + text.length),
     );
+    focusNode.requestFocus();
   }
 
   int _validOffset(int offset, int textLength) {
