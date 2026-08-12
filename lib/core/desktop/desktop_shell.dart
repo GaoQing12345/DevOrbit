@@ -11,6 +11,12 @@ import 'desktop_window_effects.dart';
 import 'launch_at_startup_service.dart';
 import 'window_blur_guard.dart';
 
+String trayIconAsset({required bool isMacOS, required bool isWindows}) {
+  if (isWindows) return 'assets/icons/tray_icon.ico';
+  if (isMacOS) return 'assets/icons/tray_icon_macos.png';
+  return 'assets/icons/tray_icon.png';
+}
+
 class DesktopShellCallbacks {
   const DesktopShellCallbacks({
     required this.onToggleRadial,
@@ -88,9 +94,10 @@ class NativeDesktopShell
   }
 
   Future<void> _setupTray() async {
-    final icon = Platform.isWindows
-        ? 'assets/icons/tray_icon.ico'
-        : 'assets/icons/tray_icon.png';
+    final icon = trayIconAsset(
+      isMacOS: Platform.isMacOS,
+      isWindows: Platform.isWindows,
+    );
     await trayManager.setIcon(icon, isTemplate: Platform.isMacOS);
     await trayManager.setToolTip('DevOrbit');
     await trayManager.setContextMenu(

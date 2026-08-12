@@ -1,4 +1,6 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:re_editor/re_editor.dart';
 
 class JsonFindPanel extends StatelessWidget implements PreferredSizeWidget {
@@ -8,7 +10,7 @@ class JsonFindPanel extends StatelessWidget implements PreferredSizeWidget {
     required this.readOnly,
   });
 
-  static const _panelWidth = 500.0;
+  static const _panelWidth = 510.0;
   static const _rowHeight = 40.0;
 
   final CodeFindController controller;
@@ -31,19 +33,12 @@ class JsonFindPanel extends StatelessWidget implements PreferredSizeWidget {
       child: Container(
         width: _panelWidth,
         height: preferredSize.height,
-        margin: const EdgeInsets.only(top: 4, right: 8),
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+        margin: const EdgeInsets.only(top: 10, right: 12),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
         decoration: BoxDecoration(
-          color: scheme.surfaceContainerHigh,
+          color: scheme.surface,
           border: Border.all(color: scheme.outlineVariant),
           borderRadius: BorderRadius.circular(6),
-          boxShadow: [
-            BoxShadow(
-              color: scheme.shadow.withAlpha(28),
-              blurRadius: 12,
-              offset: const Offset(0, 4),
-            ),
-          ],
         ),
         child: Column(
           children: [
@@ -174,19 +169,50 @@ class _PanelTextField extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return TextField(
-      controller: controller,
-      focusNode: focusNode,
-      maxLines: 1,
-      onSubmitted: onSubmitted,
-      style: Theme.of(context).textTheme.bodyMedium,
-      decoration: InputDecoration(
-        hintText: hintText,
-        isDense: true,
-        filled: true,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+    return CallbackShortcuts(
+      bindings: {
+        const SingleActivator(LogicalKeyboardKey.keyV, control: true):
+            _pasteClipboard,
+        if (defaultTargetPlatform == TargetPlatform.macOS)
+          const SingleActivator(LogicalKeyboardKey.keyV, meta: true):
+              _pasteClipboard,
+      },
+      child: TextField(
+        controller: controller,
+        focusNode: focusNode,
+        maxLines: 1,
+        onSubmitted: onSubmitted,
+        style: Theme.of(context).textTheme.bodyMedium,
+        decoration: InputDecoration(
+          hintText: hintText,
+          isDense: true,
+          filled: true,
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 11,
+            vertical: 9,
+          ),
+        ),
       ),
     );
+  }
+
+  Future<void> _pasteClipboard() async {
+    final data = await Clipboard.getData(Clipboard.kTextPlain);
+    final text = data?.text;
+    if (text == null || text.isEmpty) return;
+    final selection = controller.selection;
+    final start = _validOffset(selection.start, controller.text.length);
+    final end = _validOffset(selection.end, controller.text.length);
+    final nextText = controller.text.replaceRange(start, end, text);
+    controller.value = TextEditingValue(
+      text: nextText,
+      selection: TextSelection.collapsed(offset: start + text.length),
+    );
+  }
+
+  int _validOffset(int offset, int textLength) {
+    if (offset < 0 || offset > textLength) return textLength;
+    return offset;
   }
 }
 
@@ -209,6 +235,9 @@ class _PanelIconButton extends StatelessWidget {
       icon: Icon(icon, size: 18),
       padding: EdgeInsets.zero,
       constraints: const BoxConstraints.tightFor(width: 36, height: 36),
+      style: IconButton.styleFrom(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(5)),
+      ),
     );
   }
 }

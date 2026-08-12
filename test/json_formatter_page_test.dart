@@ -1,28 +1,25 @@
-import 'package:dev_orbit/core/settings/settings_store.dart';
-import 'package:dev_orbit/features/json_formatter/json_document_controller.dart';
-import 'package:dev_orbit/features/json_formatter/json_formatter_page.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:re_editor/re_editor.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+
+import 'support/json_formatter_fixture.dart';
 
 void main() {
   testWidgets('starts blank without example content', (tester) async {
-    final fixture = await _PageFixture.create();
+    final fixture = await JsonFormatterFixture.create();
 
     await tester.pumpWidget(fixture.widget);
 
     final editor = tester.widget<CodeEditor>(find.byType(CodeEditor));
     expect(fixture.controller.text, isEmpty);
     expect(editor.hint, isNull);
-    await _disposeEditor(tester);
+    await disposeEditor(tester);
   });
 
   testWidgets('shows and toggles nested JSON folding controls', (tester) async {
-    const nestedJson = '''
-{
+    const nestedJson = '''{
   "profile": {
     "items": [
       {
@@ -30,12 +27,11 @@ void main() {
       }
     ]
   }
-}
-''';
-    final fixture = await _PageFixture.create(text: nestedJson);
+}''';
+    final fixture = await JsonFormatterFixture.create(text: nestedJson);
     await tester.pumpWidget(fixture.widget);
 
-    await _waitForFoldChunks(tester, 4);
+    await waitForFoldChunks(tester, 4);
     final indicator = tester.widget<DefaultCodeChunkIndicator>(
       find.byType(DefaultCodeChunkIndicator),
     );
@@ -48,7 +44,7 @@ void main() {
     expect(editor.controller!.codeLines[1].chunkParent, isTrue);
     expect(fixture.controller.text, nestedJson);
     await tester.pump(const Duration(milliseconds: 350));
-    await _disposeEditor(tester);
+    await disposeEditor(tester);
   });
 
   testWidgets('Control+F opens find for the whole formatter window', (
@@ -56,7 +52,7 @@ void main() {
   ) async {
     debugDefaultTargetPlatformOverride = TargetPlatform.windows;
     addTearDown(() => debugDefaultTargetPlatformOverride = null);
-    final fixture = await _PageFixture.create();
+    final fixture = await JsonFormatterFixture.create();
     await tester.pumpWidget(fixture.widget);
 
     await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
@@ -65,14 +61,14 @@ void main() {
     await tester.pump();
 
     expect(find.byKey(const ValueKey('json-find-input')), findsOneWidget);
-    await _disposeEditor(tester);
+    await disposeEditor(tester);
     debugDefaultTargetPlatformOverride = null;
   });
 
   testWidgets('Command+F opens find on macOS', (tester) async {
     debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
     addTearDown(() => debugDefaultTargetPlatformOverride = null);
-    final fixture = await _PageFixture.create();
+    final fixture = await JsonFormatterFixture.create();
     await tester.pumpWidget(fixture.widget);
 
     await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
@@ -81,12 +77,44 @@ void main() {
     await tester.pump();
 
     expect(find.byKey(const ValueKey('json-find-input')), findsOneWidget);
-    await _disposeEditor(tester);
+    await disposeEditor(tester);
+    debugDefaultTargetPlatformOverride = null;
+  });
+
+  testWidgets('Control+H opens replace on Windows', (tester) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    final fixture = await JsonFormatterFixture.create();
+    await tester.pumpWidget(fixture.widget);
+
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyH);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    await tester.pump();
+
+    expect(find.byKey(const ValueKey('json-replace-input')), findsOneWidget);
+    await disposeEditor(tester);
+    debugDefaultTargetPlatformOverride = null;
+  });
+
+  testWidgets('Command+R opens replace on macOS', (tester) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    final fixture = await JsonFormatterFixture.create();
+    await tester.pumpWidget(fixture.widget);
+
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyR);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    await tester.pump();
+
+    expect(find.byKey(const ValueKey('json-replace-input')), findsOneWidget);
+    await disposeEditor(tester);
     debugDefaultTargetPlatformOverride = null;
   });
 
   testWidgets('find panel can replace all matches', (tester) async {
-    final fixture = await _PageFixture.create(text: 'foo foo');
+    final fixture = await JsonFormatterFixture.create(text: 'foo foo');
     await tester.pumpWidget(fixture.widget);
 
     await tester.tap(find.byTooltip('查找'));
@@ -107,7 +135,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(fixture.controller.text, 'bar bar');
-    await _disposeEditor(tester);
+    await disposeEditor(tester);
   });
 }
 
@@ -123,51 +151,4 @@ Future<void> _waitForEnabled(WidgetTester tester, String tooltip) async {
     if (tester.widget<IconButton>(iconButton).onPressed != null) return;
   }
   fail('$tooltip 在等待搜索结果后仍不可用');
-}
-
-Future<void> _waitForFoldChunks(WidgetTester tester, int count) async {
-  for (var attempt = 0; attempt < 30; attempt++) {
-    await tester.runAsync(
-      () => Future<void>.delayed(const Duration(milliseconds: 20)),
-    );
-    await tester.pump();
-    final indicator = find.byType(DefaultCodeChunkIndicator);
-    if (indicator.evaluate().isEmpty) continue;
-    if (tester
-            .widget<DefaultCodeChunkIndicator>(indicator)
-            .controller
-            .value
-            .length >=
-        count) {
-      return;
-    }
-  }
-  fail('等待 JSON 折叠区分析超时');
-}
-
-Future<void> _disposeEditor(WidgetTester tester) async {
-  FocusManager.instance.primaryFocus?.unfocus();
-  await tester.pump();
-  await tester.pump(const Duration(milliseconds: 120));
-  await tester.pumpWidget(const SizedBox.shrink());
-}
-
-class _PageFixture {
-  _PageFixture(this.controller, this.widget);
-
-  final JsonDocumentController controller;
-  final Widget widget;
-
-  static Future<_PageFixture> create({String text = ''}) async {
-    SharedPreferences.setMockInitialValues({});
-    final settings = await SettingsStore.load();
-    final controller = JsonDocumentController();
-    if (text.isNotEmpty) controller.userEdit(text);
-    final widget = MaterialApp(
-      home: Scaffold(
-        body: JsonFormatterPage(controller: controller, settings: settings),
-      ),
-    );
-    return _PageFixture(controller, widget);
-  }
 }

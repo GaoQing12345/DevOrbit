@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../../app/app_theme.dart';
 import '../../core/settings/settings_store.dart';
 import 'json_document_controller.dart';
 import 'json_formatter_page.dart';
+import 'json_initial_clipboard_import.dart';
 
 Future<void> runStandaloneJsonFormatter() async {
   final settings = await SettingsStore.load();
@@ -40,7 +42,16 @@ class _StandaloneJsonFormatterAppState
   void initState() {
     super.initState();
     _controller = JsonDocumentController();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _showWindow());
+    WidgetsBinding.instance.addPostFrameCallback((_) => _initializeWindow());
+  }
+
+  Future<void> _initializeWindow() async {
+    await importInitialClipboardJson(
+      controller: _controller,
+      indentSize: widget.settings.value.indentSize,
+      readClipboard: () => Clipboard.getData(Clipboard.kTextPlain),
+    );
+    if (mounted) await _showWindow();
   }
 
   Future<void> _showWindow() async {

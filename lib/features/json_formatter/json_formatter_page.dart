@@ -1,20 +1,23 @@
 import 'dart:convert';
+
 import 'package:desktop_drop/desktop_drop.dart';
 import 'package:file_selector/file_selector.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:path/path.dart' as path;
 import 'package:re_editor/re_editor.dart';
 import 'package:re_highlight/languages/json.dart';
 import 'package:re_highlight/styles/atom-one-dark.dart';
-import 'package:re_highlight/styles/atom-one-light.dart';
 
 import '../../core/settings/settings_store.dart';
 import 'json_code_indicator.dart';
 import 'json_document_controller.dart';
 import 'json_editor_chrome.dart';
 import 'json_find_panel.dart';
+import 'json_fold_controller.dart';
+import 'json_formatter_shortcuts.dart';
+import 'json_highlight_theme.dart';
+import 'json_transformer.dart';
 
 class JsonFormatterPage extends StatefulWidget {
   const JsonFormatterPage({
@@ -33,6 +36,7 @@ class JsonFormatterPage extends StatefulWidget {
 class _JsonFormatterPageState extends State<JsonFormatterPage> {
   late final CodeLineEditingController _editor;
   late final CodeFindController _findController;
+  final _foldController = JsonFoldController();
   bool _syncing = false;
   bool _dragging = false;
 
@@ -160,6 +164,17 @@ class _JsonFormatterPageState extends State<JsonFormatterPage> {
     if (mounted) _showMessage('已复制到剪贴板');
   }
 
+  Future<void> _compactAndCopy() async {
+    final transformed = await widget.controller.transform(
+      JsonTransformMode.compact,
+      widget.settings.value.indentSize,
+    );
+    if (!transformed) return;
+    await Clipboard.setData(ClipboardData(text: widget.controller.text));
+    widget.controller.markSaved();
+    if (mounted) _showMessage('已压缩并复制');
+  }
+
   void _showMessage(String message) {
     ScaffoldMessenger.of(context)
       ..clearSnackBars()
@@ -171,17 +186,11 @@ class _JsonFormatterPageState extends State<JsonFormatterPage> {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     return CallbackShortcuts(
-      bindings: {_findShortcut(): _findController.findMode},
+      bindings: buildJsonFormatterShortcuts(
+        onFind: _findController.findMode,
+        onReplace: _findController.replaceMode,
+      ),
       child: _buildDropTarget(theme, isDark),
-    );
-  }
-
-  ShortcutActivator _findShortcut() {
-    final isMacOS = defaultTargetPlatform == TargetPlatform.macOS;
-    return SingleActivator(
-      LogicalKeyboardKey.keyF,
-      meta: isMacOS,
-      control: !isMacOS,
     );
   }
 
@@ -191,7 +200,7 @@ class _JsonFormatterPageState extends State<JsonFormatterPage> {
       onDragExited: (_) => setState(() => _dragging = false),
       onDragDone: _handleDrop,
       child: ColoredBox(
-        color: theme.colorScheme.surface,
+        color: theme.colorScheme.surfaceContainerLowest,
         child: Column(
           children: [
             _buildToolbar(),
@@ -221,14 +230,18 @@ class _JsonFormatterPageState extends State<JsonFormatterPage> {
       onOpen: _openFile,
       onSave: _saveFile,
       onCopy: _copy,
+      onCompactAndCopy: _compactAndCopy,
       onFind: _findController.findMode,
+      onCollapseAll: _foldController.collapseAll,
+      onExpandAll: _foldController.expandAll,
     );
   }
 
   Widget _buildEditor(ThemeData theme, bool isDark) {
     return Container(
-      margin: const EdgeInsets.fromLTRB(16, 0, 16, 0),
+      margin: const EdgeInsets.fromLTRB(14, 14, 14, 12),
       decoration: BoxDecoration(
+        color: theme.colorScheme.surface,
         border: Border.all(
           color: _dragging
               ? theme.colorScheme.primary
@@ -251,25 +264,29 @@ class _JsonFormatterPageState extends State<JsonFormatterPage> {
       autofocus: true,
       findBuilder: (context, controller, readOnly) =>
           JsonFindPanel(controller: controller, readOnly: readOnly),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       style: CodeEditorStyle(
         fontSize: 14,
+        fontHeight: 1.55,
         fontFamily: 'Menlo',
         fontFamilyFallback: const ['Consolas', 'monospace'],
         backgroundColor: isDark
-            ? const Color(0xFF15191E)
-            : const Color(0xFFF8FAFA),
-        cursorLineColor: theme.colorScheme.primary.withAlpha(30),
+            ? const Color(0xFF171A1D)
+            : const Color(0xFFFCFCFD),
+        cursorLineColor: theme.colorScheme.primary.withAlpha(20),
         codeTheme: CodeHighlightTheme(
           languages: {'json': CodeHighlightThemeMode(mode: langJson)},
-          theme: isDark ? atomOneDarkTheme : atomOneLightTheme,
+          theme: isDark ? atomOneDarkTheme : jsonAtomOneLightTheme,
         ),
       ),
-      indicatorBuilder: (context, editing, chunk, notifier) =>
-          JsonCodeIndicator(
-            editingController: editing,
-            chunkController: chunk,
-            notifier: notifier,
-          ),
+      indicatorBuilder: (context, editing, chunk, notifier) {
+        _foldController.attach(editing, chunk);
+        return JsonCodeIndicator(
+          editingController: editing,
+          chunkController: chunk,
+          notifier: notifier,
+        );
+      },
       leadingDivider: ColoredBox(
         color: theme.colorScheme.outlineVariant.withAlpha(145),
         child: const SizedBox(width: 1),
