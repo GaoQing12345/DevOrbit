@@ -1,5 +1,7 @@
 import 'dart:io';
 
+import '../../features/translator/standalone_translator_app.dart';
+
 const standaloneJsonFormatterFlag = '--json-formatter-window';
 
 typedef DetachedProcessStarter =
@@ -18,15 +20,21 @@ class NativeStandaloneToolWindowLauncher
        _executable = executable ?? Platform.resolvedExecutable;
 
   static const jsonFormatterId = 'json-formatter';
+  static const translatorId = 'translator';
 
   final DetachedProcessStarter _processStarter;
   final String _executable;
 
   @override
   Future<bool> openTool(String toolId) async {
-    if (toolId != jsonFormatterId) return false;
+    final arguments = switch (toolId) {
+      jsonFormatterId => const [standaloneJsonFormatterFlag],
+      translatorId => const [standaloneTranslatorFlag],
+      _ => null,
+    };
+    if (arguments == null) return false;
     try {
-      await _processStarter(_executable, const [standaloneJsonFormatterFlag]);
+      await _processStarter(_executable, arguments);
       return true;
     } on ProcessException {
       return false;

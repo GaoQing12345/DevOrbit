@@ -1,8 +1,11 @@
 #include "flutter_window.h"
 
+#include <windows.h>
 #include <dwmapi.h>
+#include <wincred.h>
 #include <optional>
 #include <string>
+#include <vector>
 
 #include "flutter/generated_plugin_registrant.h"
 #include "flutter/standard_method_codec.h"
@@ -56,6 +59,91 @@ void FlutterWindow::RegisterClipboardChannel() {
           }
           return;
         }
+        result->NotImplemented();
+      });
+}
+
+void FlutterWindow::RegisterCredentialsChannel() {
+  credentials_channel_ =
+      std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
+          flutter_controller_->engine()->messenger(),
+          "dev_orbit/credentials",
+          &flutter::StandardMethodCodec::GetInstance());
+  credentials_channel_->SetMethodCallHandler(
+      [](const auto& call, auto result) {
+        if (!call.arguments() ||
+            !std::holds_alternative<flutter::EncodableMap>(*call.arguments())) {
+          result->Error("invalid_arguments", "Missing credential arguments");
+          return;
+        }
+        const auto& args = std::get<flutter::EncodableMap>(*call.arguments());
+        const auto key_it = args.find(flutter::EncodableValue("key"));
+        if (key_it == args.end() ||
+            !std::holds_alternative<std::string>(key_it->second)) {
+          result->Error("invalid_arguments", "Missing credential key");
+          return;
+        }
+
+        const auto key = std::get<std::string>(key_it->second);
+        const auto target = L"DevOrbit/" + Utf16FromUtf8(key);
+        if (call.method_name() == "read") {
+          PCREDENTIALW credential = nullptr;
+          if (!CredReadW(target.c_str(), CRED_TYPE_GENERIC, 0, &credential)) {
+            if (GetLastError() == ERROR_NOT_FOUND) {
+              result->Success();
+            } else {
+              result->Error("credential_read_failed", "Windows credential read failed");
+            }
+            return;
+          }
+          std::string value(
+              reinterpret_cast<const char*>(credential->CredentialBlob),
+              credential->CredentialBlobSize);
+          if (credential->CredentialBlobSize > 0) {
+            SecureZeroMemory(credential->CredentialBlob,
+                             credential->CredentialBlobSize);
+          }
+          CredFree(credential);
+          result->Success(flutter::EncodableValue(value));
+          return;
+        }
+
+        if (call.method_name() == "write") {
+          const auto value_it = args.find(flutter::EncodableValue("value"));
+          if (value_it == args.end() ||
+              !std::holds_alternative<std::string>(value_it->second)) {
+            result->Error("invalid_arguments", "Missing credential value");
+            return;
+          }
+          const auto& value = std::get<std::string>(value_it->second);
+          std::vector<BYTE> blob(value.begin(), value.end());
+          CREDENTIALW credential = {};
+          credential.Type = CRED_TYPE_GENERIC;
+          credential.TargetName = const_cast<LPWSTR>(target.c_str());
+          credential.CredentialBlobSize = static_cast<DWORD>(blob.size());
+          credential.CredentialBlob = blob.data();
+          credential.Persist = CRED_PERSIST_LOCAL_MACHINE;
+          credential.UserName = const_cast<LPWSTR>(L"DevOrbit");
+          const auto success = CredWriteW(&credential, 0);
+          if (!blob.empty()) SecureZeroMemory(blob.data(), blob.size());
+          if (!success) {
+            result->Error("credential_write_failed", "Windows credential write failed");
+            return;
+          }
+          result->Success();
+          return;
+        }
+
+        if (call.method_name() == "delete") {
+          if (!CredDeleteW(target.c_str(), CRED_TYPE_GENERIC, 0) &&
+              GetLastError() != ERROR_NOT_FOUND) {
+            result->Error("credential_delete_failed", "Windows credential delete failed");
+            return;
+          }
+          result->Success();
+          return;
+        }
+
         result->NotImplemented();
       });
 }
@@ -116,6 +204,7 @@ bool FlutterWindow::OnCreate() {
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
   RegisterWindowEffectsChannel();
   RegisterClipboardChannel();
+  RegisterCredentialsChannel();
 
   flutter_controller_->engine()->SetNextFrameCallback([&]() {
     this->Show();
@@ -135,6 +224,9 @@ void FlutterWindow::OnDestroy() {
   }
   if (clipboard_channel_) {
     clipboard_channel_ = nullptr;
+  }
+  if (credentials_channel_) {
+    credentials_channel_ = nullptr;
   }
   if (flutter_controller_) {
     flutter_controller_ = nullptr;

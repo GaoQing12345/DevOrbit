@@ -4,7 +4,9 @@ import FlutterMacOS
 @main
 class AppDelegate: FlutterAppDelegate {
   override func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
-    return ProcessInfo.processInfo.arguments.contains("--json-formatter-window")
+    let arguments = ProcessInfo.processInfo.arguments
+    return arguments.contains("--json-formatter-window") ||
+      arguments.contains("--translator-window")
   }
 
   override func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool {

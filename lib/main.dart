@@ -9,6 +9,8 @@ import 'core/modules/tool_registry.dart';
 import 'core/settings/settings_store.dart';
 import 'features/json_formatter/json_formatter_module.dart';
 import 'features/json_formatter/standalone_json_formatter_app.dart';
+import 'features/translator/standalone_translator_app.dart';
+import 'features/translator/translator_module.dart';
 
 Future<void> main(List<String> arguments) async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -16,11 +18,16 @@ Future<void> main(List<String> arguments) async {
     await runStandaloneJsonFormatter();
     return;
   }
+  if (arguments.contains(standaloneTranslatorFlag)) {
+    await runStandaloneTranslator();
+    return;
+  }
   await hotKeyManager.unregisterAll();
 
   final settings = await SettingsStore.load();
   final jsonModule = JsonFormatterModule(settings);
-  final registry = ToolRegistry([jsonModule]);
+  final translatorModule = TranslatorModule();
+  final registry = ToolRegistry([jsonModule, translatorModule]);
   final controller = AppController(
     registry: registry,
     settings: settings,

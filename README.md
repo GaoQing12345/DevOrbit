@@ -1,6 +1,6 @@
 # DevOrbit
 
-DevOrbit 是一个面向 macOS 和 Windows 的轻量级开发工具轮盘。应用常驻系统托盘，通过全局快捷键在鼠标附近打开八槽轮盘，JSON 格式化是首个内置工具。
+DevOrbit 是一个面向 macOS 和 Windows 的轻量级开发工具轮盘。应用常驻系统托盘，通过全局快捷键在鼠标附近打开八槽轮盘，当前内置 JSON 格式化和文本翻译工具。
 
 ## 当前能力
 
@@ -9,6 +9,8 @@ DevOrbit 是一个面向 macOS 和 Windows 的轻量级开发工具轮盘。应�
 - 工具箱主页、系统主题、快捷键与缩进设置
 - 严格 JSON 校验、格式化、压缩、复制、打开、拖放和保存
 - 文本级 JSON 转换，保留超大整数、重复键和原始数字写法
+- DeepL API Free 文本翻译、语言自动检测、语言交换和快捷复制
+- DeepL API Key 通过 macOS Keychain 或 Windows 安全凭据存储保存
 - 代码内 `ToolModule` 注册机制，便于继续增加开发工具
 
 ## 开发环境

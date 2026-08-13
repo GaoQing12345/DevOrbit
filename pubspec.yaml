@@ -43,6 +43,7 @@ dependencies:
   package_info_plus: ^9.0.1
   path: ^1.9.1
   re_highlight: ^0.0.3
+  http: ^1.6.0
 
 dev_dependencies:
   flutter_test:

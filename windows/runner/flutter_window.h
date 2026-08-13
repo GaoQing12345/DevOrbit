@@ -29,6 +29,7 @@ class FlutterWindow : public Win32Window {
  private:
   void RegisterWindowEffectsChannel();
   void RegisterClipboardChannel();
+  void RegisterCredentialsChannel();
   void CapturePendingPasteText();
   void SetRadialMode(bool enabled);
 
@@ -41,6 +42,8 @@ class FlutterWindow : public Win32Window {
       window_effects_channel_;
   std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>>
       clipboard_channel_;
+  std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>>
+      credentials_channel_;
   std::optional<std::string> pending_paste_text_;
 };
 
