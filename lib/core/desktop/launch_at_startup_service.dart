@@ -25,7 +25,7 @@ class LaunchAtStartupService {
 
   Future<bool> setEnabled(bool enabled) async {
     try {
-      if (Platform.isMacOS) return _setMacOSEnabled(enabled);
+      if (Platform.isMacOS) return await _setMacOSEnabled(enabled);
       if (Platform.isWindows) {
         return enabled
             ? await launchAtStartup.enable()

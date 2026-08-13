@@ -11,7 +11,7 @@ Future<bool> importInitialClipboardJson({
 }) async {
   try {
     final data = await readClipboard();
-    return controller.importClipboard(data?.text ?? '', indentSize);
+    return await controller.importClipboard(data?.text ?? '', indentSize);
   } on PlatformException {
     return false;
   }
