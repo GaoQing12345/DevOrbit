@@ -11,6 +11,58 @@
 #include "flutter/standard_method_codec.h"
 #include "utils.h"
 
+namespace {
+
+struct WindowActivationRequest {
+  DWORD process_id;
+  bool found;
+};
+
+bool IsCurrentExecutable(DWORD process_id) {
+  HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE,
+                               process_id);
+  if (!process) {
+    return false;
+  }
+  std::vector<wchar_t> process_path(32768);
+  DWORD process_path_size = static_cast<DWORD>(process_path.size());
+  const bool queried = QueryFullProcessImageNameW(
+      process, 0, process_path.data(), &process_path_size);
+  CloseHandle(process);
+  if (!queried) {
+    return false;
+  }
+
+  std::vector<wchar_t> current_path(32768);
+  const DWORD current_path_size = GetModuleFileNameW(
+      nullptr, current_path.data(), static_cast<DWORD>(current_path.size()));
+  if (current_path_size == 0 || current_path_size >= current_path.size()) {
+    return false;
+  }
+  return _wcsicmp(process_path.data(), current_path.data()) == 0;
+}
+
+BOOL CALLBACK ActivateProcessWindow(HWND window, LPARAM parameter) {
+  auto* request = reinterpret_cast<WindowActivationRequest*>(parameter);
+  DWORD window_process_id = 0;
+  GetWindowThreadProcessId(window, &window_process_id);
+  if (window_process_id != request->process_id ||
+      GetWindow(window, GW_OWNER) != nullptr || !IsWindowVisible(window)) {
+    return TRUE;
+  }
+  request->found = true;
+  if (IsIconic(window)) {
+    ShowWindow(window, SW_RESTORE);
+  } else {
+    ShowWindow(window, SW_SHOW);
+  }
+  BringWindowToTop(window);
+  SetForegroundWindow(window);
+  return FALSE;
+}
+
+}  // namespace
+
 FlutterWindow::FlutterWindow(const flutter::DartProject& project)
     : project_(project) {}
 
@@ -148,6 +200,49 @@ void FlutterWindow::RegisterCredentialsChannel() {
       });
 }
 
+void FlutterWindow::RegisterProcessWindowChannel() {
+  process_window_channel_ =
+      std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
+          flutter_controller_->engine()->messenger(),
+          "dev_orbit/process_window",
+          &flutter::StandardMethodCodec::GetInstance());
+  process_window_channel_->SetMethodCallHandler(
+      [](const auto& call, auto result) {
+        if (call.method_name() != "activate" || !call.arguments() ||
+            !std::holds_alternative<flutter::EncodableMap>(*call.arguments())) {
+          result->NotImplemented();
+          return;
+        }
+        const auto& args = std::get<flutter::EncodableMap>(*call.arguments());
+        const auto process_id_it =
+            args.find(flutter::EncodableValue("processId"));
+        if (process_id_it == args.end()) {
+          result->Error("invalid_arguments", "Missing process ID");
+          return;
+        }
+        DWORD process_id = 0;
+        if (std::holds_alternative<int32_t>(process_id_it->second)) {
+          process_id = static_cast<DWORD>(
+              std::get<int32_t>(process_id_it->second));
+        } else if (std::holds_alternative<int64_t>(process_id_it->second)) {
+          process_id = static_cast<DWORD>(
+              std::get<int64_t>(process_id_it->second));
+        } else {
+          result->Error("invalid_arguments", "Invalid process ID");
+          return;
+        }
+        if (!IsCurrentExecutable(process_id)) {
+          result->Success(flutter::EncodableValue(false));
+          return;
+        }
+        AllowSetForegroundWindow(process_id);
+        WindowActivationRequest request = {process_id, false};
+        EnumWindows(ActivateProcessWindow,
+                    reinterpret_cast<LPARAM>(&request));
+        result->Success(flutter::EncodableValue(request.found));
+      });
+}
+
 void FlutterWindow::CapturePendingPasteText() {
   if (!OpenClipboard(GetHandle())) {
     return;
@@ -205,6 +300,7 @@ bool FlutterWindow::OnCreate() {
   RegisterWindowEffectsChannel();
   RegisterClipboardChannel();
   RegisterCredentialsChannel();
+  RegisterProcessWindowChannel();
 
   flutter_controller_->engine()->SetNextFrameCallback([&]() {
     this->Show();
@@ -227,6 +323,9 @@ void FlutterWindow::OnDestroy() {
   }
   if (credentials_channel_) {
     credentials_channel_ = nullptr;
+  }
+  if (process_window_channel_) {
+    process_window_channel_ = nullptr;
   }
   if (flutter_controller_) {
     flutter_controller_ = nullptr;

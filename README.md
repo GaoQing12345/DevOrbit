@@ -10,6 +10,7 @@ DevOrbit 是一个面向 macOS 和 Windows 的轻量级开发工具轮盘。应�
 - 严格 JSON 校验、格式化、压缩、复制、打开、拖放和保存
 - 文本级 JSON 转换，保留超大整数、重复键和原始数字写法
 - DeepL API Free 文本翻译、语言自动检测、语言交换和快捷复制
+- 翻译工具复用单一独立窗口，JSON 工具仍支持同时打开多个窗口
 - DeepL API Key 通过 macOS Keychain 或 Windows 安全凭据存储保存
 - 代码内 `ToolModule` 注册机制，便于继续增加开发工具
 

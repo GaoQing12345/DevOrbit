@@ -1,17 +1,33 @@
+import 'dart:async';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../../app/app_theme.dart';
+import '../../core/desktop/process_window_activator.dart';
+import '../../core/desktop/single_instance_registry.dart';
 import '../../core/settings/settings_store.dart';
 import 'deepl_api_key_store.dart';
 import 'deepl_translation_client.dart';
+import 'standalone_translator_constants.dart';
 import 'translator_controller.dart';
 import 'translator_page.dart';
 
-const standaloneTranslatorFlag = '--translator-window';
-
 Future<void> runStandaloneTranslator() async {
+  final instanceRegistry = FileSingleInstanceRegistry(translatorInstanceName);
+  final lease = await instanceRegistry.tryAcquire(pid);
+  if (lease == null) {
+    try {
+      final processId = await instanceRegistry.findProcessId();
+      if (processId != null) {
+        await NativeProcessWindowActivator().activate(processId);
+      }
+    } finally {
+      exit(0);
+    }
+  }
   final settings = await SettingsStore.load();
   await windowManager.ensureInitialized();
   await windowManager.setPreventClose(false);
@@ -26,14 +42,23 @@ Future<void> runStandaloneTranslator() async {
   );
   final clipboard = await Clipboard.getData(Clipboard.kTextPlain);
   runApp(
-    _StandaloneTranslatorApp(settings: settings, initialText: clipboard?.text),
+    _StandaloneTranslatorApp(
+      settings: settings,
+      instanceLease: lease,
+      initialText: clipboard?.text,
+    ),
   );
 }
 
 class _StandaloneTranslatorApp extends StatefulWidget {
-  const _StandaloneTranslatorApp({required this.settings, this.initialText});
+  const _StandaloneTranslatorApp({
+    required this.settings,
+    required this.instanceLease,
+    this.initialText,
+  });
 
   final SettingsStore settings;
+  final SingleInstanceLease instanceLease;
   final String? initialText;
 
   @override
@@ -68,6 +93,7 @@ class _StandaloneTranslatorAppState extends State<_StandaloneTranslatorApp> {
 
   @override
   void dispose() {
+    unawaited(widget.instanceLease.release());
     _controller.dispose();
     super.dispose();
   }

@@ -10,6 +10,7 @@ import 'core/settings/settings_store.dart';
 import 'features/json_formatter/json_formatter_module.dart';
 import 'features/json_formatter/standalone_json_formatter_app.dart';
 import 'features/translator/standalone_translator_app.dart';
+import 'features/translator/standalone_translator_constants.dart';
 import 'features/translator/translator_module.dart';
 
 Future<void> main(List<String> arguments) async {

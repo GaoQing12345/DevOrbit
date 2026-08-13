@@ -6,6 +6,7 @@ class MainFlutterWindow: NSWindow {
   private var cursorChannel: FlutterMethodChannel?
   private var clipboardChannel: FlutterMethodChannel?
   private var credentialsChannel: FlutterMethodChannel?
+  private var processWindowChannel: FlutterMethodChannel?
   private var pasteKeyMonitor: Any?
   private var pendingPasteText: String?
 
@@ -23,6 +24,7 @@ class MainFlutterWindow: NSWindow {
     registerCursorChannel(flutterViewController)
     registerClipboardChannel(flutterViewController)
     registerCredentialsChannel(flutterViewController)
+    registerProcessWindowChannel(flutterViewController)
 
     super.awakeFromNib()
   }
@@ -115,6 +117,30 @@ class MainFlutterWindow: NSWindow {
       }
     }
     credentialsChannel = channel
+  }
+
+  private func registerProcessWindowChannel(_ controller: FlutterViewController) {
+    let channel = FlutterMethodChannel(
+      name: "dev_orbit/process_window",
+      binaryMessenger: controller.engine.binaryMessenger
+    )
+    channel.setMethodCallHandler { call, result in
+      guard call.method == "activate",
+            let arguments = call.arguments as? [String: Any],
+            let processId = arguments["processId"] as? NSNumber else {
+        result(FlutterMethodNotImplemented)
+        return
+      }
+      guard let application = NSRunningApplication(
+        processIdentifier: pid_t(processId.int32Value)
+      ), application.bundleIdentifier == Bundle.main.bundleIdentifier else {
+        result(false)
+        return
+      }
+      application.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
+      result(true)
+    }
+    processWindowChannel = channel
   }
 
   private static let credentialService = "com.gaoqing.devorbit"
