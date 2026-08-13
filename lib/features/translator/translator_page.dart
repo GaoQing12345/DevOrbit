@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -28,6 +26,7 @@ class _TranslatorPageState extends State<TranslatorPage> {
       text: widget.initialText ?? widget.controller.sourceText,
     );
     widget.controller.addListener(_syncFromController);
+    _sourceFocusNode.addListener(_handleFocusChange);
     if (_sourceController.text != widget.controller.sourceText) {
       widget.controller.updateSource(_sourceController.text);
     }
@@ -39,9 +38,14 @@ class _TranslatorPageState extends State<TranslatorPage> {
   @override
   void dispose() {
     widget.controller.removeListener(_syncFromController);
+    _sourceFocusNode.removeListener(_handleFocusChange);
     _sourceController.dispose();
     _sourceFocusNode.dispose();
     super.dispose();
+  }
+
+  void _handleFocusChange() {
+    if (mounted) setState(() {});
   }
 
   void _syncFromController() {
@@ -110,6 +114,8 @@ class _TranslatorPageState extends State<TranslatorPage> {
                       final source = _TranslationPane(
                         title: '原文',
                         footer: '${widget.controller.sourceText.length} 字符',
+                        icon: Icons.edit_note_rounded,
+                        emphasized: _sourceFocusNode.hasFocus,
                         child: TextField(
                           key: const ValueKey('translator-source'),
                           controller: _sourceController,
@@ -119,16 +125,22 @@ class _TranslatorPageState extends State<TranslatorPage> {
                           maxLines: null,
                           minLines: null,
                           textAlignVertical: TextAlignVertical.top,
+                          style: const TextStyle(fontSize: 15, height: 1.65),
                           decoration: const InputDecoration(
                             hintText: '输入或粘贴文本',
                             border: InputBorder.none,
-                            contentPadding: EdgeInsets.all(16),
+                            enabledBorder: InputBorder.none,
+                            focusedBorder: InputBorder.none,
+                            filled: false,
+                            contentPadding: EdgeInsets.all(18),
                           ),
                           onChanged: widget.controller.updateSource,
                         ),
                       );
                       final result = _TranslationPane(
                         title: _resultTitle(),
+                        icon: Icons.translate_rounded,
+                        emphasized: widget.controller.translatedText.isNotEmpty,
                         footer: widget.controller.translatedText.isEmpty
                             ? ''
                             : '${widget.controller.translatedText.length} 字符',
@@ -193,19 +205,20 @@ class _Toolbar extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return Material(
-      color: scheme.surface,
+      color: scheme.surfaceContainerLow,
       child: Container(
-        constraints: const BoxConstraints(minHeight: 58),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        height: 72,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
         decoration: BoxDecoration(
           border: Border(bottom: BorderSide(color: scheme.outlineVariant)),
         ),
-        child: Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          crossAxisAlignment: WrapCrossAlignment.center,
+        child: Row(
           children: [
-            const _LanguageField(label: '自动检测'),
+            const _LanguageField(
+              label: '自动检测',
+              icon: Icons.auto_awesome_rounded,
+            ),
+            const SizedBox(width: 8),
             IconButton(
               tooltip: '交换原文和译文',
               onPressed:
@@ -215,9 +228,10 @@ class _Toolbar extends StatelessWidget {
                   : controller.swap,
               icon: const Icon(Icons.swap_horiz_rounded),
             ),
+            const SizedBox(width: 8),
             DropdownMenu<String>(
               key: ValueKey(controller.targetLanguage),
-              width: 176,
+              width: 170,
               initialSelection: controller.targetLanguage,
               enableFilter: true,
               label: const Text('翻译为'),
@@ -232,7 +246,7 @@ class _Toolbar extends StatelessWidget {
                 if (value != null) controller.updateTargetLanguage(value);
               },
             ),
-            const SizedBox(width: 4),
+            const Spacer(),
             if (controller.isTranslating)
               OutlinedButton.icon(
                 onPressed: controller.cancel,
@@ -247,6 +261,9 @@ class _Toolbar extends StatelessWidget {
                 icon: const Icon(Icons.translate_rounded),
                 label: const Text('翻译'),
               ),
+            const SizedBox(width: 10),
+            Container(width: 1, height: 24, color: scheme.outlineVariant),
+            const SizedBox(width: 6),
             IconButton(
               tooltip: '清空',
               onPressed:
@@ -275,22 +292,37 @@ class _Toolbar extends StatelessWidget {
 }
 
 class _LanguageField extends StatelessWidget {
-  const _LanguageField({required this.label});
+  const _LanguageField({required this.label, required this.icon});
 
   final String label;
+  final IconData icon;
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: 150,
+      width: 132,
       height: 48,
       alignment: Alignment.centerLeft,
-      padding: const EdgeInsets.symmetric(horizontal: 14),
+      padding: const EdgeInsets.symmetric(horizontal: 12),
       decoration: BoxDecoration(
-        border: Border.all(color: Theme.of(context).colorScheme.outline),
+        color: Theme.of(context).colorScheme.surfaceContainer,
+        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
         borderRadius: BorderRadius.circular(6),
       ),
-      child: Text(label),
+      child: Row(
+        children: [
+          Icon(icon, size: 16, color: Theme.of(context).colorScheme.primary),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.labelLarge,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -299,12 +331,16 @@ class _TranslationPane extends StatelessWidget {
   const _TranslationPane({
     required this.title,
     required this.footer,
+    required this.icon,
+    required this.emphasized,
     required this.child,
     this.trailing,
   });
 
   final String title;
   final String footer;
+  final IconData icon;
+  final bool emphasized;
   final Widget child;
   final Widget? trailing;
 
@@ -313,20 +349,49 @@ class _TranslationPane extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: scheme.surface,
-        border: Border.all(color: scheme.outlineVariant),
-        borderRadius: BorderRadius.circular(6),
+        color: scheme.surfaceContainerLow,
+        border: Border.all(
+          color: emphasized ? scheme.primary : scheme.outlineVariant,
+          width: emphasized ? 1.5 : 1,
+        ),
+        borderRadius: BorderRadius.circular(8),
+        boxShadow: [
+          BoxShadow(
+            color: scheme.shadow.withAlpha(18),
+            blurRadius: 18,
+            offset: const Offset(0, 5),
+          ),
+        ],
       ),
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(5),
+        borderRadius: BorderRadius.circular(7),
         child: Column(
           children: [
             SizedBox(
-              height: 44,
+              height: 48,
               child: Padding(
-                padding: const EdgeInsets.only(left: 14, right: 6),
+                padding: const EdgeInsets.only(left: 14, right: 7),
                 child: Row(
                   children: [
+                    Container(
+                      width: 28,
+                      height: 28,
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        color: emphasized
+                            ? scheme.primaryContainer
+                            : scheme.surfaceContainer,
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Icon(
+                        icon,
+                        size: 16,
+                        color: emphasized
+                            ? scheme.onPrimaryContainer
+                            : scheme.onSurfaceVariant,
+                      ),
+                    ),
+                    const SizedBox(width: 9),
                     Expanded(
                       child: Text(
                         title,
@@ -341,19 +406,27 @@ class _TranslationPane extends StatelessWidget {
               ),
             ),
             Divider(height: 1, color: scheme.outlineVariant),
-            Expanded(child: child),
+            Expanded(
+              child: ColoredBox(
+                color: scheme.brightness == Brightness.dark
+                    ? scheme.surfaceContainerLowest
+                    : const Color(0xFFFBFCFC),
+                child: child,
+              ),
+            ),
             if (footer.isNotEmpty) ...[
               Divider(height: 1, color: scheme.outlineVariant),
               SizedBox(
-                height: 30,
+                height: 32,
                 child: Align(
                   alignment: Alignment.centerRight,
                   child: Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 12),
                     child: Text(
                       footer,
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
                         color: scheme.onSurfaceVariant,
+                        fontFeatures: const [FontFeature.tabularFigures()],
                       ),
                     ),
                   ),
@@ -375,28 +448,22 @@ class _TranslationResult extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (controller.isTranslating && controller.translatedText.isEmpty) {
-      return const _CenteredState(
-        icon: SizedBox.square(
-          dimension: 22,
-          child: CircularProgressIndicator(strokeWidth: 2.5),
-        ),
-        text: '正在翻译',
-      );
+      return const _TranslationSkeleton();
     }
     if (controller.translatedText.isEmpty) {
       return const _CenteredState(
-        icon: Icon(Icons.translate_rounded, size: 25),
+        icon: Icon(Icons.notes_rounded, size: 22),
         text: '译文会显示在这里',
       );
     }
     return SelectionArea(
       child: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(18),
         child: SizedBox(
           width: double.infinity,
           child: Text(
             controller.translatedText,
-            style: const TextStyle(fontSize: 15, height: 1.6),
+            style: const TextStyle(fontSize: 15, height: 1.65),
           ),
         ),
       ),
@@ -414,15 +481,57 @@ class _CenteredState extends StatelessWidget {
   Widget build(BuildContext context) {
     final color = Theme.of(context).colorScheme.onSurfaceVariant;
     return Center(
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.surfaceContainerLow,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            IconTheme(
+              data: IconThemeData(color: color),
+              child: icon,
+            ),
+            const SizedBox(height: 8),
+            Text(text, style: TextStyle(color: color)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _TranslationSkeleton extends StatelessWidget {
+  const _TranslationSkeleton();
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.all(18),
       child: Column(
-        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          IconTheme(
-            data: IconThemeData(color: color),
-            child: icon,
+          const SizedBox.square(
+            dimension: 18,
+            child: CircularProgressIndicator(strokeWidth: 2),
           ),
-          const SizedBox(height: 10),
-          Text(text, style: TextStyle(color: color)),
+          const SizedBox(height: 22),
+          for (final width in [0.88, 0.72, 0.81, 0.56]) ...[
+            FractionallySizedBox(
+              widthFactor: width,
+              child: Container(
+                height: 10,
+                decoration: BoxDecoration(
+                  color: scheme.surfaceContainerHighest,
+                  borderRadius: BorderRadius.circular(3),
+                ),
+              ),
+            ),
+            const SizedBox(height: 13),
+          ],
         ],
       ),
     );
@@ -438,11 +547,11 @@ class _StatusBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return Container(
-      height: 34,
+      height: 36,
       width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 14),
+      padding: const EdgeInsets.symmetric(horizontal: 16),
       decoration: BoxDecoration(
-        color: scheme.surface,
+        color: scheme.surfaceContainerLow,
         border: Border(top: BorderSide(color: scheme.outlineVariant)),
       ),
       child: Row(
@@ -473,12 +582,6 @@ class _StatusBar extends StatelessWidget {
                     : scheme.error,
               ),
             ),
-          ),
-          Text(
-            Platform.isMacOS ? '⌘ Enter' : 'Ctrl + Enter',
-            style: Theme.of(
-              context,
-            ).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
           ),
         ],
       ),

@@ -239,16 +239,23 @@ class _JsonFormatterPageState extends State<JsonFormatterPage> {
 
   Widget _buildEditor(ThemeData theme, bool isDark) {
     return Container(
-      margin: const EdgeInsets.fromLTRB(14, 14, 14, 12),
+      margin: const EdgeInsets.fromLTRB(16, 16, 16, 14),
       decoration: BoxDecoration(
-        color: theme.colorScheme.surface,
+        color: theme.colorScheme.surfaceContainerLow,
         border: Border.all(
           color: _dragging
               ? theme.colorScheme.primary
               : theme.colorScheme.outlineVariant,
           width: _dragging ? 2 : 1,
         ),
-        borderRadius: BorderRadius.circular(6),
+        borderRadius: BorderRadius.circular(8),
+        boxShadow: [
+          BoxShadow(
+            color: theme.colorScheme.shadow.withAlpha(isDark ? 52 : 16),
+            blurRadius: 18,
+            offset: const Offset(0, 5),
+          ),
+        ],
       ),
       clipBehavior: Clip.antiAlias,
       child: _buildCodeEditor(theme, isDark),

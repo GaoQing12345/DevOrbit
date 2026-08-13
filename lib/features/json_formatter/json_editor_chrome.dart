@@ -35,17 +35,62 @@ class JsonEditorToolbar extends StatelessWidget {
   Widget build(BuildContext context) {
     final indent = settings.value.indentSize;
     final scheme = Theme.of(context).colorScheme;
+    final fileName = controller.filePath == null
+        ? '未命名.json'
+        : path.basename(controller.filePath!);
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: scheme.surface,
+        color: scheme.surfaceContainerLow,
         border: Border(bottom: BorderSide(color: scheme.outlineVariant)),
       ),
       child: SizedBox(
-        height: 64,
+        height: 68,
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 14),
+          padding: const EdgeInsets.symmetric(horizontal: 16),
           child: Row(
             children: [
+              Container(
+                width: 34,
+                height: 34,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: scheme.primaryContainer,
+                  borderRadius: BorderRadius.circular(7),
+                ),
+                child: Icon(
+                  Icons.data_object_rounded,
+                  size: 19,
+                  color: scheme.onPrimaryContainer,
+                ),
+              ),
+              const SizedBox(width: 10),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 154),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      fileName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.labelLarge,
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      controller.isDirty ? '有未保存的更改' : 'JSON 文档',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        color: controller.isDirty
+                            ? scheme.primary
+                            : scheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const Spacer(),
               _ToolbarGroup(
                 children: [
                   _ToolbarButton(
@@ -60,7 +105,7 @@ class JsonEditorToolbar extends StatelessWidget {
                   ),
                 ],
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: 6),
               _ToolbarGroup(
                 children: [
                   _ToolbarButton(
@@ -82,7 +127,7 @@ class JsonEditorToolbar extends StatelessWidget {
                   ),
                 ],
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: 6),
               _ToolbarGroup(
                 children: [
                   _ToolbarButton(
@@ -97,7 +142,7 @@ class JsonEditorToolbar extends StatelessWidget {
                   ),
                 ],
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: 6),
               _ToolbarGroup(
                 children: [
                   _ToolbarButton(
@@ -107,24 +152,7 @@ class JsonEditorToolbar extends StatelessWidget {
                   ),
                 ],
               ),
-              const Spacer(),
-              Flexible(
-                child: Text(
-                  controller.filePath == null
-                      ? '未命名.json'
-                      : path.basename(controller.filePath!),
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                    color: scheme.onSurfaceVariant,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-              ),
-              if (controller.isDirty) ...[
-                const SizedBox(width: 6),
-                Icon(Icons.circle, size: 6, color: scheme.primary),
-              ],
-              const SizedBox(width: 8),
+              const SizedBox(width: 6),
               _ToolbarButton(
                 tooltip: '清空',
                 icon: Icons.delete_outline_rounded,
@@ -148,10 +176,14 @@ class _ToolbarGroup extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: scheme.surfaceContainerLow,
-        borderRadius: BorderRadius.circular(6),
+        color: scheme.surfaceContainer,
+        border: Border.all(color: scheme.outlineVariant),
+        borderRadius: BorderRadius.circular(7),
       ),
-      child: Row(mainAxisSize: MainAxisSize.min, children: children),
+      child: Padding(
+        padding: const EdgeInsets.all(2),
+        child: Row(mainAxisSize: MainAxisSize.min, children: children),
+      ),
     );
   }
 }
@@ -172,30 +204,35 @@ class JsonEditorStatusBar extends StatelessWidget {
       JsonDocumentStatus.invalid =>
         '第 ${issue?.line ?? 1} 行，第 ${issue?.column ?? 1} 列：${issue?.message}',
     };
-    final statusColor = controller.status == JsonDocumentStatus.invalid
+    final isInvalid = controller.status == JsonDocumentStatus.invalid;
+    final isValid = controller.status == JsonDocumentStatus.valid;
+    final statusColor = isInvalid
         ? theme.colorScheme.error
+        : isValid
+        ? theme.colorScheme.primary
         : theme.colorScheme.onSurfaceVariant;
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: theme.colorScheme.surface,
+        color: theme.colorScheme.surfaceContainerLow,
         border: Border(
           top: BorderSide(color: theme.colorScheme.outlineVariant),
         ),
       ),
       child: SizedBox(
-        height: 38,
+        height: 36,
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 18),
+          padding: const EdgeInsets.symmetric(horizontal: 16),
           child: Row(
             children: [
-              Icon(
-                controller.status == JsonDocumentStatus.invalid
-                    ? Icons.error_outline_rounded
-                    : Icons.check_circle_outline_rounded,
-                size: 15,
-                color: statusColor,
+              Container(
+                width: 7,
+                height: 7,
+                decoration: BoxDecoration(
+                  color: statusColor,
+                  shape: BoxShape.circle,
+                ),
               ),
-              const SizedBox(width: 7),
+              const SizedBox(width: 8),
               Expanded(
                 child: Text(
                   statusText,
@@ -207,7 +244,10 @@ class JsonEditorStatusBar extends StatelessWidget {
               ),
               Text(
                 '${utf8.encode(controller.text).length} B',
-                style: theme.textTheme.bodySmall,
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                  fontFeatures: const [FontFeature.tabularFigures()],
+                ),
               ),
             ],
           ),

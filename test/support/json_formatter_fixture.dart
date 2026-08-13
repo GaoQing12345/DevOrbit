@@ -1,3 +1,4 @@
+import 'package:dev_orbit/app/app_theme.dart';
 import 'package:dev_orbit/core/settings/settings_store.dart';
 import 'package:dev_orbit/features/json_formatter/json_document_controller.dart';
 import 'package:dev_orbit/features/json_formatter/json_formatter_page.dart';
@@ -26,7 +27,11 @@ class JsonFormatterFixture {
     final body = sibling == null
         ? page
         : IndexedStack(index: showSibling ? 1 : 0, children: [page, sibling]);
-    final widget = MaterialApp(home: Scaffold(body: body));
+    final widget = MaterialApp(
+      theme: AppTheme.light(),
+      darkTheme: AppTheme.dark(),
+      home: Scaffold(body: body),
+    );
     return JsonFormatterFixture(controller, widget);
   }
 }

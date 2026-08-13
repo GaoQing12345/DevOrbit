@@ -35,12 +35,19 @@ class JsonFindPanel extends StatelessWidget implements PreferredSizeWidget {
       child: Container(
         width: _panelWidth,
         height: preferredSize.height,
-        margin: const EdgeInsets.only(top: 10, right: 12),
+        margin: const EdgeInsets.only(top: 12, right: 14),
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
         decoration: BoxDecoration(
-          color: scheme.surface,
+          color: scheme.surfaceContainerLow,
           border: Border.all(color: scheme.outlineVariant),
-          borderRadius: BorderRadius.circular(6),
+          borderRadius: BorderRadius.circular(8),
+          boxShadow: [
+            BoxShadow(
+              color: scheme.shadow.withAlpha(28),
+              blurRadius: 18,
+              offset: const Offset(0, 6),
+            ),
+          ],
         ),
         child: Column(
           children: [
@@ -205,6 +212,7 @@ class _PanelTextField extends StatelessWidget {
           hintText: hintText,
           isDense: true,
           filled: true,
+          fillColor: Theme.of(context).colorScheme.surfaceContainer,
           contentPadding: const EdgeInsets.symmetric(
             horizontal: 11,
             vertical: 9,

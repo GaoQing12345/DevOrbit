@@ -1,3 +1,4 @@
+import 'package:dev_orbit/app/app_theme.dart';
 import 'package:dev_orbit/features/translator/deepl_api_key_store.dart';
 import 'package:dev_orbit/features/translator/deepl_translation_client.dart';
 import 'package:dev_orbit/features/translator/translator_controller.dart';
@@ -14,7 +15,11 @@ void main() {
     await tester.binding.setSurfaceSize(const Size(960, 700));
 
     await tester.pumpWidget(
-      MaterialApp(home: TranslatorPage(controller: controller)),
+      MaterialApp(
+        theme: AppTheme.light(),
+        darkTheme: AppTheme.dark(),
+        home: TranslatorPage(controller: controller),
+      ),
     );
     await tester.pump();
 
@@ -34,7 +39,11 @@ void main() {
     await tester.binding.setSurfaceSize(const Size(720, 540));
 
     await tester.pumpWidget(
-      MaterialApp(home: TranslatorPage(controller: controller)),
+      MaterialApp(
+        theme: AppTheme.light(),
+        darkTheme: AppTheme.dark(),
+        home: TranslatorPage(controller: controller),
+      ),
     );
     await tester.pump();
 
