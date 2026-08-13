@@ -2,9 +2,11 @@
 
 #include <dwmapi.h>
 #include <optional>
+#include <string>
 
 #include "flutter/generated_plugin_registrant.h"
 #include "flutter/standard_method_codec.h"
+#include "utils.h"
 
 FlutterWindow::FlutterWindow(const flutter::DartProject& project)
     : project_(project) {}
@@ -39,14 +41,38 @@ void FlutterWindow::RegisterClipboardChannel() {
           "dev_orbit/clipboard",
           &flutter::StandardMethodCodec::GetInstance());
   clipboard_channel_->SetMethodCallHandler(
-      [](const auto& call, auto result) {
-        if (call.method_name() != "getChangeCount") {
-          result->NotImplemented();
+      [this](const auto& call, auto result) {
+        if (call.method_name() == "getChangeCount") {
+          result->Success(flutter::EncodableValue(
+              static_cast<int64_t>(GetClipboardSequenceNumber())));
           return;
         }
-        result->Success(flutter::EncodableValue(
-            static_cast<int64_t>(GetClipboardSequenceNumber())));
+        if (call.method_name() == "takePendingPasteText") {
+          if (pending_paste_text_) {
+            result->Success(flutter::EncodableValue(*pending_paste_text_));
+            pending_paste_text_.reset();
+          } else {
+            result->Success();
+          }
+          return;
+        }
+        result->NotImplemented();
       });
+}
+
+void FlutterWindow::CapturePendingPasteText() {
+  if (!OpenClipboard(GetHandle())) {
+    return;
+  }
+  HANDLE data = ::GetClipboardData(CF_UNICODETEXT);
+  if (data) {
+    const wchar_t* text = static_cast<const wchar_t*>(GlobalLock(data));
+    if (text) {
+      pending_paste_text_ = Utf8FromUtf16(text);
+      GlobalUnlock(data);
+    }
+  }
+  CloseClipboard();
 }
 
 void FlutterWindow::SetRadialMode(bool enabled) {
@@ -121,6 +147,11 @@ LRESULT
 FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
                               WPARAM const wparam,
                               LPARAM const lparam) noexcept {
+  if (message == WM_KEYDOWN && wparam == 'V' &&
+      (GetKeyState(VK_CONTROL) & 0x8000) != 0) {
+    CapturePendingPasteText();
+  }
+
   // Give Flutter, including plugins, an opportunity to handle window messages.
   if (flutter_controller_) {
     std::optional<LRESULT> result =

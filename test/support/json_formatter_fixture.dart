@@ -75,16 +75,25 @@ Future<void> disposeEditor(WidgetTester tester) async {
 
 ClipboardState mockClipboard(WidgetTester tester, {String initialText = ''}) {
   final state = ClipboardState(initialText);
+  const nativeChannel = MethodChannel('dev_orbit/clipboard');
   tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
     SystemChannels.platform,
     state.handleMethodCall,
   );
-  addTearDown(
-    () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+  tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+    nativeChannel,
+    (_) async => null,
+  );
+  addTearDown(() {
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
       SystemChannels.platform,
       null,
-    ),
-  );
+    );
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      nativeChannel,
+      null,
+    );
+  });
   return state;
 }
 
@@ -125,9 +134,15 @@ class ClipboardRevisionState {
   ClipboardRevisionState(this.revision);
 
   int revision;
+  String? pendingPasteText;
 
   Future<Object?> handleMethodCall(MethodCall call) async {
     if (call.method == 'getChangeCount') return revision;
+    if (call.method == 'takePendingPasteText') {
+      final text = pendingPasteText;
+      pendingPasteText = null;
+      return text;
+    }
     return null;
   }
 }

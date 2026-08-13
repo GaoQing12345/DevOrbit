@@ -4,6 +4,8 @@ import FlutterMacOS
 class MainFlutterWindow: NSWindow {
   private var cursorChannel: FlutterMethodChannel?
   private var clipboardChannel: FlutterMethodChannel?
+  private var pasteKeyMonitor: Any?
+  private var pendingPasteText: String?
 
   override func awakeFromNib() {
     let flutterViewController = FlutterViewController()
@@ -44,13 +46,33 @@ class MainFlutterWindow: NSWindow {
       name: "dev_orbit/clipboard",
       binaryMessenger: controller.engine.binaryMessenger
     )
-    channel.setMethodCallHandler { call, result in
-      guard call.method == "getChangeCount" else {
+    channel.setMethodCallHandler { [weak self] call, result in
+      switch call.method {
+      case "getChangeCount":
+        result(NSPasteboard.general.changeCount)
+      case "takePendingPasteText":
+        let text = self?.pendingPasteText
+        self?.pendingPasteText = nil
+        result(text)
+      default:
         result(FlutterMethodNotImplemented)
-        return
       }
-      result(NSPasteboard.general.changeCount)
     }
     clipboardChannel = channel
+    pasteKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) {
+      [weak self] event in
+      let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+      if flags.contains(.command),
+         event.charactersIgnoringModifiers?.lowercased() == "v" {
+        self?.pendingPasteText = NSPasteboard.general.string(forType: .string)
+      }
+      return event
+    }
+  }
+
+  deinit {
+    if let monitor = pasteKeyMonitor {
+      NSEvent.removeMonitor(monitor)
+    }
   }
 }

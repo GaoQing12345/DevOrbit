@@ -8,6 +8,7 @@ class JsonFindPanel extends StatelessWidget implements PreferredSizeWidget {
     super.key,
     required this.controller,
     required this.readOnly,
+    required this.onPaste,
   });
 
   static const _panelWidth = 510.0;
@@ -15,6 +16,7 @@ class JsonFindPanel extends StatelessWidget implements PreferredSizeWidget {
 
   final CodeFindController controller;
   final bool readOnly;
+  final VoidCallback onPaste;
 
   @override
   Size get preferredSize {
@@ -42,9 +44,13 @@ class JsonFindPanel extends StatelessWidget implements PreferredSizeWidget {
         ),
         child: Column(
           children: [
-            _FindRow(controller: controller, value: value),
+            _FindRow(controller: controller, value: value, onPaste: onPaste),
             if (value.replaceMode)
-              _ReplaceRow(controller: controller, readOnly: readOnly),
+              _ReplaceRow(
+                controller: controller,
+                readOnly: readOnly,
+                onPaste: onPaste,
+              ),
           ],
         ),
       ),
@@ -53,10 +59,15 @@ class JsonFindPanel extends StatelessWidget implements PreferredSizeWidget {
 }
 
 class _FindRow extends StatelessWidget {
-  const _FindRow({required this.controller, required this.value});
+  const _FindRow({
+    required this.controller,
+    required this.value,
+    required this.onPaste,
+  });
 
   final CodeFindController controller;
   final CodeFindValue value;
+  final VoidCallback onPaste;
 
   @override
   Widget build(BuildContext context) {
@@ -82,6 +93,7 @@ class _FindRow extends StatelessWidget {
               focusNode: controller.findInputFocusNode,
               hintText: '查找',
               onSubmitted: (_) => controller.nextMatch(),
+              onPaste: onPaste,
             ),
           ),
           SizedBox(
@@ -114,10 +126,15 @@ class _FindRow extends StatelessWidget {
 }
 
 class _ReplaceRow extends StatelessWidget {
-  const _ReplaceRow({required this.controller, required this.readOnly});
+  const _ReplaceRow({
+    required this.controller,
+    required this.readOnly,
+    required this.onPaste,
+  });
 
   final CodeFindController controller;
   final bool readOnly;
+  final VoidCallback onPaste;
 
   @override
   Widget build(BuildContext context) {
@@ -134,6 +151,7 @@ class _ReplaceRow extends StatelessWidget {
               focusNode: controller.replaceInputFocusNode,
               hintText: '替换为',
               onSubmitted: (_) => controller.replaceMatch(),
+              onPaste: onPaste,
             ),
           ),
           _PanelIconButton(
@@ -160,22 +178,22 @@ class _PanelTextField extends StatelessWidget {
     required this.focusNode,
     required this.hintText,
     required this.onSubmitted,
+    required this.onPaste,
   });
 
   final TextEditingController controller;
   final FocusNode focusNode;
   final String hintText;
   final ValueChanged<String> onSubmitted;
+  final VoidCallback onPaste;
 
   @override
   Widget build(BuildContext context) {
     return CallbackShortcuts(
       bindings: {
-        const SingleActivator(LogicalKeyboardKey.keyV, control: true):
-            _pasteClipboard,
+        const SingleActivator(LogicalKeyboardKey.keyV, control: true): onPaste,
         if (defaultTargetPlatform == TargetPlatform.macOS)
-          const SingleActivator(LogicalKeyboardKey.keyV, meta: true):
-              _pasteClipboard,
+          const SingleActivator(LogicalKeyboardKey.keyV, meta: true): onPaste,
       },
       child: TextField(
         controller: controller,
@@ -194,26 +212,6 @@ class _PanelTextField extends StatelessWidget {
         ),
       ),
     );
-  }
-
-  Future<void> _pasteClipboard() async {
-    final data = await Clipboard.getData(Clipboard.kTextPlain);
-    final text = data?.text;
-    if (text == null || text.isEmpty) return;
-    final selection = controller.selection;
-    final start = _validOffset(selection.start, controller.text.length);
-    final end = _validOffset(selection.end, controller.text.length);
-    final nextText = controller.text.replaceRange(start, end, text);
-    controller.value = TextEditingValue(
-      text: nextText,
-      selection: TextSelection.collapsed(offset: start + text.length),
-    );
-    focusNode.requestFocus();
-  }
-
-  int _validOffset(int offset, int textLength) {
-    if (offset < 0 || offset > textLength) return textLength;
-    return offset;
   }
 }
 

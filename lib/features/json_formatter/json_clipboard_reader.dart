@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 class JsonClipboardState {
@@ -22,6 +23,18 @@ class JsonClipboardReader {
 
   Future<String?> readText() => _readText();
 
+  Future<String?> readPasteText() async {
+    final platform = defaultTargetPlatform;
+    if (platform != TargetPlatform.macOS &&
+        platform != TargetPlatform.windows) {
+      return _readText();
+    }
+    final clipboardFuture = _readText();
+    final pending = await _takePendingPasteText();
+    if (pending != null && pending.isNotEmpty) return pending;
+    return clipboardFuture;
+  }
+
   Future<JsonClipboardState> read() async {
     final textFuture = _readText();
     final revisionFuture = _readRevision();
@@ -42,6 +55,16 @@ class JsonClipboardReader {
   Future<int?> _readRevision() async {
     try {
       return await _channel.invokeMethod<int>('getChangeCount');
+    } on MissingPluginException {
+      return null;
+    } on PlatformException {
+      return null;
+    }
+  }
+
+  Future<String?> _takePendingPasteText() async {
+    try {
+      return await _channel.invokeMethod<String>('takePendingPasteText');
     } on MissingPluginException {
       return null;
     } on PlatformException {

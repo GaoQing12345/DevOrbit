@@ -7,6 +7,8 @@
 #include <flutter/method_channel.h>
 
 #include <memory>
+#include <optional>
+#include <string>
 
 #include "win32_window.h"
 
@@ -27,6 +29,7 @@ class FlutterWindow : public Win32Window {
  private:
   void RegisterWindowEffectsChannel();
   void RegisterClipboardChannel();
+  void CapturePendingPasteText();
   void SetRadialMode(bool enabled);
 
   // The project to run.
@@ -38,6 +41,7 @@ class FlutterWindow : public Win32Window {
       window_effects_channel_;
   std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>>
       clipboard_channel_;
+  std::optional<std::string> pending_paste_text_;
 };
 
 #endif  // RUNNER_FLUTTER_WINDOW_H_

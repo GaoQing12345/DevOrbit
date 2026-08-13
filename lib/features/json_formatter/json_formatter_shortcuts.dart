@@ -17,6 +17,16 @@ class JsonEditorShortcutsBuilder extends CodeShortcutsActivatorsBuilder {
   }
 }
 
+Map<Type, Action<Intent>> buildJsonEditorActions({
+  required VoidCallback onPaste,
+}) {
+  return {
+    CodeShortcutPasteIntent: CallbackAction<CodeShortcutPasteIntent>(
+      onInvoke: (_) => onPaste(),
+    ),
+  };
+}
+
 Map<ShortcutActivator, VoidCallback> buildJsonFormatterShortcuts({
   required VoidCallback onFind,
   required VoidCallback onReplace,

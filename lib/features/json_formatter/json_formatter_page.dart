@@ -6,8 +6,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:path/path.dart' as path;
 import 'package:re_editor/re_editor.dart';
-import 'package:re_highlight/languages/json.dart';
-import 'package:re_highlight/styles/atom-one-dark.dart';
 
 import '../../core/settings/settings_store.dart';
 import 'json_code_indicator.dart';
@@ -266,22 +264,18 @@ class _JsonFormatterPageState extends State<JsonFormatterPage> {
       wordWrap: false,
       autofocus: true,
       shortcutsActivatorsBuilder: const JsonEditorShortcutsBuilder(),
-      findBuilder: (context, controller, readOnly) =>
-          JsonFindPanel(controller: controller, readOnly: readOnly),
+      shortcutOverrideActions: buildJsonEditorActions(
+        onPaste: _focusRestorer.pasteFocusedTarget,
+      ),
+      findBuilder: (context, controller, readOnly) => JsonFindPanel(
+        controller: controller,
+        readOnly: readOnly,
+        onPaste: _focusRestorer.pasteFocusedTarget,
+      ),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      style: CodeEditorStyle(
-        fontSize: 14,
-        fontHeight: 1.55,
-        fontFamily: 'Menlo',
-        fontFamilyFallback: const ['Consolas', 'monospace'],
-        backgroundColor: isDark
-            ? const Color(0xFF171A1D)
-            : const Color(0xFFFCFCFD),
+      style: buildJsonEditorStyle(
+        isDark: isDark,
         cursorLineColor: theme.colorScheme.primary.withAlpha(20),
-        codeTheme: CodeHighlightTheme(
-          languages: {'json': CodeHighlightThemeMode(mode: langJson)},
-          theme: isDark ? atomOneDarkTheme : jsonAtomOneLightTheme,
-        ),
       ),
       indicatorBuilder: (context, editing, chunk, notifier) {
         _foldController.attach(editing, chunk);

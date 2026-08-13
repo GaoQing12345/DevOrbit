@@ -209,6 +209,18 @@ void main() {
   });
 }
 
+Future<void> pasteWithMeta(WidgetTester tester) async {
+  await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+  await tester.sendKeyEvent(LogicalKeyboardKey.keyV);
+  await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+}
+
+Future<void> pasteWithControl(WidgetTester tester) async {
+  await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+  await tester.sendKeyEvent(LogicalKeyboardKey.keyV);
+  await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+}
+
 Future<void> sendWindowEvent(String eventName) async {
   windowManager.hasListeners;
   final message = const StandardMethodCodec().encodeMethodCall(
