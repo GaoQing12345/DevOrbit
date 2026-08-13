@@ -6,13 +6,17 @@ import 'package:flutter/services.dart';
 import 'package:re_editor/re_editor.dart';
 import 'package:window_manager/window_manager.dart';
 
-enum _JsonFocusTarget { editor, find, replace }
+import 'json_clipboard_reader.dart';
+import 'json_focus_snapshot.dart';
 
 class JsonFocusRestorer with WindowListener {
   JsonFocusRestorer(this.controller, this.editor) {
     controller.findInputFocusNode.addListener(_trackFocus);
     controller.replaceInputFocusNode.addListener(_trackFocus);
     editorFocusNode.addListener(_trackFocus);
+    controller.findInputController.addListener(_trackContentChange);
+    controller.replaceInputController.addListener(_trackContentChange);
+    editor.addListener(_trackContentChange);
     _lifecycle = AppLifecycleListener(
       onInactive: _suspendFocus,
       onResume: _restoreFocus,
@@ -21,12 +25,17 @@ class JsonFocusRestorer with WindowListener {
     HardwareKeyboard.instance.addHandler(_handleKeyEvent);
   }
 
+  static const _clipboardSettleDelay = Duration(milliseconds: 140);
+  static const _clipboardSessionLimit = Duration(seconds: 5);
+
   final CodeFindController controller;
   final CodeLineEditingController editor;
+  final _clipboardReader = const JsonClipboardReader();
   final editorFocusNode = FocusNode(debugLabel: 'JSON editor');
   late final AppLifecycleListener _lifecycle;
-  _JsonFocusTarget? _lastTarget;
-  _JsonFocusTarget? _resumeTarget;
+  JsonFocusTarget? _lastTarget;
+  JsonFocusSnapshot? _snapshot;
+  Timer? _clipboardTimer;
   bool _pasteFallbackArmed = false;
   bool _disposed = false;
   bool _active = true;
@@ -37,94 +46,176 @@ class JsonFocusRestorer with WindowListener {
   }
 
   void _trackFocus() {
-    final _JsonFocusTarget? target;
-    if (controller.findInputFocusNode.hasFocus) {
-      target = _JsonFocusTarget.find;
-    } else if (controller.replaceInputFocusNode.hasFocus) {
-      target = _JsonFocusTarget.replace;
-    } else if (editorFocusNode.hasFocus) {
-      target = _JsonFocusTarget.editor;
-    } else {
-      return;
-    }
+    final target = _focusedJsonTarget();
+    if (target == null) return;
     _lastTarget = target;
-    if (_resumeTarget == target) {
-      _resumeTarget = null;
-      _pasteFallbackArmed = false;
+  }
+
+  void _trackContentChange() {
+    final snapshot = _snapshot;
+    if (snapshot != null && !_contentMatches(snapshot)) {
+      _cancelRestore();
     }
+  }
+
+  JsonFocusTarget? _focusedJsonTarget() {
+    if (controller.findInputFocusNode.hasFocus) return JsonFocusTarget.find;
+    if (controller.replaceInputFocusNode.hasFocus) {
+      return JsonFocusTarget.replace;
+    }
+    if (editorFocusNode.hasFocus) return JsonFocusTarget.editor;
+    return null;
   }
 
   void _suspendFocus() {
-    if (!_active) return;
+    if (!_active || _hasExternalEditableFocus()) return;
     _pasteFallbackArmed = true;
-    _rememberFocus();
+    _snapshot ??= _captureSnapshot(_focusedJsonTarget() ?? _lastTarget);
   }
 
-  void _rememberFocus() {
-    final target = _lastTarget;
-    _resumeTarget = switch (target) {
-      _JsonFocusTarget.find ||
-      _JsonFocusTarget.replace when controller.value == null => null,
-      _ => target,
-    };
+  JsonFocusSnapshot? _captureSnapshot(JsonFocusTarget? target) {
+    if (target == null || !target.isAvailable(controller)) return null;
+    final input = target.input(controller);
+    return JsonFocusSnapshot(
+      target: target,
+      content: target == JsonFocusTarget.editor ? editor.text : input!.text,
+      clipboardBefore: _clipboardReader.read(),
+      suspendedAt: DateTime.now(),
+      editorSelection: target == JsonFocusTarget.editor
+          ? editor.selection
+          : null,
+      inputSelection: input?.selection,
+    );
   }
 
   void _restoreFocus() {
     if (!_active) return _cancelRestore();
-    final target = _resumeTarget;
-    if (target == null) {
+    final snapshot = _snapshot;
+    if (snapshot == null) {
       _pasteFallbackArmed = false;
       return;
     }
-    _requestFocus(target);
+    _restoreSelection(snapshot);
+    _requestFocus(snapshot.target);
+    _clipboardTimer?.cancel();
+    _clipboardTimer = Timer(
+      _clipboardSettleDelay,
+      () => unawaited(_pasteChangedClipboard(snapshot)),
+    );
   }
 
-  void _requestFocus(_JsonFocusTarget target) {
+  void _restoreSelection(JsonFocusSnapshot snapshot) {
+    if (!_contentMatches(snapshot)) return;
+    if (snapshot.target == JsonFocusTarget.editor) {
+      editor.selection = snapshot.editorSelection!;
+    } else {
+      snapshot.target.input(controller)!.selection = snapshot.inputSelection!;
+    }
+  }
+
+  Future<void> _pasteChangedClipboard(JsonFocusSnapshot snapshot) async {
+    final clipboardBefore = await snapshot.clipboardBefore;
+    final clipboardNow = await _clipboardReader.read();
+    if (!_canAutoPaste(snapshot)) return;
+    if (!clipboardNow.hasChangedSince(clipboardBefore)) {
+      return _cancelRestore();
+    }
+    final text = clipboardNow.text;
+    if (text == null || text.isEmpty) return _cancelRestore();
+    _pasteText(snapshot, text);
+  }
+
+  bool _canAutoPaste(JsonFocusSnapshot snapshot) {
+    if (_disposed || !_active || !identical(_snapshot, snapshot)) return false;
+    if (DateTime.now().difference(snapshot.suspendedAt) >
+        _clipboardSessionLimit) {
+      _cancelRestore();
+      return false;
+    }
+    if (!snapshot.target.hasFocus(controller, editorFocusNode) ||
+        !_contentMatches(snapshot)) {
+      _cancelRestore();
+      return false;
+    }
+    if (_hasExternalEditableFocus()) {
+      _cancelRestore();
+      return false;
+    }
+    return true;
+  }
+
+  bool _contentMatches(JsonFocusSnapshot snapshot) {
+    final current = snapshot.target == JsonFocusTarget.editor
+        ? editor.text
+        : snapshot.target.input(controller)?.text;
+    return current == snapshot.content;
+  }
+
+  void _requestFocus(JsonFocusTarget target) {
     switch (target) {
-      case _JsonFocusTarget.editor:
+      case JsonFocusTarget.editor:
         editorFocusNode.requestFocus();
-      case _JsonFocusTarget.find:
+      case JsonFocusTarget.find:
         if (controller.value == null) return _cancelRestore();
         controller.findInputFocusNode.requestFocus();
-      case _JsonFocusTarget.replace:
+      case JsonFocusTarget.replace:
         if (controller.value == null) return _cancelRestore();
         controller.replaceInputFocusNode.requestFocus();
     }
   }
 
-  void _cancelRestore() {
-    _resumeTarget = null;
-    _pasteFallbackArmed = false;
-  }
-
   bool _handleKeyEvent(KeyEvent event) {
-    if (!_active) return false;
-    if (event is! KeyDownEvent) return false;
+    if (!_active || event is! KeyDownEvent) return false;
     if (event.logicalKey != LogicalKeyboardKey.keyV) return false;
     final keyboard = HardwareKeyboard.instance;
     final isMacOS = defaultTargetPlatform == TargetPlatform.macOS;
-    if (!isMacOS && keyboard.isMetaPressed) {
-      if (_hasExternalEditableFocus()) {
-        _cancelRestore();
-      } else {
-        _suspendFocus();
-      }
-      return false;
-    }
+    if (!isMacOS && keyboard.isMetaPressed) return _handleWindowsClipboard();
     if (!_pasteFallbackArmed) return false;
     if (isMacOS ? !keyboard.isMetaPressed : !keyboard.isControlPressed) {
       return false;
     }
-    final target = _resumeTarget;
-    if (target == null || _targetHasFocus(target)) return false;
+    final snapshot = _snapshot;
+    if (snapshot == null ||
+        snapshot.target.hasFocus(controller, editorFocusNode)) {
+      return false;
+    }
     if (_hasExternalEditableFocus()) {
       _cancelRestore();
       return false;
     }
-    if (!_targetIsAvailable(target)) return false;
     _pasteFallbackArmed = false;
-    unawaited(_pasteClipboard(target));
+    unawaited(_pasteClipboard(snapshot));
     return true;
+  }
+
+  bool _handleWindowsClipboard() {
+    if (_hasExternalEditableFocus()) {
+      _cancelRestore();
+    } else {
+      _suspendFocus();
+    }
+    return false;
+  }
+
+  Future<void> _pasteClipboard(JsonFocusSnapshot snapshot) async {
+    final text = await _clipboardReader.readText();
+    if (_disposed || !identical(_snapshot, snapshot)) return;
+    if (text == null || text.isEmpty) return;
+    _pasteText(snapshot, text);
+  }
+
+  void _pasteText(JsonFocusSnapshot snapshot, String text) {
+    if (snapshot.target == JsonFocusTarget.editor) {
+      editor.replaceSelection(text, snapshot.editorSelection);
+    } else {
+      replaceTextSelectionAt(
+        snapshot.target.input(controller)!,
+        text,
+        snapshot.inputSelection!,
+      );
+    }
+    _requestFocus(snapshot.target);
+    _cancelRestore();
   }
 
   bool _hasExternalEditableFocus() {
@@ -134,52 +225,16 @@ class JsonFocusRestorer with WindowListener {
   }
 
   bool _isJsonFocus(FocusNode focus) {
-    return focus == editorFocusNode ||
-        focus == controller.findInputFocusNode ||
-        focus == controller.replaceInputFocusNode;
-  }
-
-  bool _targetIsAvailable(_JsonFocusTarget target) {
-    if (target == _JsonFocusTarget.editor) return true;
-    return controller.value != null;
-  }
-
-  bool _targetHasFocus(_JsonFocusTarget target) => switch (target) {
-    _JsonFocusTarget.editor => editorFocusNode.hasFocus,
-    _JsonFocusTarget.find => controller.findInputFocusNode.hasFocus,
-    _JsonFocusTarget.replace => controller.replaceInputFocusNode.hasFocus,
-  };
-
-  Future<void> _pasteClipboard(_JsonFocusTarget target) async {
-    final data = await Clipboard.getData(Clipboard.kTextPlain);
-    if (_disposed) return;
-    final text = data?.text;
-    if (text == null || text.isEmpty) return;
-    switch (target) {
-      case _JsonFocusTarget.editor:
-        editor.replaceSelection(text);
-      case _JsonFocusTarget.find:
-        _replaceTextSelection(controller.findInputController, text);
-      case _JsonFocusTarget.replace:
-        _replaceTextSelection(controller.replaceInputController, text);
-    }
-    _requestFocus(target);
-  }
-
-  void _replaceTextSelection(TextEditingController input, String text) {
-    final selection = input.selection;
-    final start = _validOffset(selection.start, input.text.length);
-    final end = _validOffset(selection.end, input.text.length);
-    final nextText = input.text.replaceRange(start, end, text);
-    input.value = TextEditingValue(
-      text: nextText,
-      selection: TextSelection.collapsed(offset: start + text.length),
+    return JsonFocusTarget.values.any(
+      (target) => target.ownsFocus(focus, controller, editorFocusNode),
     );
   }
 
-  int _validOffset(int offset, int textLength) {
-    if (offset < 0 || offset > textLength) return textLength;
-    return offset;
+  void _cancelRestore() {
+    _clipboardTimer?.cancel();
+    _clipboardTimer = null;
+    _snapshot = null;
+    _pasteFallbackArmed = false;
   }
 
   @override
@@ -195,6 +250,10 @@ class JsonFocusRestorer with WindowListener {
     controller.findInputFocusNode.removeListener(_trackFocus);
     controller.replaceInputFocusNode.removeListener(_trackFocus);
     editorFocusNode.removeListener(_trackFocus);
+    controller.findInputController.removeListener(_trackContentChange);
+    controller.replaceInputController.removeListener(_trackContentChange);
+    editor.removeListener(_trackContentChange);
+    _clipboardTimer?.cancel();
     _lifecycle.dispose();
     editorFocusNode.dispose();
   }

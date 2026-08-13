@@ -3,6 +3,7 @@ import FlutterMacOS
 
 class MainFlutterWindow: NSWindow {
   private var cursorChannel: FlutterMethodChannel?
+  private var clipboardChannel: FlutterMethodChannel?
 
   override func awakeFromNib() {
     let flutterViewController = FlutterViewController()
@@ -16,6 +17,7 @@ class MainFlutterWindow: NSWindow {
 
     RegisterGeneratedPlugins(registry: flutterViewController)
     registerCursorChannel(flutterViewController)
+    registerClipboardChannel(flutterViewController)
 
     super.awakeFromNib()
   }
@@ -35,5 +37,20 @@ class MainFlutterWindow: NSWindow {
       result(["dx": mouse.x, "dy": primaryHeight - mouse.y])
     }
     cursorChannel = channel
+  }
+
+  private func registerClipboardChannel(_ controller: FlutterViewController) {
+    let channel = FlutterMethodChannel(
+      name: "dev_orbit/clipboard",
+      binaryMessenger: controller.engine.binaryMessenger
+    )
+    channel.setMethodCallHandler { call, result in
+      guard call.method == "getChangeCount" else {
+        result(FlutterMethodNotImplemented)
+        return
+      }
+      result(NSPasteboard.general.changeCount)
+    }
+    clipboardChannel = channel
   }
 }

@@ -88,6 +88,25 @@ ClipboardState mockClipboard(WidgetTester tester, {String initialText = ''}) {
   return state;
 }
 
+ClipboardRevisionState mockClipboardRevision(
+  WidgetTester tester, {
+  int initialRevision = 1,
+}) {
+  const channel = MethodChannel('dev_orbit/clipboard');
+  final state = ClipboardRevisionState(initialRevision);
+  tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+    channel,
+    state.handleMethodCall,
+  );
+  addTearDown(
+    () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      channel,
+      null,
+    ),
+  );
+  return state;
+}
+
 class ClipboardState {
   ClipboardState(this.text);
 
@@ -98,6 +117,17 @@ class ClipboardState {
     if (call.method == 'Clipboard.setData') {
       text = (call.arguments as Map<Object?, Object?>)['text']! as String;
     }
+    return null;
+  }
+}
+
+class ClipboardRevisionState {
+  ClipboardRevisionState(this.revision);
+
+  int revision;
+
+  Future<Object?> handleMethodCall(MethodCall call) async {
+    if (call.method == 'getChangeCount') return revision;
     return null;
   }
 }

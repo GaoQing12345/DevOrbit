@@ -32,6 +32,23 @@ void FlutterWindow::RegisterWindowEffectsChannel() {
       });
 }
 
+void FlutterWindow::RegisterClipboardChannel() {
+  clipboard_channel_ =
+      std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
+          flutter_controller_->engine()->messenger(),
+          "dev_orbit/clipboard",
+          &flutter::StandardMethodCodec::GetInstance());
+  clipboard_channel_->SetMethodCallHandler(
+      [](const auto& call, auto result) {
+        if (call.method_name() != "getChangeCount") {
+          result->NotImplemented();
+          return;
+        }
+        result->Success(flutter::EncodableValue(
+            static_cast<int64_t>(GetClipboardSequenceNumber())));
+      });
+}
+
 void FlutterWindow::SetRadialMode(bool enabled) {
   constexpr auto kWindowCornerPreference =
       static_cast<DWMWINDOWATTRIBUTE>(33);
@@ -72,6 +89,7 @@ bool FlutterWindow::OnCreate() {
   RegisterPlugins(flutter_controller_->engine());
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
   RegisterWindowEffectsChannel();
+  RegisterClipboardChannel();
 
   flutter_controller_->engine()->SetNextFrameCallback([&]() {
     this->Show();
@@ -88,6 +106,9 @@ bool FlutterWindow::OnCreate() {
 void FlutterWindow::OnDestroy() {
   if (window_effects_channel_) {
     window_effects_channel_ = nullptr;
+  }
+  if (clipboard_channel_) {
+    clipboard_channel_ = nullptr;
   }
   if (flutter_controller_) {
     flutter_controller_ = nullptr;
