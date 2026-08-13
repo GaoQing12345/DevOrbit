@@ -45,7 +45,7 @@ class _JsonFormatterPageState extends State<JsonFormatterPage> {
     super.initState();
     _editor = CodeLineEditingController.fromText(widget.controller.text);
     _findController = CodeFindController(_editor);
-    _focusRestorer = JsonFocusRestorer(controller: _findController);
+    _focusRestorer = JsonFocusRestorer(_findController, _editor);
     widget.controller.addListener(_syncFromDocument);
   }
 
@@ -69,9 +69,8 @@ class _JsonFormatterPageState extends State<JsonFormatterPage> {
     if (mounted) setState(() {});
   }
 
-  void _onEditorChanged() {
-    if (!_syncing) widget.controller.userEdit(_editor.text);
-  }
+  void _onEditorChanged() =>
+      _syncing ? null : widget.controller.userEdit(_editor.text);
 
   Future<bool> _confirmReplace() async {
     if (!widget.controller.isDirty) return true;
@@ -185,6 +184,7 @@ class _JsonFormatterPageState extends State<JsonFormatterPage> {
 
   @override
   Widget build(BuildContext context) {
+    _focusRestorer.active = Visibility.of(context);
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     return CallbackShortcuts(

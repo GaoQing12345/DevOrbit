@@ -13,16 +13,20 @@ class JsonFormatterFixture {
   final JsonDocumentController controller;
   final Widget widget;
 
-  static Future<JsonFormatterFixture> create({String text = ''}) async {
+  static Future<JsonFormatterFixture> create({
+    String text = '',
+    Widget? sibling,
+    bool showSibling = false,
+  }) async {
     SharedPreferences.setMockInitialValues({});
     final settings = await SettingsStore.load();
     final controller = JsonDocumentController();
     if (text.isNotEmpty) controller.userEdit(text);
-    final widget = MaterialApp(
-      home: Scaffold(
-        body: JsonFormatterPage(controller: controller, settings: settings),
-      ),
-    );
+    final page = JsonFormatterPage(controller: controller, settings: settings);
+    final body = sibling == null
+        ? page
+        : IndexedStack(index: showSibling ? 1 : 0, children: [page, sibling]);
+    final widget = MaterialApp(home: Scaffold(body: body));
     return JsonFormatterFixture(controller, widget);
   }
 }
