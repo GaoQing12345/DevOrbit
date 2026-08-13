@@ -50,7 +50,7 @@ class NativeStandaloneToolWindowLauncher
           return true;
         case translatorId:
           final pendingOpen = _translatorOpen;
-          if (pendingOpen != null) return pendingOpen;
+          if (pendingOpen != null) return await pendingOpen;
           final open = _openTranslator();
           _translatorOpen = open;
           try {
