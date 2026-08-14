@@ -152,5 +152,8 @@ class _FakeDesktopShell implements DesktopShell {
 
 class _NoopStandaloneLauncher implements StandaloneToolWindowLauncher {
   @override
+  Future<void> closeAllTools() async {}
+
+  @override
   Future<bool> openTool(String toolId) async => false;
 }

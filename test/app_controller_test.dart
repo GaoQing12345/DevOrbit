@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:dev_orbit/app/app_controller.dart';
 import 'package:dev_orbit/core/desktop/desktop_shell.dart';
 import 'package:dev_orbit/core/desktop/standalone_tool_window_launcher.dart';
@@ -60,6 +62,25 @@ void main() {
     expect(fixture.shell.hideCount, 2);
   });
 
+  test('radial hides before a standalone process finishes starting', () async {
+    final launchCompleter = Completer<bool>();
+    final fixture = await _ControllerFixture.create(
+      modules: [_TestModule(id: 'json-formatter')],
+      launcher: _FakeStandaloneLauncher(onOpen: (_) => launchCompleter.future),
+    );
+
+    final opening = fixture.controller.openTool(
+      'json-formatter',
+      origin: ToolLaunchOrigin.radial,
+    );
+    await Future<void>.delayed(Duration.zero);
+
+    expect(fixture.controller.mode, AppViewMode.hidden);
+    expect(fixture.shell.hideCount, 1);
+    launchCompleter.complete(true);
+    await opening;
+  });
+
   test('native close hides the toolbox without quitting the app', () async {
     final fixture = await _ControllerFixture.create();
     await fixture.controller.initialize();
@@ -68,6 +89,25 @@ void main() {
 
     expect(fixture.shell.hideCount, 1);
     expect(fixture.shell.quitCount, 0);
+  });
+
+  test('tray quit closes standalone tools before the main process', () async {
+    final closeCompleter = Completer<void>();
+    final fixture = await _ControllerFixture.create(
+      launcher: _FakeStandaloneLauncher(
+        onCloseAll: () => closeCompleter.future,
+      ),
+    );
+    await fixture.controller.initialize();
+
+    final quitting = fixture.shell.callbacks!.onQuitRequested();
+    await Future<void>.delayed(Duration.zero);
+
+    expect(fixture.launcher.closeAllCount, 1);
+    expect(fixture.shell.quitCount, 0);
+    closeCompleter.complete();
+    await quitting;
+    expect(fixture.shell.quitCount, 1);
   });
 }
 
@@ -109,11 +149,12 @@ class _ControllerFixture {
 
   static Future<_ControllerFixture> create({
     List<ToolModule> modules = const [],
+    _FakeStandaloneLauncher? launcher,
   }) async {
     SharedPreferences.setMockInitialValues({});
     final settings = await SettingsStore.load();
     final shell = _FakeDesktopShell();
-    final launcher = _FakeStandaloneLauncher();
+    launcher ??= _FakeStandaloneLauncher();
     final controller = AppController(
       registry: ToolRegistry(modules),
       settings: settings,
@@ -125,11 +166,23 @@ class _ControllerFixture {
 }
 
 class _FakeStandaloneLauncher implements StandaloneToolWindowLauncher {
+  _FakeStandaloneLauncher({this.onOpen, this.onCloseAll});
+
+  final Future<bool> Function(String toolId)? onOpen;
+  final Future<void> Function()? onCloseAll;
   final List<String> openedToolIds = [];
+  int closeAllCount = 0;
+
+  @override
+  Future<void> closeAllTools() async {
+    closeAllCount++;
+    await onCloseAll?.call();
+  }
 
   @override
   Future<bool> openTool(String toolId) async {
     openedToolIds.add(toolId);
+    if (onOpen != null) return onOpen!(toolId);
     return toolId == 'json-formatter';
   }
 }

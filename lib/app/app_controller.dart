@@ -41,6 +41,7 @@ class AppController extends ChangeNotifier {
         onOpenToolbox: showToolbox,
         onOpenSettings: showSettings,
         onCloseRequested: hide,
+        onQuitRequested: quit,
         onWindowBlur: _handleWindowBlur,
       ),
       settings.value.hotKey,
@@ -89,10 +90,9 @@ class AppController extends ChangeNotifier {
     ToolLaunchOrigin origin = ToolLaunchOrigin.toolbox,
   }) async {
     final module = registry.byId(id);
-    if (origin == ToolLaunchOrigin.radial &&
-        await standaloneLauncher.openTool(id)) {
+    if (origin == ToolLaunchOrigin.radial) {
       await hide();
-      return;
+      if (await standaloneLauncher.openTool(id)) return;
     }
     await module.onLaunch(ToolLaunchContext(origin: origin));
     _selectedToolId = id;
@@ -109,6 +109,11 @@ class AppController extends ChangeNotifier {
 
   Future<void> minimize() {
     return shell.minimize();
+  }
+
+  Future<void> quit() async {
+    await standaloneLauncher.closeAllTools();
+    await shell.quit();
   }
 
   Future<void> updateHotKey(HotKey hotKey) async {

@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:hotkey_manager/hotkey_manager.dart';
 import 'package:screen_retriever/screen_retriever.dart';
 import 'package:tray_manager/tray_manager.dart';
@@ -23,6 +24,7 @@ class DesktopShellCallbacks {
     required this.onOpenToolbox,
     required this.onOpenSettings,
     required this.onCloseRequested,
+    required this.onQuitRequested,
     required this.onWindowBlur,
   });
 
@@ -30,6 +32,7 @@ class DesktopShellCallbacks {
   final Future<void> Function() onOpenToolbox;
   final Future<void> Function() onOpenSettings;
   final Future<void> Function() onCloseRequested;
+  final Future<void> Function() onQuitRequested;
   final VoidCallback onWindowBlur;
 }
 
@@ -57,6 +60,7 @@ class NativeDesktopShell
   static const toolSize = Size(960, 700);
   static const toolMinimumSize = Size(760, 520);
   static const _maximumSize = Size(10000, 10000);
+  static const _appLifecycleChannel = MethodChannel('dev_orbit/app_lifecycle');
 
   DesktopShellCallbacks? _callbacks;
   HotKey? _hotKey;
@@ -203,7 +207,13 @@ class NativeDesktopShell
     await trayManager.destroy();
     await hotKeyManager.unregisterAll();
     await windowManager.setPreventClose(false);
-    await windowManager.destroy();
+    try {
+      await _appLifecycleChannel.invokeMethod<void>('quit');
+    } on MissingPluginException {
+      await windowManager.destroy();
+    } on PlatformException {
+      await windowManager.destroy();
+    }
   }
 
   @override
@@ -277,7 +287,7 @@ class NativeDesktopShell
         _callbacks?.onOpenSettings();
         break;
       case 'quit':
-        quit();
+        _callbacks?.onQuitRequested();
         break;
     }
   }

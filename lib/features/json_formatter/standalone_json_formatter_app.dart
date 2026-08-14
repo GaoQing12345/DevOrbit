@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:window_manager/window_manager.dart';
@@ -42,16 +44,19 @@ class _StandaloneJsonFormatterAppState
   void initState() {
     super.initState();
     _controller = JsonDocumentController();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _initializeWindow());
+    WidgetsBinding.instance.addPostFrameCallback(
+      (_) => unawaited(_initializeWindow()),
+    );
   }
 
   Future<void> _initializeWindow() async {
+    await _showWindow();
+    if (!mounted) return;
     await importInitialClipboardJson(
       controller: _controller,
       indentSize: widget.settings.value.indentSize,
       readClipboard: () => Clipboard.getData(Clipboard.kTextPlain),
     );
-    if (mounted) await _showWindow();
   }
 
   Future<void> _showWindow() async {

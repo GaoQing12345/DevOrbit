@@ -2,21 +2,18 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../../app/app_theme.dart';
 import '../../core/desktop/process_window_activator.dart';
 import '../../core/desktop/single_instance_registry.dart';
 import '../../core/settings/settings_store.dart';
-import 'deepl_api_key_store.dart';
-import 'deepl_translation_client.dart';
-import 'standalone_translator_constants.dart';
-import 'translator_controller.dart';
-import 'translator_page.dart';
+import 'standalone_text_compare_constants.dart';
+import 'text_compare_controller.dart';
+import 'text_compare_page.dart';
 
-Future<void> runStandaloneTranslator() async {
-  final instanceRegistry = FileSingleInstanceRegistry(translatorInstanceName);
+Future<void> runStandaloneTextCompare() async {
+  final instanceRegistry = FileSingleInstanceRegistry(textCompareInstanceName);
   final lease = await instanceRegistry.tryAcquire(pid);
   if (lease == null) {
     try {
@@ -33,18 +30,18 @@ Future<void> runStandaloneTranslator() async {
   await windowManager.setPreventClose(false);
   await windowManager.waitUntilReadyToShow(
     const WindowOptions(
-      size: Size(980, 700),
-      minimumSize: Size(720, 540),
+      size: Size(1100, 720),
+      minimumSize: Size(820, 560),
       center: true,
       backgroundColor: Colors.transparent,
-      title: '文本翻译 - DevOrbit',
+      title: '文本比对 - DevOrbit',
     ),
   );
-  runApp(_StandaloneTranslatorApp(settings: settings, instanceLease: lease));
+  runApp(_StandaloneTextCompareApp(settings: settings, instanceLease: lease));
 }
 
-class _StandaloneTranslatorApp extends StatefulWidget {
-  const _StandaloneTranslatorApp({
+class _StandaloneTextCompareApp extends StatefulWidget {
+  const _StandaloneTextCompareApp({
     required this.settings,
     required this.instanceLease,
   });
@@ -53,36 +50,20 @@ class _StandaloneTranslatorApp extends StatefulWidget {
   final SingleInstanceLease instanceLease;
 
   @override
-  State<_StandaloneTranslatorApp> createState() =>
-      _StandaloneTranslatorAppState();
+  State<_StandaloneTextCompareApp> createState() =>
+      _StandaloneTextCompareAppState();
 }
 
-class _StandaloneTranslatorAppState extends State<_StandaloneTranslatorApp> {
-  late final TranslatorController _controller;
+class _StandaloneTextCompareAppState extends State<_StandaloneTextCompareApp> {
+  late final TextCompareController _controller;
 
   @override
   void initState() {
     super.initState();
-    _controller = TranslatorController(
-      client: DeepLTranslationClient(),
-      keyStore: const NativeDeepLApiKeyStore(),
-    );
+    _controller = TextCompareController();
     WidgetsBinding.instance.addPostFrameCallback(
-      (_) => unawaited(_initializeWindow()),
+      (_) => unawaited(_showWindow()),
     );
-  }
-
-  Future<void> _initializeWindow() async {
-    await _showWindow();
-    if (!mounted || _controller.sourceText.isNotEmpty) return;
-    try {
-      final text = (await Clipboard.getData(Clipboard.kTextPlain))?.text;
-      if (mounted && _controller.sourceText.isEmpty && text != null) {
-        _controller.updateSource(text);
-      }
-    } on PlatformException {
-      // 剪贴板不可用不应阻塞翻译窗口启动。
-    }
   }
 
   Future<void> _showWindow() async {
@@ -109,12 +90,12 @@ class _StandaloneTranslatorAppState extends State<_StandaloneTranslatorApp> {
     return AnimatedBuilder(
       animation: widget.settings,
       builder: (context, child) => MaterialApp(
-        title: '文本翻译 - DevOrbit',
+        title: '文本比对 - DevOrbit',
         debugShowCheckedModeBanner: false,
         theme: AppTheme.light(),
         darkTheme: AppTheme.dark(),
         themeMode: widget.settings.value.themeMode,
-        home: Scaffold(body: TranslatorPage(controller: _controller)),
+        home: Scaffold(body: TextComparePage(controller: _controller)),
       ),
     );
   }

@@ -18,7 +18,7 @@ packages:
     source: hosted
     version: "2.1.2"
   characters:
-    dependency: transitive
+    dependency: "direct main"
     description:
       name: characters
       sha256: faf38497bda5ead2a8c7615f4f7939df04333478bf32e4173fcb06d428b5716b
@@ -65,6 +65,14 @@ packages:
       url: "https://pub.flutter-io.cn"
     source: hosted
     version: "0.4.4"
+  diffutil_dart:
+    dependency: "direct main"
+    description:
+      name: diffutil_dart
+      sha256: "794bf169096770b6ba60da12c6480116dfefa891c19fc4518ec80ad516f69bb9"
+      url: "https://pub.flutter-io.cn"
+    source: hosted
+    version: "5.0.0"
   fake_async:
     dependency: transitive
     description:

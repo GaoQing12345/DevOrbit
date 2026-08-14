@@ -2,7 +2,9 @@
 
 #include <windows.h>
 #include <dwmapi.h>
+#include <tlhelp32.h>
 #include <wincred.h>
+#include <cstdlib>
 #include <optional>
 #include <string>
 #include <vector>
@@ -59,6 +61,32 @@ BOOL CALLBACK ActivateProcessWindow(HWND window, LPARAM parameter) {
   BringWindowToTop(window);
   SetForegroundWindow(window);
   return FALSE;
+}
+
+void TerminateSiblingProcesses() {
+  const DWORD current_process_id = GetCurrentProcessId();
+  HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+  if (snapshot == INVALID_HANDLE_VALUE) {
+    return;
+  }
+
+  PROCESSENTRY32W entry = {};
+  entry.dwSize = sizeof(entry);
+  if (Process32FirstW(snapshot, &entry)) {
+    do {
+      if (entry.th32ProcessID == current_process_id ||
+          !IsCurrentExecutable(entry.th32ProcessID)) {
+        continue;
+      }
+      HANDLE process = OpenProcess(PROCESS_TERMINATE, FALSE,
+                                   entry.th32ProcessID);
+      if (process) {
+        TerminateProcess(process, EXIT_SUCCESS);
+        CloseHandle(process);
+      }
+    } while (Process32NextW(snapshot, &entry));
+  }
+  CloseHandle(snapshot);
 }
 
 }  // namespace
@@ -243,19 +271,46 @@ void FlutterWindow::RegisterProcessWindowChannel() {
       });
 }
 
+void FlutterWindow::RegisterAppLifecycleChannel() {
+  app_lifecycle_channel_ =
+      std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
+          flutter_controller_->engine()->messenger(),
+          "dev_orbit/app_lifecycle",
+          &flutter::StandardMethodCodec::GetInstance());
+  app_lifecycle_channel_->SetMethodCallHandler(
+      [](const auto& call, auto result) {
+        if (call.method_name() != "quit") {
+          result->NotImplemented();
+          return;
+        }
+        result->Success();
+        TerminateSiblingProcesses();
+        PostQuitMessage(0);
+      });
+}
+
 void FlutterWindow::CapturePendingPasteText() {
-  if (!OpenClipboard(GetHandle())) {
-    return;
-  }
-  HANDLE data = ::GetClipboardData(CF_UNICODETEXT);
-  if (data) {
-    const wchar_t* text = static_cast<const wchar_t*>(GlobalLock(data));
-    if (text) {
-      pending_paste_text_ = Utf8FromUtf16(text);
-      GlobalUnlock(data);
+  constexpr int kClipboardOpenAttempts = 8;
+  constexpr DWORD kClipboardRetryDelayMs = 5;
+  pending_paste_text_.reset();
+
+  for (int attempt = 0; attempt < kClipboardOpenAttempts; ++attempt) {
+    if (OpenClipboard(GetHandle())) {
+      HANDLE data = ::GetClipboardData(CF_UNICODETEXT);
+      if (data) {
+        const wchar_t* text = static_cast<const wchar_t*>(GlobalLock(data));
+        if (text) {
+          pending_paste_text_ = Utf8FromUtf16(text);
+          GlobalUnlock(data);
+        }
+      }
+      CloseClipboard();
+      return;
+    }
+    if (attempt + 1 < kClipboardOpenAttempts) {
+      Sleep(kClipboardRetryDelayMs);
     }
   }
-  CloseClipboard();
 }
 
 void FlutterWindow::SetRadialMode(bool enabled) {
@@ -301,6 +356,7 @@ bool FlutterWindow::OnCreate() {
   RegisterClipboardChannel();
   RegisterCredentialsChannel();
   RegisterProcessWindowChannel();
+  RegisterAppLifecycleChannel();
 
   flutter_controller_->engine()->SetNextFrameCallback([&]() {
     this->Show();
@@ -326,6 +382,9 @@ void FlutterWindow::OnDestroy() {
   }
   if (process_window_channel_) {
     process_window_channel_ = nullptr;
+  }
+  if (app_lifecycle_channel_) {
+    app_lifecycle_channel_ = nullptr;
   }
   if (flutter_controller_) {
     flutter_controller_ = nullptr;

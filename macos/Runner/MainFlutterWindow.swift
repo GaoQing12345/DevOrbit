@@ -7,6 +7,7 @@ class MainFlutterWindow: NSWindow {
   private var clipboardChannel: FlutterMethodChannel?
   private var credentialsChannel: FlutterMethodChannel?
   private var processWindowChannel: FlutterMethodChannel?
+  private var appLifecycleChannel: FlutterMethodChannel?
   private var pasteKeyMonitor: Any?
   private var pendingPasteText: String?
 
@@ -25,6 +26,7 @@ class MainFlutterWindow: NSWindow {
     registerClipboardChannel(flutterViewController)
     registerCredentialsChannel(flutterViewController)
     registerProcessWindowChannel(flutterViewController)
+    registerAppLifecycleChannel(flutterViewController)
 
     super.awakeFromNib()
   }
@@ -141,6 +143,24 @@ class MainFlutterWindow: NSWindow {
       result(true)
     }
     processWindowChannel = channel
+  }
+
+  private func registerAppLifecycleChannel(_ controller: FlutterViewController) {
+    let channel = FlutterMethodChannel(
+      name: "dev_orbit/app_lifecycle",
+      binaryMessenger: controller.engine.binaryMessenger
+    )
+    channel.setMethodCallHandler { call, result in
+      guard call.method == "quit" else {
+        result(FlutterMethodNotImplemented)
+        return
+      }
+      result(nil)
+      DispatchQueue.main.async {
+        NSApplication.shared.terminate(nil)
+      }
+    }
+    appLifecycleChannel = channel
   }
 
   private static let credentialService = "com.gaoqing.devorbit"

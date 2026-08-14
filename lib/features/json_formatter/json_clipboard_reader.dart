@@ -29,10 +29,9 @@ class JsonClipboardReader {
         platform != TargetPlatform.windows) {
       return _readText();
     }
-    final clipboardFuture = _readText();
     final pending = await _takePendingPasteText();
     if (pending != null && pending.isNotEmpty) return pending;
-    return clipboardFuture;
+    return _readText();
   }
 
   Future<JsonClipboardState> read() async {
