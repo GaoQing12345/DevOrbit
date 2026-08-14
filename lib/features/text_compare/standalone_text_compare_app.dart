@@ -8,12 +8,13 @@ import '../../app/app_theme.dart';
 import '../../core/desktop/desktop_window_shell.dart';
 import '../../core/desktop/process_window_activator.dart';
 import '../../core/desktop/single_instance_registry.dart';
+import '../../core/desktop/standalone_window_activation.dart';
 import '../../core/settings/settings_store.dart';
 import 'standalone_text_compare_constants.dart';
 import 'text_compare_controller.dart';
 import 'text_compare_page.dart';
 
-Future<void> runStandaloneTextCompare() async {
+Future<void> runStandaloneTextCompare({bool prewarmed = false}) async {
   final instanceRegistry = FileSingleInstanceRegistry(textCompareInstanceName);
   final lease = await instanceRegistry.tryAcquire(pid);
   if (lease == null) {
@@ -26,10 +27,10 @@ Future<void> runStandaloneTextCompare() async {
       exit(0);
     }
   }
-  final settings = await SettingsStore.load();
+  final settingsFuture = SettingsStore.load();
   await windowManager.ensureInitialized();
-  await windowManager.setPreventClose(false);
-  final titleBarHeight = Platform.isWindows
+  final useCustomWindowsTitleBar = Platform.isWindows;
+  final titleBarHeight = useCustomWindowsTitleBar
       ? WindowsWindowTitleBar.height
       : 0.0;
   await windowManager.waitUntilReadyToShow(
@@ -39,19 +40,32 @@ Future<void> runStandaloneTextCompare() async {
       center: true,
       backgroundColor: Colors.transparent,
       title: '文本比对 - DevOrbit',
+      titleBarStyle: useCustomWindowsTitleBar
+          ? TitleBarStyle.hidden
+          : TitleBarStyle.normal,
+      windowButtonVisibility: !useCustomWindowsTitleBar,
     ),
   );
-  runApp(_StandaloneTextCompareApp(settings: settings, instanceLease: lease));
+  final settings = await settingsFuture;
+  runApp(
+    _StandaloneTextCompareApp(
+      settings: settings,
+      instanceLease: lease,
+      prewarmed: prewarmed,
+    ),
+  );
 }
 
 class _StandaloneTextCompareApp extends StatefulWidget {
   const _StandaloneTextCompareApp({
     required this.settings,
     required this.instanceLease,
+    required this.prewarmed,
   });
 
   final SettingsStore settings;
   final SingleInstanceLease instanceLease;
+  final bool prewarmed;
 
   @override
   State<_StandaloneTextCompareApp> createState() =>
@@ -60,31 +74,24 @@ class _StandaloneTextCompareApp extends StatefulWidget {
 
 class _StandaloneTextCompareAppState extends State<_StandaloneTextCompareApp> {
   late final TextCompareController _controller;
+  late final StandaloneWindowActivation _windowActivation;
 
   @override
   void initState() {
     super.initState();
     _controller = TextCompareController();
+    _windowActivation = StandaloneWindowActivation(
+      prewarmed: widget.prewarmed,
+      onActivated: () async {},
+    );
     WidgetsBinding.instance.addPostFrameCallback(
-      (_) => unawaited(_showWindow()),
+      (_) => unawaited(_windowActivation.initialize()),
     );
-  }
-
-  Future<void> _showWindow() async {
-    await windowManager.setResizable(true);
-    await windowManager.setAlwaysOnTop(false);
-    await windowManager.setSkipTaskbar(false);
-    final useCustomWindowsTitleBar = Platform.isWindows;
-    await windowManager.setTitleBarStyle(
-      useCustomWindowsTitleBar ? TitleBarStyle.hidden : TitleBarStyle.normal,
-      windowButtonVisibility: !useCustomWindowsTitleBar,
-    );
-    await windowManager.show();
-    await windowManager.focus();
   }
 
   @override
   void dispose() {
+    _windowActivation.dispose();
     unawaited(widget.instanceLease.release());
     _controller.dispose();
     super.dispose();

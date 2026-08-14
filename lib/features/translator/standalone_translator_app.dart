@@ -9,6 +9,7 @@ import '../../app/app_theme.dart';
 import '../../core/desktop/desktop_window_shell.dart';
 import '../../core/desktop/process_window_activator.dart';
 import '../../core/desktop/single_instance_registry.dart';
+import '../../core/desktop/standalone_window_activation.dart';
 import '../../core/settings/settings_store.dart';
 import 'deepl_api_key_store.dart';
 import 'deepl_translation_client.dart';
@@ -16,7 +17,7 @@ import 'standalone_translator_constants.dart';
 import 'translator_controller.dart';
 import 'translator_page.dart';
 
-Future<void> runStandaloneTranslator() async {
+Future<void> runStandaloneTranslator({bool prewarmed = false}) async {
   final instanceRegistry = FileSingleInstanceRegistry(translatorInstanceName);
   final lease = await instanceRegistry.tryAcquire(pid);
   if (lease == null) {
@@ -29,10 +30,10 @@ Future<void> runStandaloneTranslator() async {
       exit(0);
     }
   }
-  final settings = await SettingsStore.load();
+  final settingsFuture = SettingsStore.load();
   await windowManager.ensureInitialized();
-  await windowManager.setPreventClose(false);
-  final titleBarHeight = Platform.isWindows
+  final useCustomWindowsTitleBar = Platform.isWindows;
+  final titleBarHeight = useCustomWindowsTitleBar
       ? WindowsWindowTitleBar.height
       : 0.0;
   await windowManager.waitUntilReadyToShow(
@@ -42,19 +43,32 @@ Future<void> runStandaloneTranslator() async {
       center: true,
       backgroundColor: Colors.transparent,
       title: '文本翻译 - DevOrbit',
+      titleBarStyle: useCustomWindowsTitleBar
+          ? TitleBarStyle.hidden
+          : TitleBarStyle.normal,
+      windowButtonVisibility: !useCustomWindowsTitleBar,
     ),
   );
-  runApp(_StandaloneTranslatorApp(settings: settings, instanceLease: lease));
+  final settings = await settingsFuture;
+  runApp(
+    _StandaloneTranslatorApp(
+      settings: settings,
+      instanceLease: lease,
+      prewarmed: prewarmed,
+    ),
+  );
 }
 
 class _StandaloneTranslatorApp extends StatefulWidget {
   const _StandaloneTranslatorApp({
     required this.settings,
     required this.instanceLease,
+    required this.prewarmed,
   });
 
   final SettingsStore settings;
   final SingleInstanceLease instanceLease;
+  final bool prewarmed;
 
   @override
   State<_StandaloneTranslatorApp> createState() =>
@@ -63,6 +77,7 @@ class _StandaloneTranslatorApp extends StatefulWidget {
 
 class _StandaloneTranslatorAppState extends State<_StandaloneTranslatorApp> {
   late final TranslatorController _controller;
+  late final StandaloneWindowActivation _windowActivation;
 
   @override
   void initState() {
@@ -71,13 +86,16 @@ class _StandaloneTranslatorAppState extends State<_StandaloneTranslatorApp> {
       client: DeepLTranslationClient(),
       keyStore: const NativeDeepLApiKeyStore(),
     );
+    _windowActivation = StandaloneWindowActivation(
+      prewarmed: widget.prewarmed,
+      onActivated: _importClipboard,
+    );
     WidgetsBinding.instance.addPostFrameCallback(
-      (_) => unawaited(_initializeWindow()),
+      (_) => unawaited(_windowActivation.initialize()),
     );
   }
 
-  Future<void> _initializeWindow() async {
-    await _showWindow();
+  Future<void> _importClipboard() async {
     if (!mounted || _controller.sourceText.isNotEmpty) return;
     try {
       final text = (await Clipboard.getData(Clipboard.kTextPlain))?.text;
@@ -89,21 +107,9 @@ class _StandaloneTranslatorAppState extends State<_StandaloneTranslatorApp> {
     }
   }
 
-  Future<void> _showWindow() async {
-    await windowManager.setResizable(true);
-    await windowManager.setAlwaysOnTop(false);
-    await windowManager.setSkipTaskbar(false);
-    final useCustomWindowsTitleBar = Platform.isWindows;
-    await windowManager.setTitleBarStyle(
-      useCustomWindowsTitleBar ? TitleBarStyle.hidden : TitleBarStyle.normal,
-      windowButtonVisibility: !useCustomWindowsTitleBar,
-    );
-    await windowManager.show();
-    await windowManager.focus();
-  }
-
   @override
   void dispose() {
+    _windowActivation.dispose();
     unawaited(widget.instanceLease.release());
     _controller.dispose();
     super.dispose();

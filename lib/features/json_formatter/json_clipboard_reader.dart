@@ -23,6 +23,12 @@ class JsonClipboardReader {
 
   Future<String?> readText() => _readText();
 
+  Future<void> armPasteCapture() => _invokeVoid('armPasteCapture');
+
+  Future<void> discardPendingPasteText() {
+    return _invokeVoid('discardPendingPasteText');
+  }
+
   Future<String?> readPasteText() async {
     final platform = defaultTargetPlatform;
     if (platform != TargetPlatform.macOS &&
@@ -68,6 +74,16 @@ class JsonClipboardReader {
       return null;
     } on PlatformException {
       return null;
+    }
+  }
+
+  Future<void> _invokeVoid(String method) async {
+    try {
+      await _channel.invokeMethod<void>(method);
+    } on MissingPluginException {
+      return;
+    } on PlatformException {
+      return;
     }
   }
 }

@@ -1,4 +1,5 @@
 import 'package:dev_orbit/app/app_theme.dart';
+import 'package:dev_orbit/core/desktop/desktop_window_shell.dart';
 import 'package:dev_orbit/core/settings/settings_store.dart';
 import 'package:dev_orbit/features/json_formatter/json_document_controller.dart';
 import 'package:dev_orbit/features/json_formatter/json_formatter_page.dart';
@@ -18,15 +19,19 @@ class JsonFormatterFixture {
     String text = '',
     Widget? sibling,
     bool showSibling = false,
+    Future<void> Function()? onEscapeClose,
   }) async {
     SharedPreferences.setMockInitialValues({});
     final settings = await SettingsStore.load();
     final controller = JsonDocumentController();
     if (text.isNotEmpty) controller.userEdit(text);
     final page = JsonFormatterPage(controller: controller, settings: settings);
-    final body = sibling == null
+    Widget body = sibling == null
         ? page
         : IndexedStack(index: showSibling ? 1 : 0, children: [page, sibling]);
+    if (onEscapeClose != null) {
+      body = DesktopEscapeCloseRegion(onClose: onEscapeClose, child: body);
+    }
     final widget = MaterialApp(
       theme: AppTheme.light(),
       darkTheme: AppTheme.dark(),
@@ -143,6 +148,14 @@ class ClipboardRevisionState {
 
   Future<Object?> handleMethodCall(MethodCall call) async {
     if (call.method == 'getChangeCount') return revision;
+    if (call.method == 'armPasteCapture') {
+      pendingPasteText = null;
+      return null;
+    }
+    if (call.method == 'discardPendingPasteText') {
+      pendingPasteText = null;
+      return null;
+    }
     if (call.method == 'takePendingPasteText') {
       final text = pendingPasteText;
       pendingPasteText = null;

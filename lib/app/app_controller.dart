@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:hotkey_manager/hotkey_manager.dart';
 
@@ -35,6 +37,7 @@ class AppController extends ChangeNotifier {
   String? get hotKeyError => _hotKeyError;
 
   Future<void> initialize() async {
+    unawaited(standaloneLauncher.warmUp());
     _hotKeyError = await shell.initialize(
       DesktopShellCallbacks(
         onToggleRadial: toggleRadial,
@@ -51,7 +54,7 @@ class AppController extends ChangeNotifier {
 
   Future<void> afterFirstFrame({required bool startHidden}) async {
     if (startHidden) {
-      await hide();
+      await shell.hideRadial();
     } else {
       await showToolbox();
     }
@@ -68,7 +71,9 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> dismissRadial() async {
-    await hide();
+    _mode = AppViewMode.hidden;
+    notifyListeners();
+    await shell.hideRadial();
   }
 
   Future<void> showToolbox() async {
@@ -91,8 +96,12 @@ class AppController extends ChangeNotifier {
   }) async {
     final module = registry.byId(id);
     if (origin == ToolLaunchOrigin.radial) {
-      await hide();
-      if (await standaloneLauncher.openTool(id)) return;
+      _mode = AppViewMode.hidden;
+      notifyListeners();
+      final hidingRadial = shell.hideRadial();
+      final openedStandalone = await standaloneLauncher.openTool(id);
+      await hidingRadial;
+      if (openedStandalone) return;
     }
     await module.onLaunch(ToolLaunchContext(origin: origin));
     _selectedToolId = id;

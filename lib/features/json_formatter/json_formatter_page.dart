@@ -43,6 +43,7 @@ class _JsonFormatterPageState extends State<JsonFormatterPage> {
     super.initState();
     _editor = CodeLineEditingController.fromText(widget.controller.text);
     _findController = CodeFindController(_editor);
+    _findController.addListener(_onFindChanged);
     _focusRestorer = JsonFocusRestorer(_findController, _editor);
     widget.controller.addListener(_syncFromDocument);
   }
@@ -51,6 +52,7 @@ class _JsonFormatterPageState extends State<JsonFormatterPage> {
   void dispose() {
     widget.controller.removeListener(_syncFromDocument);
     _focusRestorer.dispose();
+    _findController.removeListener(_onFindChanged);
     _findController.dispose();
     _editor.dispose();
     super.dispose();
@@ -69,6 +71,10 @@ class _JsonFormatterPageState extends State<JsonFormatterPage> {
 
   void _onEditorChanged() =>
       _syncing ? null : widget.controller.userEdit(_editor.text);
+
+  void _onFindChanged() {
+    if (mounted) setState(() {});
+  }
 
   Future<bool> _confirmReplace() async {
     if (!widget.controller.isDirty) return true;
@@ -185,11 +191,16 @@ class _JsonFormatterPageState extends State<JsonFormatterPage> {
     _focusRestorer.active = Visibility.of(context);
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
+    final shortcuts = buildJsonFormatterShortcuts(
+      onFind: _findController.findMode,
+      onReplace: _findController.replaceMode,
+    );
+    if (_findController.value != null) {
+      shortcuts[const SingleActivator(LogicalKeyboardKey.escape)] =
+          _findController.close;
+    }
     return CallbackShortcuts(
-      bindings: buildJsonFormatterShortcuts(
-        onFind: _findController.findMode,
-        onReplace: _findController.replaceMode,
-      ),
+      bindings: shortcuts,
       child: _buildDropTarget(theme, isDark),
     );
   }

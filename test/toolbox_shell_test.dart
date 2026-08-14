@@ -50,6 +50,9 @@ void main() {
 
 class _NoopStandaloneLauncher implements StandaloneToolWindowLauncher {
   @override
+  Future<void> warmUp() async {}
+
+  @override
   Future<void> closeAllTools() async {}
 
   @override
@@ -63,6 +66,9 @@ class _FakeDesktopShell implements DesktopShell {
 
   @override
   Future<void> hide() async => hideCount++;
+
+  @override
+  Future<void> hideRadial() async {}
 
   @override
   Future<String?> initialize(

@@ -19,6 +19,8 @@ class FlutterWindow : public Win32Window {
   explicit FlutterWindow(const flutter::DartProject& project);
   virtual ~FlutterWindow();
 
+  void SetShowOnFirstFrame(bool show);
+
  protected:
   // Win32Window:
   bool OnCreate() override;
@@ -32,7 +34,9 @@ class FlutterWindow : public Win32Window {
   void RegisterCredentialsChannel();
   void RegisterProcessWindowChannel();
   void RegisterAppLifecycleChannel();
-  void CapturePendingPasteText();
+  void ArmPasteCapture();
+  void DiscardPendingPasteText();
+  bool CapturePendingPasteText(bool preserve_existing);
   void SetRadialMode(bool enabled);
 
   // The project to run.
@@ -51,6 +55,8 @@ class FlutterWindow : public Win32Window {
   std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>>
       app_lifecycle_channel_;
   std::optional<std::string> pending_paste_text_;
+  bool paste_capture_armed_ = false;
+  bool show_on_first_frame_ = true;
 };
 
 #endif  // RUNNER_FLUTTER_WINDOW_H_

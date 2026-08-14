@@ -69,8 +69,12 @@ class JsonFocusRestorer with WindowListener {
 
   void _suspendFocus() {
     if (!_active || _hasExternalEditableFocus()) return;
+    final snapshot =
+        _snapshot ?? _captureSnapshot(_focusedJsonTarget() ?? _lastTarget);
+    if (snapshot == null) return;
+    _snapshot = snapshot;
     _pasteFallbackArmed = true;
-    _snapshot ??= _captureSnapshot(_focusedJsonTarget() ?? _lastTarget);
+    unawaited(_clipboardReader.armPasteCapture());
   }
 
   JsonFocusSnapshot? _captureSnapshot(JsonFocusTarget? target) {
@@ -120,7 +124,8 @@ class JsonFocusRestorer with WindowListener {
     if (!clipboardNow.hasChangedSince(clipboardBefore)) {
       return _cancelRestore();
     }
-    final text = clipboardNow.text;
+    final text = await _clipboardReader.readPasteText();
+    if (!_canAutoPaste(snapshot)) return;
     if (text == null || text.isEmpty) return _cancelRestore();
     _pasteText(snapshot, text);
   }
@@ -265,6 +270,7 @@ class JsonFocusRestorer with WindowListener {
     _clipboardTimer = null;
     _snapshot = null;
     _pasteFallbackArmed = false;
+    unawaited(_clipboardReader.discardPendingPasteText());
   }
 
   @override

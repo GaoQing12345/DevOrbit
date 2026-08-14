@@ -7,16 +7,17 @@ import 'package:window_manager/window_manager.dart';
 
 import '../../app/app_theme.dart';
 import '../../core/desktop/desktop_window_shell.dart';
+import '../../core/desktop/standalone_window_activation.dart';
 import '../../core/settings/settings_store.dart';
 import 'json_document_controller.dart';
 import 'json_formatter_page.dart';
 import 'json_initial_clipboard_import.dart';
 
-Future<void> runStandaloneJsonFormatter() async {
-  final settings = await SettingsStore.load();
+Future<void> runStandaloneJsonFormatter({bool prewarmed = false}) async {
+  final settingsFuture = SettingsStore.load();
   await windowManager.ensureInitialized();
-  await windowManager.setPreventClose(false);
-  final titleBarHeight = Platform.isWindows
+  final useCustomWindowsTitleBar = Platform.isWindows;
+  final titleBarHeight = useCustomWindowsTitleBar
       ? WindowsWindowTitleBar.height
       : 0.0;
   await windowManager.waitUntilReadyToShow(
@@ -26,15 +27,24 @@ Future<void> runStandaloneJsonFormatter() async {
       center: true,
       backgroundColor: Colors.transparent,
       title: 'JSON 格式化 - DevOrbit',
+      titleBarStyle: useCustomWindowsTitleBar
+          ? TitleBarStyle.hidden
+          : TitleBarStyle.normal,
+      windowButtonVisibility: !useCustomWindowsTitleBar,
     ),
   );
-  runApp(_StandaloneJsonFormatterApp(settings: settings));
+  final settings = await settingsFuture;
+  runApp(_StandaloneJsonFormatterApp(settings: settings, prewarmed: prewarmed));
 }
 
 class _StandaloneJsonFormatterApp extends StatefulWidget {
-  const _StandaloneJsonFormatterApp({required this.settings});
+  const _StandaloneJsonFormatterApp({
+    required this.settings,
+    required this.prewarmed,
+  });
 
   final SettingsStore settings;
+  final bool prewarmed;
 
   @override
   State<_StandaloneJsonFormatterApp> createState() =>
@@ -44,18 +54,22 @@ class _StandaloneJsonFormatterApp extends StatefulWidget {
 class _StandaloneJsonFormatterAppState
     extends State<_StandaloneJsonFormatterApp> {
   late final JsonDocumentController _controller;
+  late final StandaloneWindowActivation _windowActivation;
 
   @override
   void initState() {
     super.initState();
     _controller = JsonDocumentController();
+    _windowActivation = StandaloneWindowActivation(
+      prewarmed: widget.prewarmed,
+      onActivated: _importClipboard,
+    );
     WidgetsBinding.instance.addPostFrameCallback(
-      (_) => unawaited(_initializeWindow()),
+      (_) => unawaited(_windowActivation.initialize()),
     );
   }
 
-  Future<void> _initializeWindow() async {
-    await _showWindow();
+  Future<void> _importClipboard() async {
     if (!mounted) return;
     await importInitialClipboardJson(
       controller: _controller,
@@ -64,21 +78,9 @@ class _StandaloneJsonFormatterAppState
     );
   }
 
-  Future<void> _showWindow() async {
-    await windowManager.setResizable(true);
-    await windowManager.setAlwaysOnTop(false);
-    await windowManager.setSkipTaskbar(false);
-    final useCustomWindowsTitleBar = Platform.isWindows;
-    await windowManager.setTitleBarStyle(
-      useCustomWindowsTitleBar ? TitleBarStyle.hidden : TitleBarStyle.normal,
-      windowButtonVisibility: !useCustomWindowsTitleBar,
-    );
-    await windowManager.show();
-    await windowManager.focus();
-  }
-
   @override
   void dispose() {
+    _windowActivation.dispose();
     _controller.dispose();
     super.dispose();
   }

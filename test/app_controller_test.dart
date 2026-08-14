@@ -36,8 +36,25 @@ void main() {
 
     await fixture.controller.dismissRadial();
     expect(fixture.controller.mode, AppViewMode.hidden);
-    expect(fixture.shell.hideCount, 1);
+    expect(fixture.shell.radialHideCount, 1);
     expect(fixture.shell.toolWindowShows, 1);
+  });
+
+  test('warms standalone tools while the desktop shell initializes', () async {
+    final fixture = await _ControllerFixture.create();
+
+    await fixture.controller.initialize();
+
+    expect(fixture.launcher.warmUpCount, 1);
+  });
+
+  test('background startup hides without re-reading window bounds', () async {
+    final fixture = await _ControllerFixture.create();
+
+    await fixture.controller.afterFirstFrame(startHidden: true);
+
+    expect(fixture.shell.radialHideCount, 1);
+    expect(fixture.shell.hideCount, 0);
   });
 
   test('each radial JSON selection opens a standalone window', () async {
@@ -59,7 +76,7 @@ void main() {
       'json-formatter',
     ]);
     expect(fixture.controller.mode, AppViewMode.hidden);
-    expect(fixture.shell.hideCount, 2);
+    expect(fixture.shell.radialHideCount, 2);
   });
 
   test('radial hides before a standalone process finishes starting', () async {
@@ -76,8 +93,27 @@ void main() {
     await Future<void>.delayed(Duration.zero);
 
     expect(fixture.controller.mode, AppViewMode.hidden);
-    expect(fixture.shell.hideCount, 1);
+    expect(fixture.shell.radialHideCount, 1);
     launchCompleter.complete(true);
+    await opening;
+  });
+
+  test('standalone activation does not wait for radial hiding', () async {
+    final hideCompleter = Completer<void>();
+    final fixture = await _ControllerFixture.create(
+      modules: [_TestModule(id: 'json-formatter')],
+      onHideRadial: () => hideCompleter.future,
+    );
+
+    final opening = fixture.controller.openTool(
+      'json-formatter',
+      origin: ToolLaunchOrigin.radial,
+    );
+    await Future<void>.delayed(Duration.zero);
+
+    expect(fixture.launcher.openedToolIds, ['json-formatter']);
+    expect(fixture.shell.radialHideCount, 1);
+    hideCompleter.complete();
     await opening;
   });
 
@@ -112,6 +148,9 @@ void main() {
 }
 
 class _FailingDesktopShell implements DesktopShell {
+  @override
+  Future<void> hideRadial() async {}
+
   @override
   Future<void> hide() async {}
 
@@ -150,10 +189,11 @@ class _ControllerFixture {
   static Future<_ControllerFixture> create({
     List<ToolModule> modules = const [],
     _FakeStandaloneLauncher? launcher,
+    Future<void> Function()? onHideRadial,
   }) async {
     SharedPreferences.setMockInitialValues({});
     final settings = await SettingsStore.load();
-    final shell = _FakeDesktopShell();
+    final shell = _FakeDesktopShell(onHideRadial: onHideRadial);
     launcher ??= _FakeStandaloneLauncher();
     final controller = AppController(
       registry: ToolRegistry(modules),
@@ -172,6 +212,10 @@ class _FakeStandaloneLauncher implements StandaloneToolWindowLauncher {
   final Future<void> Function()? onCloseAll;
   final List<String> openedToolIds = [];
   int closeAllCount = 0;
+  int warmUpCount = 0;
+
+  @override
+  Future<void> warmUp() async => warmUpCount++;
 
   @override
   Future<void> closeAllTools() async {
@@ -188,13 +232,23 @@ class _FakeStandaloneLauncher implements StandaloneToolWindowLauncher {
 }
 
 class _FakeDesktopShell extends _FailingDesktopShell {
+  _FakeDesktopShell({this.onHideRadial});
+
+  final Future<void> Function()? onHideRadial;
   int hideCount = 0;
+  int radialHideCount = 0;
   int quitCount = 0;
   int toolWindowShows = 0;
   DesktopShellCallbacks? callbacks;
 
   @override
   Future<void> hide() async => hideCount++;
+
+  @override
+  Future<void> hideRadial() async {
+    radialHideCount++;
+    await onHideRadial?.call();
+  }
 
   @override
   Future<String?> initialize(

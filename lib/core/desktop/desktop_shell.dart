@@ -40,6 +40,7 @@ abstract interface class DesktopShell {
   Future<String?> initialize(DesktopShellCallbacks callbacks, HotKey hotKey);
   Future<void> showRadial();
   Future<void> showToolWindow({bool focus = true});
+  Future<void> hideRadial();
   Future<void> hide();
   Future<void> minimize();
   Future<void> quit();
@@ -195,6 +196,11 @@ class NativeDesktopShell
   Future<void> hide() async {
     if (await windowManager.isVisible()) await _rememberToolBounds();
     await windowManager.hide();
+  }
+
+  @override
+  Future<void> hideRadial() {
+    return windowManager.hide();
   }
 
   @override

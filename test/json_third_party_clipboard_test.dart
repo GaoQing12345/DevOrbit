@@ -61,6 +61,34 @@ void main() {
     },
   );
 
+  testWidgets(
+    'QuickClipboard double-click uses the first native clipboard update',
+    (tester) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+      final fixture = await JsonFormatterFixture.create(text: 'abcdef');
+      mockClipboard(tester, initialText: 'restored clipboard');
+      final nativeClipboard = mockClipboardRevision(tester);
+      await tester.pumpWidget(fixture.widget);
+      final editor = tester.widget<CodeEditor>(find.byType(CodeEditor));
+      editor.controller!.selection = const CodeLineSelection.collapsed(
+        index: 0,
+        offset: 3,
+      );
+
+      await _blurEditor(tester, editor.focusNode!);
+      nativeClipboard.pendingPasteText = 'QuickClipboard item';
+      nativeClipboard.revision += 2;
+      await _focusWindow(tester);
+      await tester.pump(const Duration(milliseconds: 200));
+
+      expect(fixture.controller.text, 'abcQuickClipboard itemdef');
+      await tester.pump(const Duration(milliseconds: 350));
+      await disposeEditor(tester);
+      debugDefaultTargetPlatformOverride = null;
+    },
+  );
+
   testWidgets('QuickClipboard paste restores the previous find cursor', (
     tester,
   ) async {

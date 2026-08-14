@@ -61,6 +61,11 @@ class MainFlutterWindow: NSWindow {
         let text = self?.pendingPasteText
         self?.pendingPasteText = nil
         result(text)
+      case "armPasteCapture":
+        result(nil)
+      case "discardPendingPasteText":
+        self?.pendingPasteText = nil
+        result(nil)
       default:
         result(FlutterMethodNotImplemented)
       }

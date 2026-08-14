@@ -121,6 +121,9 @@ class _FakeDesktopShell implements DesktopShell {
   int toolWindowShows = 0;
 
   @override
+  Future<void> hideRadial() async {}
+
+  @override
   Future<void> hide() async {}
 
   @override
@@ -151,6 +154,9 @@ class _FakeDesktopShell implements DesktopShell {
 }
 
 class _NoopStandaloneLauncher implements StandaloneToolWindowLauncher {
+  @override
+  Future<void> warmUp() async {}
+
   @override
   Future<void> closeAllTools() async {}
 

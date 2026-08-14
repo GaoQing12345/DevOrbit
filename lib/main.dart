@@ -19,15 +19,21 @@ import 'features/translator/translator_module.dart';
 Future<void> main(List<String> arguments) async {
   WidgetsFlutterBinding.ensureInitialized();
   if (arguments.contains(standaloneJsonFormatterFlag)) {
-    await runStandaloneJsonFormatter();
+    await runStandaloneJsonFormatter(
+      prewarmed: arguments.contains(standaloneJsonFormatterPrewarmFlag),
+    );
     return;
   }
   if (arguments.contains(standaloneTranslatorFlag)) {
-    await runStandaloneTranslator();
+    await runStandaloneTranslator(
+      prewarmed: arguments.contains(standaloneTranslatorPrewarmFlag),
+    );
     return;
   }
   if (arguments.contains(standaloneTextCompareFlag)) {
-    await runStandaloneTextCompare();
+    await runStandaloneTextCompare(
+      prewarmed: arguments.contains(standaloneTextComparePrewarmFlag),
+    );
     return;
   }
   await hotKeyManager.unregisterAll();

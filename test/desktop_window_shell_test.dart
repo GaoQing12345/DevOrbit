@@ -23,6 +23,26 @@ void main() {
     expect(closeCount, 1);
   });
 
+  testWidgets('Escape closes a desktop window without an editable focus', (
+    tester,
+  ) async {
+    var closeCount = 0;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: DesktopEscapeCloseRegion(
+          onClose: () async => closeCount++,
+          child: const Scaffold(body: SizedBox.expand()),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pump();
+
+    expect(closeCount, 1);
+  });
+
   testWidgets('Windows window controls are visible before hover', (
     tester,
   ) async {

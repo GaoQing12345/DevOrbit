@@ -15,6 +15,9 @@
 
 namespace {
 
+constexpr wchar_t kToolWindowReadyProperty[] =
+    L"DevOrbitToolWindowReady";
+
 struct WindowActivationRequest {
   DWORD process_id;
   bool found;
@@ -49,7 +52,11 @@ BOOL CALLBACK ActivateProcessWindow(HWND window, LPARAM parameter) {
   DWORD window_process_id = 0;
   GetWindowThreadProcessId(window, &window_process_id);
   if (window_process_id != request->process_id ||
-      GetWindow(window, GW_OWNER) != nullptr || !IsWindowVisible(window)) {
+      GetWindow(window, GW_OWNER) != nullptr) {
+    return TRUE;
+  }
+  if (!IsWindowVisible(window) &&
+      GetPropW(window, kToolWindowReadyProperty) == nullptr) {
     return TRUE;
   }
   request->found = true;
@@ -96,6 +103,10 @@ FlutterWindow::FlutterWindow(const flutter::DartProject& project)
 
 FlutterWindow::~FlutterWindow() {}
 
+void FlutterWindow::SetShowOnFirstFrame(bool show) {
+  show_on_first_frame_ = show;
+}
+
 void FlutterWindow::RegisterWindowEffectsChannel() {
   window_effects_channel_ =
       std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
@@ -133,10 +144,20 @@ void FlutterWindow::RegisterClipboardChannel() {
         if (call.method_name() == "takePendingPasteText") {
           if (pending_paste_text_) {
             result->Success(flutter::EncodableValue(*pending_paste_text_));
-            pending_paste_text_.reset();
           } else {
             result->Success();
           }
+          DiscardPendingPasteText();
+          return;
+        }
+        if (call.method_name() == "armPasteCapture") {
+          ArmPasteCapture();
+          result->Success();
+          return;
+        }
+        if (call.method_name() == "discardPendingPasteText") {
+          DiscardPendingPasteText();
+          result->Success();
           return;
         }
         result->NotImplemented();
@@ -235,7 +256,13 @@ void FlutterWindow::RegisterProcessWindowChannel() {
           "dev_orbit/process_window",
           &flutter::StandardMethodCodec::GetInstance());
   process_window_channel_->SetMethodCallHandler(
-      [](const auto& call, auto result) {
+      [this](const auto& call, auto result) {
+        if (call.method_name() == "markReadyForActivation") {
+          SetPropW(GetHandle(), kToolWindowReadyProperty,
+                   reinterpret_cast<HANDLE>(static_cast<INT_PTR>(1)));
+          result->Success();
+          return;
+        }
         if (call.method_name() != "activate" || !call.arguments() ||
             !std::holds_alternative<flutter::EncodableMap>(*call.arguments())) {
           result->NotImplemented();
@@ -289,10 +316,28 @@ void FlutterWindow::RegisterAppLifecycleChannel() {
       });
 }
 
-void FlutterWindow::CapturePendingPasteText() {
+void FlutterWindow::ArmPasteCapture() {
+  if (paste_capture_armed_) {
+    return;
+  }
+  paste_capture_armed_ = true;
+  pending_paste_text_.reset();
+}
+
+void FlutterWindow::DiscardPendingPasteText() {
+  paste_capture_armed_ = false;
+  pending_paste_text_.reset();
+}
+
+bool FlutterWindow::CapturePendingPasteText(bool preserve_existing) {
   constexpr int kClipboardOpenAttempts = 8;
   constexpr DWORD kClipboardRetryDelayMs = 5;
-  pending_paste_text_.reset();
+  if (preserve_existing && pending_paste_text_) {
+    return true;
+  }
+  if (!preserve_existing) {
+    pending_paste_text_.reset();
+  }
 
   for (int attempt = 0; attempt < kClipboardOpenAttempts; ++attempt) {
     if (OpenClipboard(GetHandle())) {
@@ -305,12 +350,13 @@ void FlutterWindow::CapturePendingPasteText() {
         }
       }
       CloseClipboard();
-      return;
+      return pending_paste_text_.has_value();
     }
     if (attempt + 1 < kClipboardOpenAttempts) {
       Sleep(kClipboardRetryDelayMs);
     }
   }
+  return false;
 }
 
 void FlutterWindow::SetRadialMode(bool enabled) {
@@ -357,10 +403,13 @@ bool FlutterWindow::OnCreate() {
   RegisterCredentialsChannel();
   RegisterProcessWindowChannel();
   RegisterAppLifecycleChannel();
+  AddClipboardFormatListener(GetHandle());
 
-  flutter_controller_->engine()->SetNextFrameCallback([&]() {
-    this->Show();
-  });
+  if (show_on_first_frame_) {
+    flutter_controller_->engine()->SetNextFrameCallback([this]() {
+      Show();
+    });
+  }
 
   // Flutter can complete the first frame before the "show window" callback is
   // registered. The following call ensures a frame is pending to ensure the
@@ -371,6 +420,8 @@ bool FlutterWindow::OnCreate() {
 }
 
 void FlutterWindow::OnDestroy() {
+  RemovePropW(GetHandle(), kToolWindowReadyProperty);
+  RemoveClipboardFormatListener(GetHandle());
   if (window_effects_channel_) {
     window_effects_channel_ = nullptr;
   }
@@ -399,7 +450,13 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
                               LPARAM const lparam) noexcept {
   if (message == WM_KEYDOWN && wparam == 'V' &&
       (GetKeyState(VK_CONTROL) & 0x8000) != 0) {
-    CapturePendingPasteText();
+    CapturePendingPasteText(paste_capture_armed_);
+  }
+  if (message == WM_CLIPBOARDUPDATE && paste_capture_armed_) {
+    CapturePendingPasteText(true);
+  }
+  if (message == WM_ACTIVATE && LOWORD(wparam) == WA_INACTIVE) {
+    ArmPasteCapture();
   }
 
   // Give Flutter, including plugins, an opportunity to handle window messages.

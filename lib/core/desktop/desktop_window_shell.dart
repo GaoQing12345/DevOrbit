@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:window_manager/window_manager.dart';
 
-class DesktopEscapeCloseRegion extends StatefulWidget {
+class DesktopEscapeCloseRegion extends StatelessWidget {
   const DesktopEscapeCloseRegion({
     super.key,
     required this.onClose,
@@ -16,34 +16,16 @@ class DesktopEscapeCloseRegion extends StatefulWidget {
   final Widget child;
 
   @override
-  State<DesktopEscapeCloseRegion> createState() =>
-      _DesktopEscapeCloseRegionState();
-}
-
-class _DesktopEscapeCloseRegionState extends State<DesktopEscapeCloseRegion> {
-  @override
-  void initState() {
-    super.initState();
-    HardwareKeyboard.instance.addHandler(_handleKeyEvent);
+  Widget build(BuildContext context) {
+    return CallbackShortcuts(
+      bindings: {
+        const SingleActivator(LogicalKeyboardKey.escape): () {
+          unawaited(onClose());
+        },
+      },
+      child: Focus(autofocus: true, child: child),
+    );
   }
-
-  @override
-  void dispose() {
-    HardwareKeyboard.instance.removeHandler(_handleKeyEvent);
-    super.dispose();
-  }
-
-  bool _handleKeyEvent(KeyEvent event) {
-    if (event is! KeyDownEvent ||
-        event.logicalKey != LogicalKeyboardKey.escape) {
-      return false;
-    }
-    unawaited(widget.onClose());
-    return true;
-  }
-
-  @override
-  Widget build(BuildContext context) => widget.child;
 }
 
 class StandaloneWindowShell extends StatelessWidget {
