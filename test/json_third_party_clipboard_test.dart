@@ -120,6 +120,62 @@ void main() {
     await disposeEditor(tester);
     debugDefaultTargetPlatformOverride = null;
   });
+
+  testWidgets(
+    'automatic paste never falls back to a restored system clipboard value',
+    (tester) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+      final fixture = await JsonFormatterFixture.create(text: 'abcdef');
+      final clipboard = mockClipboard(tester, initialText: 'old clipboard');
+      final nativeClipboard = mockClipboardRevision(tester);
+      await tester.pumpWidget(fixture.widget);
+      final editor = tester.widget<CodeEditor>(find.byType(CodeEditor));
+      editor.controller!.selection = const CodeLineSelection.collapsed(
+        index: 0,
+        offset: 3,
+      );
+
+      await _blurEditor(tester, editor.focusNode!);
+      clipboard.text = 'restored old value';
+      nativeClipboard.revision++;
+      await _focusWindow(tester);
+      await tester.pump(const Duration(milliseconds: 140));
+
+      expect(fixture.controller.text, 'abcdef');
+      await tester.pump(const Duration(milliseconds: 350));
+      await disposeEditor(tester);
+      debugDefaultTargetPlatformOverride = null;
+    },
+  );
+
+  testWidgets(
+    'a missed native capture never pastes the restored previous value',
+    (tester) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+      final fixture = await JsonFormatterFixture.create(text: 'abcdef');
+      mockClipboard(tester, initialText: 'restored previous value');
+      final nativeClipboard = mockClipboardRevision(tester);
+      await tester.pumpWidget(fixture.widget);
+      final editor = tester.widget<CodeEditor>(find.byType(CodeEditor));
+      editor.controller!.selection = const CodeLineSelection.collapsed(
+        index: 0,
+        offset: 3,
+      );
+
+      await _blurEditor(tester, editor.focusNode!);
+      nativeClipboard.observedChange = true;
+      await _focusWindow(tester);
+      await _pasteWithControl(tester);
+      await tester.pump(const Duration(milliseconds: 80));
+
+      expect(fixture.controller.text, 'abcdef');
+      await tester.pump(const Duration(milliseconds: 350));
+      await disposeEditor(tester);
+      debugDefaultTargetPlatformOverride = null;
+    },
+  );
 }
 
 Future<void> _blurEditor(WidgetTester tester, FocusNode focusNode) async {

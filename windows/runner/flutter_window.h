@@ -7,6 +7,7 @@
 #include <flutter/method_channel.h>
 
 #include <memory>
+#include <cstdint>
 #include <optional>
 #include <string>
 
@@ -34,9 +35,16 @@ class FlutterWindow : public Win32Window {
   void RegisterCredentialsChannel();
   void RegisterProcessWindowChannel();
   void RegisterAppLifecycleChannel();
-  void ArmPasteCapture();
-  void DiscardPendingPasteText();
-  bool CapturePendingPasteText(bool preserve_existing);
+  void BeginPasteCapture(std::optional<int64_t> session_id);
+  void ArmPasteCapture(int64_t session_id);
+  bool DidPasteCaptureObserveChange(int64_t session_id);
+  void DiscardPendingPasteText(int64_t session_id);
+  std::optional<std::string> TakePendingPasteText(int64_t session_id);
+  void HandleClipboardUpdate();
+  void RetryPendingPasteCapture();
+  bool CaptureObservedPasteText();
+  void InvalidatePasteCapture();
+  void ResetPasteCapture();
   void SetRadialMode(bool enabled);
 
   // The project to run.
@@ -55,7 +63,12 @@ class FlutterWindow : public Win32Window {
   std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>>
       app_lifecycle_channel_;
   std::optional<std::string> pending_paste_text_;
+  std::optional<int64_t> paste_capture_session_id_;
+  DWORD paste_capture_baseline_sequence_ = 0;
+  DWORD paste_capture_observed_sequence_ = 0;
+  int paste_capture_retry_count_ = 0;
   bool paste_capture_armed_ = false;
+  bool paste_capture_invalidated_ = false;
   bool show_on_first_frame_ = true;
 };
 

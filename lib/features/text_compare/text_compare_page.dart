@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:re_editor/re_editor.dart';
 
+import '../../core/desktop/desktop_clipboard_focus_restorer.dart';
 import 'text_compare_controller.dart';
 import 'text_compare_indicator.dart';
 import 'text_compare_models.dart';
@@ -23,12 +24,27 @@ class _TextComparePageState extends State<TextComparePage> {
   late final CodeLineEditingController _rightEditor;
   final _leftFocusNode = FocusNode();
   final _rightFocusNode = FocusNode();
+  late final DesktopClipboardFocusRestorer _focusRestorer;
 
   @override
   void initState() {
     super.initState();
     _leftEditor = _createEditor(TextCompareSide.left);
     _rightEditor = _createEditor(TextCompareSide.right);
+    _focusRestorer = DesktopClipboardFocusRestorer(
+      targets: [
+        CodeLineClipboardTarget(
+          controller: _leftEditor,
+          focusNode: _leftFocusNode,
+          onChanged: widget.controller.updateLeft,
+        ),
+        CodeLineClipboardTarget(
+          controller: _rightEditor,
+          focusNode: _rightFocusNode,
+          onChanged: widget.controller.updateRight,
+        ),
+      ],
+    );
     widget.controller.addListener(_syncFromController);
     _leftFocusNode.addListener(_handleFocusChange);
     _rightFocusNode.addListener(_handleFocusChange);
@@ -60,6 +76,7 @@ class _TextComparePageState extends State<TextComparePage> {
   @override
   void dispose() {
     widget.controller.removeListener(_syncFromController);
+    _focusRestorer.dispose();
     _leftFocusNode.removeListener(_handleFocusChange);
     _rightFocusNode.removeListener(_handleFocusChange);
     _leftEditor.dispose();
@@ -175,6 +192,7 @@ class _TextComparePageState extends State<TextComparePage> {
 
   @override
   Widget build(BuildContext context) {
+    _focusRestorer.active = Visibility.of(context);
     return CallbackShortcuts(
       bindings: {
         const SingleActivator(LogicalKeyboardKey.enter, meta: true):
@@ -206,6 +224,7 @@ class _TextComparePageState extends State<TextComparePage> {
                           editor: _leftEditor,
                           focusNode: _leftFocusNode,
                           emphasized: _leftFocusNode.hasFocus,
+                          onPaste: _focusRestorer.pasteFocusedTarget,
                           onChanged: (_) =>
                               widget.controller.updateLeft(_leftEditor.text),
                         ),
@@ -218,6 +237,7 @@ class _TextComparePageState extends State<TextComparePage> {
                           editor: _rightEditor,
                           focusNode: _rightFocusNode,
                           emphasized: _rightFocusNode.hasFocus,
+                          onPaste: _focusRestorer.pasteFocusedTarget,
                           onChanged: (_) =>
                               widget.controller.updateRight(_rightEditor.text),
                         ),
@@ -379,6 +399,7 @@ class _TextPane extends StatelessWidget {
     required this.editor,
     required this.focusNode,
     required this.emphasized,
+    required this.onPaste,
     required this.onChanged,
   });
 
@@ -387,6 +408,7 @@ class _TextPane extends StatelessWidget {
   final CodeLineEditingController editor;
   final FocusNode focusNode;
   final bool emphasized;
+  final VoidCallback onPaste;
   final ValueChanged<CodeLineEditingValue> onChanged;
 
   @override
@@ -455,6 +477,12 @@ class _TextPane extends StatelessWidget {
                 key: ValueKey('${side.name}-${controller.highlightRevision}'),
                 controller: editor,
                 focusNode: focusNode,
+                shortcutOverrideActions: {
+                  CodeShortcutPasteIntent:
+                      CallbackAction<CodeShortcutPasteIntent>(
+                        onInvoke: (_) => onPaste(),
+                      ),
+                },
                 autofocus: false,
                 wordWrap: false,
                 autocompleteSymbols: false,

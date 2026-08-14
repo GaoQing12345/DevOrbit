@@ -1,4 +1,4 @@
-import 'package:dev_orbit/features/json_formatter/json_clipboard_reader.dart';
+import 'package:dev_orbit/core/desktop/desktop_clipboard_reader.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -28,10 +28,50 @@ void main() {
         messenger.setMockMethodCallHandler(nativeChannel, null);
       });
 
-      final text = await const JsonClipboardReader().readPasteText();
+      final text = await const DesktopClipboardReader().readPasteText(
+        sessionId: 7,
+      );
 
       expect(text, 'QuickClipboard item');
       expect(systemClipboardReads, 0);
     },
   );
+
+  test('an old discard cannot clear a newer capture session', () async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    int? activeSession;
+    String? pendingText;
+    const nativeChannel = MethodChannel('dev_orbit/clipboard');
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(nativeChannel, (call) async {
+      final sessionId =
+          (call.arguments as Map<Object?, Object?>)['sessionId']! as int;
+      if (call.method == 'armPasteCapture') {
+        activeSession = sessionId;
+      } else if (call.method == 'discardPendingPasteText') {
+        if (activeSession == sessionId) {
+          activeSession = null;
+          pendingText = null;
+        }
+      } else if (call.method == 'takePendingPasteText' &&
+          activeSession == sessionId) {
+        final result = pendingText;
+        activeSession = null;
+        pendingText = null;
+        return result;
+      }
+      return null;
+    });
+    addTearDown(() => messenger.setMockMethodCallHandler(nativeChannel, null));
+    const reader = DesktopClipboardReader();
+
+    await reader.armPasteCapture(1);
+    await reader.armPasteCapture(2);
+    pendingText = 'current session';
+    await reader.discardPendingPasteText(1);
+
+    expect(await reader.readCapturedPasteText(2), 'current session');
+  });
 }

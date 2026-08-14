@@ -3,8 +3,13 @@ import 'package:dev_orbit/features/translator/deepl_api_key_store.dart';
 import 'package:dev_orbit/features/translator/deepl_translation_client.dart';
 import 'package:dev_orbit/features/translator/translator_controller.dart';
 import 'package:dev_orbit/features/translator/translator_page.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:window_manager/window_manager.dart';
+
+import 'support/json_formatter_fixture.dart';
 
 void main() {
   testWidgets('shows the translation workspace', (tester) async {
@@ -51,6 +56,54 @@ void main() {
     expect(find.byKey(const ValueKey('translator-source')), findsOneWidget);
     await tester.binding.setSurfaceSize(null);
   });
+
+  testWidgets('QuickClipboard inserts into the previous translation cursor', (
+    tester,
+  ) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    final controller = TranslatorController(
+      client: _NoopClient(),
+      keyStore: _MemoryApiKeyStore(),
+    );
+    addTearDown(controller.dispose);
+    mockClipboard(tester, initialText: 'restored clipboard');
+    final nativeClipboard = mockClipboardRevision(tester);
+    await tester.pumpWidget(
+      MaterialApp(home: TranslatorPage(controller: controller)),
+    );
+    await tester.pump();
+    final field = tester.widget<TextField>(
+      find.byKey(const ValueKey('translator-source')),
+    );
+    field.controller!.value = const TextEditingValue(
+      text: 'abcd',
+      selection: TextSelection.collapsed(offset: 2),
+    );
+    field.focusNode!.requestFocus();
+    await tester.pump();
+
+    await _sendWindowEvent('blur');
+    field.focusNode!.unfocus();
+    await tester.pump();
+    nativeClipboard.pendingPasteText = 'QuickClipboard';
+    await _sendWindowEvent('focus');
+    await tester.pump();
+
+    expect(field.controller!.text, 'abQuickClipboardcd');
+    expect(controller.sourceText, 'abQuickClipboardcd');
+    await tester.pumpWidget(const SizedBox.shrink());
+    debugDefaultTargetPlatformOverride = null;
+  });
+}
+
+Future<void> _sendWindowEvent(String eventName) async {
+  windowManager.hasListeners;
+  final message = const StandardMethodCodec().encodeMethodCall(
+    MethodCall('onEvent', {'eventName': eventName}),
+  );
+  await TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+      .handlePlatformMessage('window_manager', message, (_) {});
 }
 
 class _NoopClient implements TranslationClient {

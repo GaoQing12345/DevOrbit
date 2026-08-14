@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../core/desktop/desktop_clipboard_focus_restorer.dart';
 import 'translation_language.dart';
 import 'translator_controller.dart';
 
@@ -17,6 +18,7 @@ class TranslatorPage extends StatefulWidget {
 class _TranslatorPageState extends State<TranslatorPage> {
   late final TextEditingController _sourceController;
   final _sourceFocusNode = FocusNode();
+  late final DesktopClipboardFocusRestorer _focusRestorer;
   bool _initialized = false;
 
   @override
@@ -24,6 +26,15 @@ class _TranslatorPageState extends State<TranslatorPage> {
     super.initState();
     _sourceController = TextEditingController(
       text: widget.initialText ?? widget.controller.sourceText,
+    );
+    _focusRestorer = DesktopClipboardFocusRestorer(
+      targets: [
+        TextEditingClipboardTarget(
+          controller: _sourceController,
+          focusNode: _sourceFocusNode,
+          onChanged: widget.controller.updateSource,
+        ),
+      ],
     );
     widget.controller.addListener(_syncFromController);
     _sourceFocusNode.addListener(_handleFocusChange);
@@ -38,6 +49,7 @@ class _TranslatorPageState extends State<TranslatorPage> {
   @override
   void dispose() {
     widget.controller.removeListener(_syncFromController);
+    _focusRestorer.dispose();
     _sourceFocusNode.removeListener(_handleFocusChange);
     _sourceController.dispose();
     _sourceFocusNode.dispose();
@@ -84,6 +96,7 @@ class _TranslatorPageState extends State<TranslatorPage> {
 
   @override
   Widget build(BuildContext context) {
+    _focusRestorer.active = Visibility.of(context);
     final shortcuts = <ShortcutActivator, VoidCallback>{
       const SingleActivator(LogicalKeyboardKey.enter, meta: true):
           widget.controller.translate,
@@ -600,13 +613,30 @@ class _ApiKeyDialog extends StatefulWidget {
 
 class _ApiKeyDialogState extends State<_ApiKeyDialog> {
   final _keyController = TextEditingController();
+  final _keyFocusNode = FocusNode();
+  late final DesktopClipboardFocusRestorer _focusRestorer;
   bool _obscure = true;
   bool _saving = false;
   String? _error;
 
   @override
+  void initState() {
+    super.initState();
+    _focusRestorer = DesktopClipboardFocusRestorer(
+      targets: [
+        TextEditingClipboardTarget(
+          controller: _keyController,
+          focusNode: _keyFocusNode,
+        ),
+      ],
+    );
+  }
+
+  @override
   void dispose() {
+    _focusRestorer.dispose();
     _keyController.dispose();
+    _keyFocusNode.dispose();
     super.dispose();
   }
 
@@ -646,6 +676,7 @@ class _ApiKeyDialogState extends State<_ApiKeyDialog> {
             TextField(
               key: const ValueKey('deepl-api-key'),
               controller: _keyController,
+              focusNode: _keyFocusNode,
               autofocus: true,
               obscureText: _obscure,
               enableSuggestions: false,

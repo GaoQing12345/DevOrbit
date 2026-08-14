@@ -17,6 +17,9 @@ namespace {
 
 constexpr wchar_t kToolWindowReadyProperty[] =
     L"DevOrbitToolWindowReady";
+constexpr UINT_PTR kPasteCaptureRetryTimer = 0xD30B;
+constexpr UINT kPasteCaptureRetryDelayMs = 5;
+constexpr int kPasteCaptureMaxRetries = 8;
 
 struct WindowActivationRequest {
   DWORD process_id;
@@ -96,6 +99,26 @@ void TerminateSiblingProcesses() {
   CloseHandle(snapshot);
 }
 
+std::optional<int64_t> ClipboardSessionId(
+    const flutter::MethodCall<flutter::EncodableValue>& call) {
+  if (!call.arguments() ||
+      !std::holds_alternative<flutter::EncodableMap>(*call.arguments())) {
+    return std::nullopt;
+  }
+  const auto& args = std::get<flutter::EncodableMap>(*call.arguments());
+  const auto session_it = args.find(flutter::EncodableValue("sessionId"));
+  if (session_it == args.end()) {
+    return std::nullopt;
+  }
+  if (std::holds_alternative<int64_t>(session_it->second)) {
+    return std::get<int64_t>(session_it->second);
+  }
+  if (std::holds_alternative<int32_t>(session_it->second)) {
+    return static_cast<int64_t>(std::get<int32_t>(session_it->second));
+  }
+  return std::nullopt;
+}
+
 }  // namespace
 
 FlutterWindow::FlutterWindow(const flutter::DartProject& project)
@@ -142,21 +165,46 @@ void FlutterWindow::RegisterClipboardChannel() {
           return;
         }
         if (call.method_name() == "takePendingPasteText") {
-          if (pending_paste_text_) {
-            result->Success(flutter::EncodableValue(*pending_paste_text_));
+          const auto session_id = ClipboardSessionId(call);
+          if (!session_id) {
+            result->Error("invalid_arguments", "Missing clipboard session ID");
+            return;
+          }
+          const auto text = TakePendingPasteText(*session_id);
+          if (text) {
+            result->Success(flutter::EncodableValue(*text));
           } else {
             result->Success();
           }
-          DiscardPendingPasteText();
           return;
         }
         if (call.method_name() == "armPasteCapture") {
-          ArmPasteCapture();
+          const auto session_id = ClipboardSessionId(call);
+          if (!session_id) {
+            result->Error("invalid_arguments", "Missing clipboard session ID");
+            return;
+          }
+          ArmPasteCapture(*session_id);
           result->Success();
           return;
         }
+        if (call.method_name() == "didPasteCaptureObserveChange") {
+          const auto session_id = ClipboardSessionId(call);
+          if (!session_id) {
+            result->Error("invalid_arguments", "Missing clipboard session ID");
+            return;
+          }
+          result->Success(flutter::EncodableValue(
+              DidPasteCaptureObserveChange(*session_id)));
+          return;
+        }
         if (call.method_name() == "discardPendingPasteText") {
-          DiscardPendingPasteText();
+          const auto session_id = ClipboardSessionId(call);
+          if (!session_id) {
+            result->Error("invalid_arguments", "Missing clipboard session ID");
+            return;
+          }
+          DiscardPendingPasteText(*session_id);
           result->Success();
           return;
         }
@@ -316,47 +364,136 @@ void FlutterWindow::RegisterAppLifecycleChannel() {
       });
 }
 
-void FlutterWindow::ArmPasteCapture() {
+void FlutterWindow::BeginPasteCapture(std::optional<int64_t> session_id) {
+  ResetPasteCapture();
+  paste_capture_armed_ = true;
+  paste_capture_session_id_ = session_id;
+  paste_capture_baseline_sequence_ = GetClipboardSequenceNumber();
+}
+
+void FlutterWindow::ArmPasteCapture(int64_t session_id) {
   if (paste_capture_armed_) {
+    if (!paste_capture_session_id_) {
+      paste_capture_session_id_ = session_id;
+      HandleClipboardUpdate();
+      return;
+    }
+    if (*paste_capture_session_id_ == session_id) {
+      return;
+    }
+  }
+  BeginPasteCapture(session_id);
+}
+
+bool FlutterWindow::DidPasteCaptureObserveChange(int64_t session_id) {
+  if (!paste_capture_armed_ || !paste_capture_session_id_ ||
+      *paste_capture_session_id_ != session_id) {
+    return false;
+  }
+  HandleClipboardUpdate();
+  return paste_capture_invalidated_ ||
+         paste_capture_observed_sequence_ != 0;
+}
+
+void FlutterWindow::DiscardPendingPasteText(int64_t session_id) {
+  if (!paste_capture_session_id_ ||
+      *paste_capture_session_id_ != session_id) {
     return;
   }
-  paste_capture_armed_ = true;
-  pending_paste_text_.reset();
+  ResetPasteCapture();
 }
 
-void FlutterWindow::DiscardPendingPasteText() {
+std::optional<std::string> FlutterWindow::TakePendingPasteText(
+    int64_t session_id) {
+  if (!paste_capture_armed_ || !paste_capture_session_id_ ||
+      *paste_capture_session_id_ != session_id || !pending_paste_text_) {
+    return std::nullopt;
+  }
+  auto text = pending_paste_text_;
+  ResetPasteCapture();
+  return text;
+}
+
+void FlutterWindow::HandleClipboardUpdate() {
+  if (!paste_capture_armed_ || paste_capture_invalidated_ ||
+      pending_paste_text_) {
+    return;
+  }
+  const DWORD sequence = GetClipboardSequenceNumber();
+  if (sequence == paste_capture_baseline_sequence_) {
+    return;
+  }
+  if (paste_capture_observed_sequence_ == 0) {
+    if (sequence - paste_capture_baseline_sequence_ != 1) {
+      paste_capture_observed_sequence_ = sequence;
+      InvalidatePasteCapture();
+      return;
+    }
+    paste_capture_observed_sequence_ = sequence;
+  } else if (paste_capture_observed_sequence_ != sequence) {
+    InvalidatePasteCapture();
+    return;
+  }
+  if (!CaptureObservedPasteText()) {
+    RetryPendingPasteCapture();
+  }
+}
+
+void FlutterWindow::RetryPendingPasteCapture() {
+  if (!paste_capture_armed_ || paste_capture_invalidated_ ||
+      pending_paste_text_) {
+    return;
+  }
+  if (++paste_capture_retry_count_ > kPasteCaptureMaxRetries) {
+    InvalidatePasteCapture();
+    return;
+  }
+  SetTimer(GetHandle(), kPasteCaptureRetryTimer,
+           kPasteCaptureRetryDelayMs, nullptr);
+}
+
+bool FlutterWindow::CaptureObservedPasteText() {
+  if (!paste_capture_armed_ || paste_capture_invalidated_ ||
+      paste_capture_observed_sequence_ == 0 ||
+      GetClipboardSequenceNumber() != paste_capture_observed_sequence_) {
+    InvalidatePasteCapture();
+    return false;
+  }
+  if (!OpenClipboard(GetHandle())) {
+    return false;
+  }
+
+  HANDLE data = ::GetClipboardData(CF_UNICODETEXT);
+  if (data) {
+    const wchar_t* text = static_cast<const wchar_t*>(GlobalLock(data));
+    if (text) {
+      pending_paste_text_ = Utf8FromUtf16(text);
+      GlobalUnlock(data);
+    }
+  }
+  CloseClipboard();
+  if (pending_paste_text_) {
+    KillTimer(GetHandle(), kPasteCaptureRetryTimer);
+  }
+  return pending_paste_text_.has_value();
+}
+
+void FlutterWindow::InvalidatePasteCapture() {
+  KillTimer(GetHandle(), kPasteCaptureRetryTimer);
+  pending_paste_text_.reset();
+  paste_capture_retry_count_ = 0;
+  paste_capture_invalidated_ = true;
+}
+
+void FlutterWindow::ResetPasteCapture() {
+  KillTimer(GetHandle(), kPasteCaptureRetryTimer);
   paste_capture_armed_ = false;
   pending_paste_text_.reset();
-}
-
-bool FlutterWindow::CapturePendingPasteText(bool preserve_existing) {
-  constexpr int kClipboardOpenAttempts = 8;
-  constexpr DWORD kClipboardRetryDelayMs = 5;
-  if (preserve_existing && pending_paste_text_) {
-    return true;
-  }
-  if (!preserve_existing) {
-    pending_paste_text_.reset();
-  }
-
-  for (int attempt = 0; attempt < kClipboardOpenAttempts; ++attempt) {
-    if (OpenClipboard(GetHandle())) {
-      HANDLE data = ::GetClipboardData(CF_UNICODETEXT);
-      if (data) {
-        const wchar_t* text = static_cast<const wchar_t*>(GlobalLock(data));
-        if (text) {
-          pending_paste_text_ = Utf8FromUtf16(text);
-          GlobalUnlock(data);
-        }
-      }
-      CloseClipboard();
-      return pending_paste_text_.has_value();
-    }
-    if (attempt + 1 < kClipboardOpenAttempts) {
-      Sleep(kClipboardRetryDelayMs);
-    }
-  }
-  return false;
+  paste_capture_session_id_.reset();
+  paste_capture_baseline_sequence_ = 0;
+  paste_capture_observed_sequence_ = 0;
+  paste_capture_retry_count_ = 0;
+  paste_capture_invalidated_ = false;
 }
 
 void FlutterWindow::SetRadialMode(bool enabled) {
@@ -420,6 +557,7 @@ bool FlutterWindow::OnCreate() {
 }
 
 void FlutterWindow::OnDestroy() {
+  ResetPasteCapture();
   RemovePropW(GetHandle(), kToolWindowReadyProperty);
   RemoveClipboardFormatListener(GetHandle());
   if (window_effects_channel_) {
@@ -448,15 +586,20 @@ LRESULT
 FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
                               WPARAM const wparam,
                               LPARAM const lparam) noexcept {
-  if (message == WM_KEYDOWN && wparam == 'V' &&
-      (GetKeyState(VK_CONTROL) & 0x8000) != 0) {
-    CapturePendingPasteText(paste_capture_armed_);
-  }
   if (message == WM_CLIPBOARDUPDATE && paste_capture_armed_) {
-    CapturePendingPasteText(true);
+    HandleClipboardUpdate();
   }
   if (message == WM_ACTIVATE && LOWORD(wparam) == WA_INACTIVE) {
-    ArmPasteCapture();
+    if (!paste_capture_armed_ || !paste_capture_session_id_) {
+      BeginPasteCapture(std::nullopt);
+    }
+  }
+  if (message == WM_TIMER && wparam == kPasteCaptureRetryTimer) {
+    KillTimer(GetHandle(), kPasteCaptureRetryTimer);
+    if (!CaptureObservedPasteText()) {
+      RetryPendingPasteCapture();
+    }
+    return 0;
   }
 
   // Give Flutter, including plugins, an opportunity to handle window messages.

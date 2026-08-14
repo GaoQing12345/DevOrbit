@@ -145,22 +145,43 @@ class ClipboardRevisionState {
 
   int revision;
   String? pendingPasteText;
+  int? armedSessionId;
+  bool observedChange = false;
 
   Future<Object?> handleMethodCall(MethodCall call) async {
     if (call.method == 'getChangeCount') return revision;
     if (call.method == 'armPasteCapture') {
+      armedSessionId = _sessionId(call);
       pendingPasteText = null;
+      observedChange = false;
       return null;
     }
     if (call.method == 'discardPendingPasteText') {
-      pendingPasteText = null;
+      if (_sessionId(call) == armedSessionId) {
+        pendingPasteText = null;
+        armedSessionId = null;
+        observedChange = false;
+      }
       return null;
     }
+    if (call.method == 'didPasteCaptureObserveChange') {
+      return _sessionId(call) == armedSessionId &&
+          (observedChange || pendingPasteText != null);
+    }
     if (call.method == 'takePendingPasteText') {
+      if (_sessionId(call) != armedSessionId) return null;
       final text = pendingPasteText;
-      pendingPasteText = null;
+      if (text != null) {
+        pendingPasteText = null;
+        armedSessionId = null;
+        observedChange = false;
+      }
       return text;
     }
     return null;
+  }
+
+  int? _sessionId(MethodCall call) {
+    return (call.arguments as Map<Object?, Object?>?)?['sessionId'] as int?;
   }
 }

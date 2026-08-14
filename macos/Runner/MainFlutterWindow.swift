@@ -8,8 +8,14 @@ class MainFlutterWindow: NSWindow {
   private var credentialsChannel: FlutterMethodChannel?
   private var processWindowChannel: FlutterMethodChannel?
   private var appLifecycleChannel: FlutterMethodChannel?
-  private var pasteKeyMonitor: Any?
   private var pendingPasteText: String?
+  private var pasteCaptureSessionId: Int64?
+  private var pasteCaptureBaselineChangeCount = 0
+  private var pasteCaptureObservedChangeCount: Int?
+  private var pasteCaptureDeadline: Date?
+  private var pasteCaptureTimer: Timer?
+  private var pasteCaptureArmed = false
+  private var pasteCaptureInvalidated = false
 
   override func awakeFromNib() {
     let flutterViewController = FlutterViewController()
@@ -29,6 +35,13 @@ class MainFlutterWindow: NSWindow {
     registerAppLifecycleChannel(flutterViewController)
 
     super.awakeFromNib()
+  }
+
+  override func resignKey() {
+    if !pasteCaptureArmed || pasteCaptureSessionId == nil {
+      beginPasteCapture(sessionId: nil)
+    }
+    super.resignKey()
   }
 
   private func registerCursorChannel(_ controller: FlutterViewController) {
@@ -58,28 +71,145 @@ class MainFlutterWindow: NSWindow {
       case "getChangeCount":
         result(NSPasteboard.general.changeCount)
       case "takePendingPasteText":
-        let text = self?.pendingPasteText
-        self?.pendingPasteText = nil
-        result(text)
+        guard let sessionId = Self.clipboardSessionId(from: call) else {
+          result(FlutterError(code: "invalid_arguments", message: "Missing clipboard session ID", details: nil))
+          return
+        }
+        result(self?.takePendingPasteText(sessionId: sessionId))
       case "armPasteCapture":
+        guard let sessionId = Self.clipboardSessionId(from: call) else {
+          result(FlutterError(code: "invalid_arguments", message: "Missing clipboard session ID", details: nil))
+          return
+        }
+        self?.armPasteCapture(sessionId: sessionId)
         result(nil)
+      case "didPasteCaptureObserveChange":
+        guard let sessionId = Self.clipboardSessionId(from: call) else {
+          result(FlutterError(code: "invalid_arguments", message: "Missing clipboard session ID", details: nil))
+          return
+        }
+        result(self?.didPasteCaptureObserveChange(sessionId: sessionId) ?? false)
       case "discardPendingPasteText":
-        self?.pendingPasteText = nil
+        guard let sessionId = Self.clipboardSessionId(from: call) else {
+          result(FlutterError(code: "invalid_arguments", message: "Missing clipboard session ID", details: nil))
+          return
+        }
+        self?.discardPendingPasteText(sessionId: sessionId)
         result(nil)
       default:
         result(FlutterMethodNotImplemented)
       }
     }
     clipboardChannel = channel
-    pasteKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) {
-      [weak self] event in
-      let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-      if flags.contains(.command),
-         event.charactersIgnoringModifiers?.lowercased() == "v" {
-        self?.pendingPasteText = NSPasteboard.general.string(forType: .string)
-      }
-      return event
+  }
+
+  private static func clipboardSessionId(from call: FlutterMethodCall) -> Int64? {
+    guard let arguments = call.arguments as? [String: Any],
+          let value = arguments["sessionId"] as? NSNumber else {
+      return nil
     }
+    return value.int64Value
+  }
+
+  private func beginPasteCapture(sessionId: Int64?) {
+    resetPasteCapture()
+    let pasteboard = NSPasteboard.general
+    pasteCaptureArmed = true
+    pasteCaptureSessionId = sessionId
+    pasteCaptureBaselineChangeCount = pasteboard.changeCount
+    pasteCaptureDeadline = Date().addingTimeInterval(30)
+    let timer = Timer(timeInterval: 0.005, repeats: true) { [weak self] _ in
+      self?.pollPasteboard()
+    }
+    pasteCaptureTimer = timer
+    RunLoop.main.add(timer, forMode: .common)
+  }
+
+  private func armPasteCapture(sessionId: Int64) {
+    if pasteCaptureArmed {
+      if pasteCaptureSessionId == nil {
+        pasteCaptureSessionId = sessionId
+        pollPasteboard()
+        return
+      }
+      if pasteCaptureSessionId == sessionId {
+        return
+      }
+    }
+    beginPasteCapture(sessionId: sessionId)
+  }
+
+  private func pollPasteboard() {
+    guard pasteCaptureArmed, !pasteCaptureInvalidated else {
+      pasteCaptureTimer?.invalidate()
+      pasteCaptureTimer = nil
+      return
+    }
+    if let deadline = pasteCaptureDeadline, Date() >= deadline {
+      resetPasteCapture()
+      return
+    }
+    let pasteboard = NSPasteboard.general
+    let changeCount = pasteboard.changeCount
+    if let observed = pasteCaptureObservedChangeCount {
+      guard changeCount == observed else {
+        invalidatePasteCapture()
+        return
+      }
+    } else {
+      guard changeCount != pasteCaptureBaselineChangeCount else { return }
+      guard changeCount == pasteCaptureBaselineChangeCount + 1 else {
+        pasteCaptureObservedChangeCount = changeCount
+        invalidatePasteCapture()
+        return
+      }
+      pasteCaptureObservedChangeCount = changeCount
+    }
+    guard let text = pasteboard.string(forType: .string) else { return }
+    pendingPasteText = text
+    pasteCaptureTimer?.invalidate()
+    pasteCaptureTimer = nil
+  }
+
+  private func takePendingPasteText(sessionId: Int64) -> String? {
+    guard pasteCaptureArmed, !pasteCaptureInvalidated,
+          pasteCaptureSessionId == sessionId,
+          let text = pendingPasteText else {
+      return nil
+    }
+    resetPasteCapture()
+    return text
+  }
+
+  private func didPasteCaptureObserveChange(sessionId: Int64) -> Bool {
+    guard pasteCaptureArmed, pasteCaptureSessionId == sessionId else {
+      return false
+    }
+    pollPasteboard()
+    return pasteCaptureInvalidated || pasteCaptureObservedChangeCount != nil
+  }
+
+  private func discardPendingPasteText(sessionId: Int64) {
+    guard pasteCaptureSessionId == sessionId else { return }
+    resetPasteCapture()
+  }
+
+  private func invalidatePasteCapture() {
+    pasteCaptureTimer?.invalidate()
+    pasteCaptureTimer = nil
+    pendingPasteText = nil
+    pasteCaptureInvalidated = true
+  }
+
+  private func resetPasteCapture() {
+    pasteCaptureTimer?.invalidate()
+    pasteCaptureTimer = nil
+    pendingPasteText = nil
+    pasteCaptureSessionId = nil
+    pasteCaptureObservedChangeCount = nil
+    pasteCaptureDeadline = nil
+    pasteCaptureArmed = false
+    pasteCaptureInvalidated = false
   }
 
   private func registerCredentialsChannel(_ controller: FlutterViewController) {

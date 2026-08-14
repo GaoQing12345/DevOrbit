@@ -30,9 +30,10 @@ void main() {
     await tester.pump();
     editor.focusNode!.unfocus();
     clipboard.text = '-inserted-';
+    revision.pendingPasteText = '-inserted-';
     revision.revision++;
     await sendWindowEvent('focus');
-    await tester.pump(const Duration(milliseconds: 200));
+    await tester.pump(const Duration(milliseconds: 1));
     await tester.pump();
 
     expect(fixture.controller.text, 'abc-inserted-def');
@@ -69,6 +70,7 @@ void main() {
     await tester.pump();
     field.focusNode!.unfocus();
     clipboard.text = 'XX';
+    revision.pendingPasteText = 'XX';
     revision.revision++;
     await sendWindowEvent('focus');
     await tester.pump(const Duration(milliseconds: 200));
@@ -100,6 +102,7 @@ void main() {
     await sendWindowEvent('blur');
     await tester.pump();
     editor.focusNode!.unfocus();
+    revision.pendingPasteText = 'same';
     revision.revision++;
     await sendWindowEvent('focus');
     await tester.pump(const Duration(milliseconds: 200));
@@ -141,6 +144,7 @@ void main() {
     await tester.pump();
     field.focusNode!.unfocus();
     clipboard.text = 'YY';
+    revision.pendingPasteText = 'YY';
     revision.revision++;
     await sendWindowEvent('focus');
     await tester.pump(const Duration(milliseconds: 200));
@@ -168,6 +172,7 @@ void main() {
     await tester.pump();
     editor.focusNode!.unfocus();
     clipboard.text = 'X';
+    revision.pendingPasteText = 'X';
     revision.revision++;
     await sendWindowEvent('focus');
     await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
