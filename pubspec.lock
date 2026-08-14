@@ -272,6 +272,14 @@ packages:
       url: "https://pub.flutter-io.cn"
     source: hosted
     version: "4.12.0"
+  jsonrepair_dart:
+    dependency: "direct main"
+    description:
+      name: jsonrepair_dart
+      sha256: "2195bd52987c0f41bb53ef606c6f790da7e2052eed55a675dc9c34e4519798a1"
+      url: "https://pub.flutter-io.cn"
+    source: hosted
+    version: "0.1.2"
   launch_at_startup:
     dependency: "direct main"
     description:

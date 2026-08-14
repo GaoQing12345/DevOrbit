@@ -57,12 +57,14 @@ class JsonDocumentController extends ChangeNotifier {
       JsonTransformMode.format,
       indentSize: indentSize,
     );
-    if (!result.isValid) return false;
+    if (result.output == null) return false;
     _text = result.output!;
     _filePath = null;
     _isDirty = false;
-    _issue = null;
-    _status = JsonDocumentStatus.valid;
+    _issue = result.issue;
+    _status = result.isValid
+        ? JsonDocumentStatus.valid
+        : JsonDocumentStatus.invalid;
     _revision++;
     notifyListeners();
     return true;
@@ -83,6 +85,13 @@ class JsonDocumentController extends ChangeNotifier {
     }
     _isBusy = false;
     if (!result.isValid) {
+      if (mode != JsonTransformMode.validate &&
+          result.output != null &&
+          result.output != source) {
+        _text = result.output!;
+        _isDirty = true;
+        _revision++;
+      }
       _setIssue(result.issue!);
       return false;
     }

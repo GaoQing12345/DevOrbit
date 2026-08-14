@@ -15,7 +15,7 @@ class JsonFormatterModule implements ToolModule {
   ToolDescriptor get descriptor => const ToolDescriptor(
     id: 'json-formatter',
     title: 'JSON 格式化',
-    description: '校验、格式化、压缩并保存严格 JSON',
+    description: '修复、格式化、压缩并保存 JSON',
     icon: Icons.data_object_rounded,
     radialSlot: 0,
     accentColor: Color(0xFF22C7A9),
