@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../../app/app_theme.dart';
+import '../../core/desktop/desktop_window_shell.dart';
 import '../../core/desktop/process_window_activator.dart';
 import '../../core/desktop/single_instance_registry.dart';
 import '../../core/settings/settings_store.dart';
@@ -31,10 +32,13 @@ Future<void> runStandaloneTranslator() async {
   final settings = await SettingsStore.load();
   await windowManager.ensureInitialized();
   await windowManager.setPreventClose(false);
+  final titleBarHeight = Platform.isWindows
+      ? WindowsWindowTitleBar.height
+      : 0.0;
   await windowManager.waitUntilReadyToShow(
-    const WindowOptions(
-      size: Size(980, 700),
-      minimumSize: Size(720, 540),
+    WindowOptions(
+      size: Size(980, 700 + titleBarHeight),
+      minimumSize: Size(720, 540 + titleBarHeight),
       center: true,
       backgroundColor: Colors.transparent,
       title: '文本翻译 - DevOrbit',
@@ -89,9 +93,10 @@ class _StandaloneTranslatorAppState extends State<_StandaloneTranslatorApp> {
     await windowManager.setResizable(true);
     await windowManager.setAlwaysOnTop(false);
     await windowManager.setSkipTaskbar(false);
+    final useCustomWindowsTitleBar = Platform.isWindows;
     await windowManager.setTitleBarStyle(
-      TitleBarStyle.normal,
-      windowButtonVisibility: true,
+      useCustomWindowsTitleBar ? TitleBarStyle.hidden : TitleBarStyle.normal,
+      windowButtonVisibility: !useCustomWindowsTitleBar,
     );
     await windowManager.show();
     await windowManager.focus();
@@ -114,7 +119,10 @@ class _StandaloneTranslatorAppState extends State<_StandaloneTranslatorApp> {
         theme: AppTheme.light(),
         darkTheme: AppTheme.dark(),
         themeMode: widget.settings.value.themeMode,
-        home: Scaffold(body: TranslatorPage(controller: _controller)),
+        home: StandaloneWindowShell(
+          title: '文本翻译 - DevOrbit',
+          child: Scaffold(body: TranslatorPage(controller: _controller)),
+        ),
       ),
     );
   }

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../core/desktop/desktop_window_shell.dart';
 import '../core/modules/tool_registry.dart';
 import '../core/settings/settings_store.dart';
 import '../features/launcher/radial_launcher.dart';
@@ -48,10 +49,13 @@ class _DevOrbitAppState extends State<DevOrbitApp> {
           theme: AppTheme.light(),
           darkTheme: AppTheme.dark(),
           themeMode: widget.settings.value.themeMode,
-          home: _AppViewport(
-            controller: widget.controller,
-            registry: widget.registry,
-            settings: widget.settings,
+          home: DesktopEscapeCloseRegion(
+            onClose: widget.controller.hide,
+            child: _AppViewport(
+              controller: widget.controller,
+              registry: widget.registry,
+              settings: widget.settings,
+            ),
           ),
         );
       },

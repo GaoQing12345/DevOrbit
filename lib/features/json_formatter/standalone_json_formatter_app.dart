@@ -1,10 +1,12 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../../app/app_theme.dart';
+import '../../core/desktop/desktop_window_shell.dart';
 import '../../core/settings/settings_store.dart';
 import 'json_document_controller.dart';
 import 'json_formatter_page.dart';
@@ -14,10 +16,13 @@ Future<void> runStandaloneJsonFormatter() async {
   final settings = await SettingsStore.load();
   await windowManager.ensureInitialized();
   await windowManager.setPreventClose(false);
+  final titleBarHeight = Platform.isWindows
+      ? WindowsWindowTitleBar.height
+      : 0.0;
   await windowManager.waitUntilReadyToShow(
-    const WindowOptions(
-      size: Size(960, 700),
-      minimumSize: Size(720, 520),
+    WindowOptions(
+      size: Size(960, 700 + titleBarHeight),
+      minimumSize: Size(720, 520 + titleBarHeight),
       center: true,
       backgroundColor: Colors.transparent,
       title: 'JSON 格式化 - DevOrbit',
@@ -63,9 +68,10 @@ class _StandaloneJsonFormatterAppState
     await windowManager.setResizable(true);
     await windowManager.setAlwaysOnTop(false);
     await windowManager.setSkipTaskbar(false);
+    final useCustomWindowsTitleBar = Platform.isWindows;
     await windowManager.setTitleBarStyle(
-      TitleBarStyle.normal,
-      windowButtonVisibility: true,
+      useCustomWindowsTitleBar ? TitleBarStyle.hidden : TitleBarStyle.normal,
+      windowButtonVisibility: !useCustomWindowsTitleBar,
     );
     await windowManager.show();
     await windowManager.focus();
@@ -87,10 +93,13 @@ class _StandaloneJsonFormatterAppState
         theme: AppTheme.light(),
         darkTheme: AppTheme.dark(),
         themeMode: widget.settings.value.themeMode,
-        home: Scaffold(
-          body: JsonFormatterPage(
-            controller: _controller,
-            settings: widget.settings,
+        home: StandaloneWindowShell(
+          title: 'JSON 格式化 - DevOrbit',
+          child: Scaffold(
+            body: JsonFormatterPage(
+              controller: _controller,
+              settings: widget.settings,
+            ),
           ),
         ),
       ),

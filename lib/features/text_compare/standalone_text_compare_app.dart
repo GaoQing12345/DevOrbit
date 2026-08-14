@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../../app/app_theme.dart';
+import '../../core/desktop/desktop_window_shell.dart';
 import '../../core/desktop/process_window_activator.dart';
 import '../../core/desktop/single_instance_registry.dart';
 import '../../core/settings/settings_store.dart';
@@ -28,10 +29,13 @@ Future<void> runStandaloneTextCompare() async {
   final settings = await SettingsStore.load();
   await windowManager.ensureInitialized();
   await windowManager.setPreventClose(false);
+  final titleBarHeight = Platform.isWindows
+      ? WindowsWindowTitleBar.height
+      : 0.0;
   await windowManager.waitUntilReadyToShow(
-    const WindowOptions(
-      size: Size(1100, 720),
-      minimumSize: Size(820, 560),
+    WindowOptions(
+      size: Size(1100, 720 + titleBarHeight),
+      minimumSize: Size(820, 560 + titleBarHeight),
       center: true,
       backgroundColor: Colors.transparent,
       title: '文本比对 - DevOrbit',
@@ -70,9 +74,10 @@ class _StandaloneTextCompareAppState extends State<_StandaloneTextCompareApp> {
     await windowManager.setResizable(true);
     await windowManager.setAlwaysOnTop(false);
     await windowManager.setSkipTaskbar(false);
+    final useCustomWindowsTitleBar = Platform.isWindows;
     await windowManager.setTitleBarStyle(
-      TitleBarStyle.normal,
-      windowButtonVisibility: true,
+      useCustomWindowsTitleBar ? TitleBarStyle.hidden : TitleBarStyle.normal,
+      windowButtonVisibility: !useCustomWindowsTitleBar,
     );
     await windowManager.show();
     await windowManager.focus();
@@ -95,7 +100,10 @@ class _StandaloneTextCompareAppState extends State<_StandaloneTextCompareApp> {
         theme: AppTheme.light(),
         darkTheme: AppTheme.dark(),
         themeMode: widget.settings.value.themeMode,
-        home: Scaffold(body: TextComparePage(controller: _controller)),
+        home: StandaloneWindowShell(
+          title: '文本比对 - DevOrbit',
+          child: Scaffold(body: TextComparePage(controller: _controller)),
+        ),
       ),
     );
   }
