@@ -347,10 +347,4 @@ class MainFlutterWindow: NSWindow {
     let message = SecCopyErrorMessageString(status, nil) as String? ?? "Keychain error"
     return NSError(domain: NSOSStatusErrorDomain, code: Int(status), userInfo: [NSLocalizedDescriptionKey: message])
   }
-
-  deinit {
-    if let monitor = pasteKeyMonitor {
-      NSEvent.removeMonitor(monitor)
-    }
-  }
 }
