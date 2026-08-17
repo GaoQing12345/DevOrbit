@@ -24,9 +24,11 @@ void main() {
     );
 
     await _blurEditor(tester, editor.focusNode!);
+    final sessionId = nativeClipboard.armedSessionId!;
     nativeClipboard.pendingPasteText = 'iCopy item';
     await _focusWindow(tester);
-    await _pasteWithMeta(tester);
+    await _sendNativePasteRequested(sessionId);
+    await tester.pump();
 
     expect(fixture.controller.text, 'abciCopy itemdef');
     await tester.pump(const Duration(milliseconds: 350));
@@ -280,13 +282,6 @@ Future<void> _blurEditor(WidgetTester tester, FocusNode focusNode) async {
 
 Future<void> _focusWindow(WidgetTester tester) async {
   await _sendWindowEvent('focus');
-  await tester.pump();
-}
-
-Future<void> _pasteWithMeta(WidgetTester tester) async {
-  await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
-  await tester.sendKeyEvent(LogicalKeyboardKey.keyV);
-  await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
   await tester.pump();
 }
 

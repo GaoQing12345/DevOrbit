@@ -5,6 +5,7 @@ import Security
 class MainFlutterWindow: NSWindow {
   private var cursorChannel: FlutterMethodChannel?
   private var clipboardChannel: FlutterMethodChannel?
+  private var pasteKeyMonitor: Any?
   private var credentialsChannel: FlutterMethodChannel?
   private var processWindowChannel: FlutterMethodChannel?
   private var appLifecycleChannel: FlutterMethodChannel?
@@ -16,6 +17,8 @@ class MainFlutterWindow: NSWindow {
   private var pasteCaptureTimer: Timer?
   private var pasteCaptureArmed = false
   private var pasteCaptureInvalidated = false
+  private var pasteRequestPending = false
+  private var pasteRequestNotificationSent = false
 
   override func awakeFromNib() {
     let flutterViewController = FlutterViewController()
@@ -101,6 +104,25 @@ class MainFlutterWindow: NSWindow {
       }
     }
     clipboardChannel = channel
+    pasteKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) {
+      [weak self] event in
+      guard let self else { return event }
+      let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+      guard self.pasteCaptureArmed,
+            self.pasteCaptureSessionId != nil,
+            flags.contains(.command),
+            event.charactersIgnoringModifiers?.lowercased() == "v" else {
+        return event
+      }
+
+      // Clipboard managers such as iCopy restore the previous app and send a
+      // synthetic Command+V. Capture that request before Flutter can perform a
+      // second paste with a clipboard value restored by the clipboard manager.
+      self.pasteRequestPending = true
+      self.pollPasteboard()
+      self.notifyPasteRequestedIfReady()
+      return nil
+    }
   }
 
   private static func clipboardSessionId(from call: FlutterMethodCall) -> Int64? {
@@ -131,6 +153,7 @@ class MainFlutterWindow: NSWindow {
       if pasteCaptureSessionId == nil {
         pasteCaptureSessionId = sessionId
         pollPasteboard()
+        notifyPasteRequestedIfReady()
         return
       }
       if pasteCaptureSessionId == sessionId {
@@ -170,6 +193,18 @@ class MainFlutterWindow: NSWindow {
     pendingPasteText = text
     pasteCaptureTimer?.invalidate()
     pasteCaptureTimer = nil
+    notifyPasteRequestedIfReady()
+  }
+
+  private func notifyPasteRequestedIfReady() {
+    guard pasteRequestPending, !pasteRequestNotificationSent,
+          let sessionId = pasteCaptureSessionId,
+          pendingPasteText != nil,
+          let channel = clipboardChannel else {
+      return
+    }
+    pasteRequestNotificationSent = true
+    channel.invokeMethod("pasteRequested", arguments: ["sessionId": sessionId])
   }
 
   private func takePendingPasteText(sessionId: Int64) -> String? {
@@ -211,6 +246,8 @@ class MainFlutterWindow: NSWindow {
     pasteCaptureDeadline = nil
     pasteCaptureArmed = false
     pasteCaptureInvalidated = false
+    pasteRequestPending = false
+    pasteRequestNotificationSent = false
   }
 
   private func registerCredentialsChannel(_ controller: FlutterViewController) {
@@ -347,5 +384,11 @@ class MainFlutterWindow: NSWindow {
   private static func keychainError(_ status: OSStatus) -> NSError {
     let message = SecCopyErrorMessageString(status, nil) as String? ?? "Keychain error"
     return NSError(domain: NSOSStatusErrorDomain, code: Int(status), userInfo: [NSLocalizedDescriptionKey: message])
+  }
+
+  deinit {
+    if let monitor = pasteKeyMonitor {
+      NSEvent.removeMonitor(monitor)
+    }
   }
 }
