@@ -3,26 +3,46 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
+class DesktopPasteRequest {
+  const DesktopPasteRequest({this.sessionId, this.text});
+
+  final int? sessionId;
+  final String? text;
+}
+
 class DesktopClipboardReader {
   const DesktopClipboardReader();
 
   static const _channel = MethodChannel('dev_orbit/clipboard');
-  static final _pasteRequestSessions = StreamController<int>.broadcast(
-    sync: true,
-  );
+  static final _pasteRequests =
+      StreamController<DesktopPasteRequest>.broadcast(sync: true);
   static bool _pasteRequestHandlerInstalled = false;
 
-  Stream<int> get pasteRequestSessions {
+  Stream<DesktopPasteRequest> get pasteRequests {
     _installPasteRequestHandler();
-    return _pasteRequestSessions.stream;
+    return _pasteRequests.stream;
+  }
+
+  Future<void> registerPasteTarget() {
+    if (defaultTargetPlatform != TargetPlatform.macOS) {
+      return Future<void>.value();
+    }
+    return _invokeVoid('registerPasteTarget');
+  }
+
+  Future<void> unregisterPasteTarget() {
+    if (defaultTargetPlatform != TargetPlatform.macOS) {
+      return Future<void>.value();
+    }
+    return _invokeVoid('unregisterPasteTarget');
   }
 
   Future<void> armPasteCapture(int sessionId) {
-    return _invokeVoid('armPasteCapture', sessionId);
+    return _invokeVoid('armPasteCapture', sessionId: sessionId);
   }
 
   Future<void> discardPendingPasteText(int sessionId) {
-    return _invokeVoid('discardPendingPasteText', sessionId);
+    return _invokeVoid('discardPendingPasteText', sessionId: sessionId);
   }
 
   Future<String?> readCapturedPasteText(int sessionId) async {
@@ -82,14 +102,24 @@ class DesktopClipboardReader {
       final arguments = call.arguments;
       if (arguments is! Map) return;
       final sessionId = arguments['sessionId'];
-      if (sessionId is int) _pasteRequestSessions.add(sessionId);
+      final text = arguments['text'];
+      if (sessionId is! int && text is! String) return;
+      _pasteRequests.add(
+        DesktopPasteRequest(
+          sessionId: sessionId is int ? sessionId : null,
+          text: text is String ? text : null,
+        ),
+      );
     });
   }
 
-  Future<void> _invokeVoid(String method, int sessionId) async {
+  Future<void> _invokeVoid(String method, {int? sessionId}) async {
     if (!_usesNativeCapture) return;
     try {
-      await _channel.invokeMethod<void>(method, {'sessionId': sessionId});
+      await _channel.invokeMethod<void>(
+        method,
+        sessionId == null ? null : {'sessionId': sessionId},
+      );
     } on MissingPluginException {
       return;
     } on PlatformException {

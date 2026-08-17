@@ -142,9 +142,10 @@ class DesktopClipboardFocusRestorer with WindowListener {
     );
     windowManager.addListener(this);
     HardwareKeyboard.instance.addHandler(_handleKeyEvent);
-    _pasteRequestSubscription = _clipboardReader.pasteRequestSessions.listen(
+    _pasteRequestSubscription = _clipboardReader.pasteRequests.listen(
       _handleNativePasteRequest,
     );
+    unawaited(_clipboardReader.registerPasteTarget());
   }
 
   static const _clipboardSessionLimit = Duration(seconds: 30);
@@ -154,7 +155,7 @@ class DesktopClipboardFocusRestorer with WindowListener {
   final List<DesktopClipboardTarget> _targets;
   final _clipboardReader = const DesktopClipboardReader();
   late final AppLifecycleListener _lifecycle;
-  late final StreamSubscription<int> _pasteRequestSubscription;
+  late final StreamSubscription<DesktopPasteRequest> _pasteRequestSubscription;
   DesktopClipboardTarget? _lastTarget;
   _DesktopFocusSnapshot? _snapshot;
   bool _pasteFallbackArmed = false;
@@ -191,7 +192,9 @@ class DesktopClipboardFocusRestorer with WindowListener {
     return null;
   }
 
-  void _suspendFocus() {
+  void _suspendFocus() => _captureFocusSnapshot();
+
+  void _captureFocusSnapshot({bool armNative = true}) {
     if (!_active || _snapshot != null || _hasExternalEditableFocus()) return;
     final target = _focusedTarget() ?? _lastTarget;
     if (target == null || !target.isAvailable) return;
@@ -207,7 +210,9 @@ class DesktopClipboardFocusRestorer with WindowListener {
     _snapshot = snapshot;
     _pasteFallbackArmed = true;
     _resumedCaptureTimer?.cancel();
-    unawaited(_clipboardReader.armPasteCapture(sessionId));
+    if (armNative) {
+      unawaited(_clipboardReader.armPasteCapture(sessionId));
+    }
   }
 
   void _restoreFocus() {
@@ -235,9 +240,23 @@ class DesktopClipboardFocusRestorer with WindowListener {
     }
   }
 
-  void _handleNativePasteRequest(int sessionId) {
+  void _handleNativePasteRequest(DesktopPasteRequest request) {
+    if (_snapshot == null && request.text != null) {
+      _captureFocusSnapshot(armNative: false);
+    }
     final snapshot = _snapshot;
-    if (snapshot == null || snapshot.sessionId != sessionId) return;
+    if (snapshot == null) return;
+    final sessionId = request.sessionId;
+    if (sessionId != null && snapshot.sessionId != sessionId) return;
+    final text = request.text;
+    if (text != null) {
+      if (text.isEmpty || !_canPaste(snapshot)) return;
+      _pasteFallbackArmed = false;
+      _restoreSelection(snapshot);
+      _requestFocus(snapshot.target);
+      _pasteText(snapshot, text, suppressFollowUpPaste: true);
+      return;
+    }
     unawaited(_pasteExplicitClipboard(snapshot, suppressFollowUpPaste: true));
   }
 
@@ -451,6 +470,7 @@ class DesktopClipboardFocusRestorer with WindowListener {
     _disposed = true;
     _cancelRestore();
     _pasteRequestSubscription.cancel();
+    unawaited(_clipboardReader.unregisterPasteTarget());
     HardwareKeyboard.instance.removeHandler(_handleKeyEvent);
     windowManager.removeListener(this);
     for (final target in _targets) {
