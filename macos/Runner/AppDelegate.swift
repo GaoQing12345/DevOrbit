@@ -7,7 +7,9 @@ class AppDelegate: FlutterAppDelegate {
     let arguments = ProcessInfo.processInfo.arguments
     return arguments.contains("--json-formatter-window") ||
       arguments.contains("--translator-window") ||
-      arguments.contains("--text-compare-window")
+      arguments.contains("--text-compare-window") ||
+      arguments.contains("--timestamp-window") ||
+      arguments.contains("--sql-log-window")
   }
 
   override func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {

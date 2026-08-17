@@ -9,8 +9,9 @@ class StandaloneWindowActivation with WindowListener {
   StandaloneWindowActivation({
     required this.prewarmed,
     required this.onActivated,
+    this.reactivateAfterClose = false,
   }) {
-    if (prewarmed) windowManager.addListener(this);
+    if (_listensToWindow) windowManager.addListener(this);
   }
 
   static const _processWindowChannel = MethodChannel(
@@ -19,16 +20,17 @@ class StandaloneWindowActivation with WindowListener {
 
   final bool prewarmed;
   final StandaloneWindowActivated onActivated;
+  final bool reactivateAfterClose;
   bool _activating = false;
   bool _activated = false;
   bool _disposed = false;
 
+  bool get _listensToWindow => prewarmed || reactivateAfterClose;
+
   Future<void> initialize() async {
     if (_disposed) return;
-    if (prewarmed) {
-      await _markReadyForActivation();
-      return;
-    }
+    await _markReadyForActivation();
+    if (prewarmed) return;
     await _activateWindow();
   }
 
@@ -59,13 +61,18 @@ class StandaloneWindowActivation with WindowListener {
 
   @override
   void onWindowFocus() {
-    if (prewarmed) {
+    if (_listensToWindow) {
       unawaited(_activateWindow(alreadyShownAndFocused: true));
     }
   }
 
+  @override
+  void onWindowClose() {
+    if (reactivateAfterClose) _activated = false;
+  }
+
   void dispose() {
     _disposed = true;
-    if (prewarmed) windowManager.removeListener(this);
+    if (_listensToWindow) windowManager.removeListener(this);
   }
 }

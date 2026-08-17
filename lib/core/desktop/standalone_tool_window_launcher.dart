@@ -3,8 +3,10 @@ import 'dart:io';
 
 import 'package:flutter/services.dart';
 
+import '../../features/sql_log/standalone_sql_log_constants.dart';
 import '../../features/translator/standalone_translator_constants.dart';
 import '../../features/text_compare/standalone_text_compare_constants.dart';
+import '../../features/timestamp/standalone_timestamp_constants.dart';
 import 'process_window_activator.dart';
 import 'single_instance_registry.dart';
 
@@ -29,6 +31,8 @@ class NativeStandaloneToolWindowLauncher
     ProcessWindowActivator? windowActivator,
     SingleInstanceRegistry? translatorInstanceRegistry,
     SingleInstanceRegistry? textCompareInstanceRegistry,
+    SingleInstanceRegistry? timestampInstanceRegistry,
+    SingleInstanceRegistry? sqlLogInstanceRegistry,
     String? executable,
     bool? enableToolPrewarming,
   }) : _processStarter = processStarter ?? _startDetached,
@@ -40,18 +44,28 @@ class NativeStandaloneToolWindowLauncher
        _textCompareInstanceRegistry =
            textCompareInstanceRegistry ??
            FileSingleInstanceRegistry(textCompareInstanceName),
+       _timestampInstanceRegistry =
+           timestampInstanceRegistry ??
+           FileSingleInstanceRegistry(timestampInstanceName),
+       _sqlLogInstanceRegistry =
+           sqlLogInstanceRegistry ??
+           FileSingleInstanceRegistry(sqlLogInstanceName),
        _executable = executable ?? Platform.resolvedExecutable,
        _enableToolPrewarming = enableToolPrewarming ?? Platform.isWindows;
 
   static const jsonFormatterId = 'json-formatter';
   static const translatorId = 'translator';
   static const textCompareId = 'text-compare';
+  static const timestampId = 'timestamp-converter';
+  static const sqlLogId = 'sql-log-converter';
 
   final DetachedProcessStarter _processStarter;
   final ProcessTerminator _processTerminator;
   final ProcessWindowActivator _windowActivator;
   final SingleInstanceRegistry _translatorInstanceRegistry;
   final SingleInstanceRegistry _textCompareInstanceRegistry;
+  final SingleInstanceRegistry _timestampInstanceRegistry;
+  final SingleInstanceRegistry _sqlLogInstanceRegistry;
   final String _executable;
   final bool _enableToolPrewarming;
   final Map<String, int> _singletonProcessIds = {};
@@ -72,18 +86,32 @@ class NativeStandaloneToolWindowLauncher
         prewarmFlag: standaloneJsonFormatterPrewarmFlag,
       ),
       _warmUpToolAfterDelay(
-        delay: const Duration(milliseconds: 120),
+        delay: const Duration(milliseconds: 80),
         toolId: translatorId,
         flag: standaloneTranslatorFlag,
         prewarmFlag: standaloneTranslatorPrewarmFlag,
         registry: _translatorInstanceRegistry,
       ),
       _warmUpToolAfterDelay(
-        delay: const Duration(milliseconds: 240),
+        delay: const Duration(milliseconds: 160),
         toolId: textCompareId,
         flag: standaloneTextCompareFlag,
         prewarmFlag: standaloneTextComparePrewarmFlag,
         registry: _textCompareInstanceRegistry,
+      ),
+      _warmUpToolAfterDelay(
+        delay: const Duration(milliseconds: 240),
+        toolId: timestampId,
+        flag: standaloneTimestampFlag,
+        prewarmFlag: standaloneTimestampPrewarmFlag,
+        registry: _timestampInstanceRegistry,
+      ),
+      _warmUpToolAfterDelay(
+        delay: const Duration(milliseconds: 320),
+        toolId: sqlLogId,
+        flag: standaloneSqlLogFlag,
+        prewarmFlag: standaloneSqlLogPrewarmFlag,
+        registry: _sqlLogInstanceRegistry,
       ),
     ]);
   }
@@ -108,6 +136,20 @@ class NativeStandaloneToolWindowLauncher
             flag: standaloneTextCompareFlag,
             prewarmFlag: standaloneTextComparePrewarmFlag,
             registry: _textCompareInstanceRegistry,
+          );
+        case timestampId:
+          return await _openSingleton(
+            toolId: timestampId,
+            flag: standaloneTimestampFlag,
+            prewarmFlag: standaloneTimestampPrewarmFlag,
+            registry: _timestampInstanceRegistry,
+          );
+        case sqlLogId:
+          return await _openSingleton(
+            toolId: sqlLogId,
+            flag: standaloneSqlLogFlag,
+            prewarmFlag: standaloneSqlLogPrewarmFlag,
+            registry: _sqlLogInstanceRegistry,
           );
         default:
           return false;
@@ -225,7 +267,7 @@ class NativeStandaloneToolWindowLauncher
 
   Future<bool> _activateWithRetry(int processId) async {
     const retryDelay = Duration(milliseconds: 25);
-    const attempts = 20;
+    const attempts = 60;
     for (var attempt = 0; attempt < attempts && !_closing; attempt++) {
       if (await _activate(processId)) return true;
       if (attempt + 1 < attempts) await Future<void>.delayed(retryDelay);
@@ -341,6 +383,8 @@ class NativeStandaloneToolWindowLauncher
     }
     await _trackRegisteredProcess(_translatorInstanceRegistry);
     await _trackRegisteredProcess(_textCompareInstanceRegistry);
+    await _trackRegisteredProcess(_timestampInstanceRegistry);
+    await _trackRegisteredProcess(_sqlLogInstanceRegistry);
     final processIds = _processIds.toList();
     _processIds.clear();
     _singletonProcessIds.clear();

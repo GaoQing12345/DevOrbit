@@ -549,6 +549,14 @@ packages:
       url: "https://pub.flutter-io.cn"
     source: hosted
     version: "1.10.2"
+  sql_formatter:
+    dependency: "direct main"
+    description:
+      name: sql_formatter
+      sha256: "7980ea577cdeaeb4a896e34b6b78c727fbc71e80bd0055c25dcf91033d524acd"
+      url: "https://pub.flutter-io.cn"
+    source: hosted
+    version: "0.1.0"
   stack_trace:
     dependency: transitive
     description:

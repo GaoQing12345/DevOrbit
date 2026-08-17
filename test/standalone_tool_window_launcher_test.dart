@@ -3,7 +3,9 @@ import 'dart:async';
 import 'package:dev_orbit/core/desktop/process_window_activator.dart';
 import 'package:dev_orbit/core/desktop/single_instance_registry.dart';
 import 'package:dev_orbit/core/desktop/standalone_tool_window_launcher.dart';
+import 'package:dev_orbit/features/sql_log/standalone_sql_log_constants.dart';
 import 'package:dev_orbit/features/text_compare/standalone_text_compare_constants.dart';
+import 'package:dev_orbit/features/timestamp/standalone_timestamp_constants.dart';
 import 'package:dev_orbit/features/translator/standalone_translator_constants.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -35,7 +37,9 @@ void main() {
   test('prewarms and activates every Windows tool', () async {
     final calls = <(String, List<String>)>[];
     var nextProcessId = 901;
-    final activator = _FakeWindowActivator(activeProcessIds: {901, 902, 903});
+    final activator = _FakeWindowActivator(
+      activeProcessIds: {901, 902, 903, 904, 905},
+    );
     final launcher = NativeStandaloneToolWindowLauncher(
       executable: 'DevOrbit.exe',
       enableToolPrewarming: true,
@@ -46,6 +50,9 @@ void main() {
       processTerminator: (_) => true,
       windowActivator: activator,
       translatorInstanceRegistry: _FakeSingleInstanceRegistry(),
+      textCompareInstanceRegistry: _FakeSingleInstanceRegistry(),
+      timestampInstanceRegistry: _FakeSingleInstanceRegistry(),
+      sqlLogInstanceRegistry: _FakeSingleInstanceRegistry(),
     );
 
     await launcher.warmUp();
@@ -53,19 +60,23 @@ void main() {
       [standaloneJsonFormatterFlag, standaloneJsonFormatterPrewarmFlag],
       [standaloneTranslatorFlag, standaloneTranslatorPrewarmFlag],
       [standaloneTextCompareFlag, standaloneTextComparePrewarmFlag],
+      [standaloneTimestampFlag, standaloneTimestampPrewarmFlag],
+      [standaloneSqlLogFlag, standaloneSqlLogPrewarmFlag],
     ]);
 
     expect(await launcher.openTool('json-formatter'), isTrue);
     await Future<void>.delayed(Duration.zero);
     expect(await launcher.openTool('translator'), isTrue);
     expect(await launcher.openTool('text-compare'), isTrue);
+    expect(await launcher.openTool('timestamp-converter'), isTrue);
+    expect(await launcher.openTool('sql-log-converter'), isTrue);
 
-    expect(calls, hasLength(4));
-    expect(calls.last.$2, [
+    expect(calls, hasLength(6));
+    expect(calls[5].$2, [
       standaloneJsonFormatterFlag,
       standaloneJsonFormatterPrewarmFlag,
     ]);
-    expect(activator.processIds, [901, 902, 903]);
+    expect(activator.processIds, [901, 902, 903, 904, 905]);
   });
 
   test('reuses the existing standalone translator window', () async {
@@ -194,6 +205,104 @@ void main() {
     expect(launchCount, 1);
   });
 
+  test('reuses the existing standalone timestamp window', () async {
+    final calls = <(String, List<String>)>[];
+    final activator = _FakeWindowActivator(activeProcessIds: {691});
+    final launcher = NativeStandaloneToolWindowLauncher(
+      executable: '/Applications/DevOrbit',
+      enableToolPrewarming: false,
+      processStarter: (executable, arguments) async {
+        calls.add((executable, arguments));
+        return 691;
+      },
+      windowActivator: activator,
+      translatorInstanceRegistry: _FakeSingleInstanceRegistry(),
+      textCompareInstanceRegistry: _FakeSingleInstanceRegistry(),
+      timestampInstanceRegistry: _FakeSingleInstanceRegistry(),
+      sqlLogInstanceRegistry: _FakeSingleInstanceRegistry(),
+    );
+
+    expect(await launcher.openTool('timestamp-converter'), isTrue);
+    expect(await launcher.openTool('timestamp-converter'), isTrue);
+    expect(calls, hasLength(1));
+    expect(calls.single.$2, [standaloneTimestampFlag]);
+    expect(activator.processIds, [691]);
+  });
+
+  test('coalesces concurrent timestamp launch requests', () async {
+    final launchCompleter = Completer<int>();
+    var launchCount = 0;
+    final launcher = NativeStandaloneToolWindowLauncher(
+      enableToolPrewarming: false,
+      processStarter: (_, _) {
+        launchCount++;
+        return launchCompleter.future;
+      },
+      windowActivator: _FakeWindowActivator(activeProcessIds: {694}),
+      translatorInstanceRegistry: _FakeSingleInstanceRegistry(),
+      textCompareInstanceRegistry: _FakeSingleInstanceRegistry(),
+      timestampInstanceRegistry: _FakeSingleInstanceRegistry(),
+      sqlLogInstanceRegistry: _FakeSingleInstanceRegistry(),
+    );
+
+    final first = launcher.openTool('timestamp-converter');
+    final second = launcher.openTool('timestamp-converter');
+    launchCompleter.complete(694);
+
+    expect(await first, isTrue);
+    expect(await second, isTrue);
+    expect(launchCount, 1);
+  });
+
+  test('reuses the existing standalone SQL log window', () async {
+    final calls = <(String, List<String>)>[];
+    final activator = _FakeWindowActivator(activeProcessIds: {696});
+    final launcher = NativeStandaloneToolWindowLauncher(
+      executable: '/Applications/DevOrbit',
+      enableToolPrewarming: false,
+      processStarter: (executable, arguments) async {
+        calls.add((executable, arguments));
+        return 696;
+      },
+      windowActivator: activator,
+      translatorInstanceRegistry: _FakeSingleInstanceRegistry(),
+      textCompareInstanceRegistry: _FakeSingleInstanceRegistry(),
+      timestampInstanceRegistry: _FakeSingleInstanceRegistry(),
+      sqlLogInstanceRegistry: _FakeSingleInstanceRegistry(),
+    );
+
+    expect(await launcher.openTool('sql-log-converter'), isTrue);
+    expect(await launcher.openTool('sql-log-converter'), isTrue);
+    expect(calls, hasLength(1));
+    expect(calls.single.$2, [standaloneSqlLogFlag]);
+    expect(activator.processIds, [696]);
+  });
+
+  test('coalesces concurrent SQL log launch requests', () async {
+    final launchCompleter = Completer<int>();
+    var launchCount = 0;
+    final launcher = NativeStandaloneToolWindowLauncher(
+      enableToolPrewarming: false,
+      processStarter: (_, _) {
+        launchCount++;
+        return launchCompleter.future;
+      },
+      windowActivator: _FakeWindowActivator(activeProcessIds: {698}),
+      translatorInstanceRegistry: _FakeSingleInstanceRegistry(),
+      textCompareInstanceRegistry: _FakeSingleInstanceRegistry(),
+      timestampInstanceRegistry: _FakeSingleInstanceRegistry(),
+      sqlLogInstanceRegistry: _FakeSingleInstanceRegistry(),
+    );
+
+    final first = launcher.openTool('sql-log-converter');
+    final second = launcher.openTool('sql-log-converter');
+    launchCompleter.complete(698);
+
+    expect(await first, isTrue);
+    expect(await second, isTrue);
+    expect(launchCount, 1);
+  });
+
   test('closes every standalone process started by this launcher', () async {
     var nextProcessId = 701;
     final terminated = <int>[];
@@ -207,6 +316,8 @@ void main() {
       windowActivator: _FakeWindowActivator(),
       translatorInstanceRegistry: _FakeSingleInstanceRegistry(),
       textCompareInstanceRegistry: _FakeSingleInstanceRegistry(),
+      timestampInstanceRegistry: _FakeSingleInstanceRegistry(),
+      sqlLogInstanceRegistry: _FakeSingleInstanceRegistry(),
     );
 
     await launcher.openTool('json-formatter');
@@ -230,12 +341,14 @@ void main() {
       windowActivator: _FakeWindowActivator(),
       translatorInstanceRegistry: _FakeSingleInstanceRegistry(),
       textCompareInstanceRegistry: _FakeSingleInstanceRegistry(),
+      timestampInstanceRegistry: _FakeSingleInstanceRegistry(),
+      sqlLogInstanceRegistry: _FakeSingleInstanceRegistry(),
     );
 
     await launcher.warmUp();
     await launcher.closeAllTools();
 
-    expect(terminated, [751, 752, 753]);
+    expect(terminated, [751, 752, 753, 754, 755]);
   });
 
   test('quit cancels tool prewarming that has not started yet', () async {
@@ -257,6 +370,8 @@ void main() {
       windowActivator: _FakeWindowActivator(),
       translatorInstanceRegistry: _FakeSingleInstanceRegistry(),
       textCompareInstanceRegistry: _FakeSingleInstanceRegistry(),
+      timestampInstanceRegistry: _FakeSingleInstanceRegistry(),
+      sqlLogInstanceRegistry: _FakeSingleInstanceRegistry(),
     );
 
     final warming = launcher.warmUp();
@@ -285,6 +400,8 @@ void main() {
         windowActivator: _FakeWindowActivator(),
         translatorInstanceRegistry: _FakeSingleInstanceRegistry(),
         textCompareInstanceRegistry: _FakeSingleInstanceRegistry(),
+        timestampInstanceRegistry: _FakeSingleInstanceRegistry(),
+        sqlLogInstanceRegistry: _FakeSingleInstanceRegistry(),
       );
 
       final opening = launcher.openTool('json-formatter');

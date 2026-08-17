@@ -63,12 +63,37 @@ void main() {
 
     await activation.initialize();
 
+    expect(processWindowCalls.map((call) => call.method), [
+      'markReadyForActivation',
+    ]);
     expect(windowCalls.map((call) => call.method), [
       'isMinimized',
       'show',
       'focus',
     ]);
     expect(activationCount, 1);
+    activation.dispose();
+  });
+
+  test('reusable window runs activation work again only after close', () async {
+    var activationCount = 0;
+    final activation = StandaloneWindowActivation(
+      prewarmed: true,
+      reactivateAfterClose: true,
+      onActivated: () async => activationCount++,
+    );
+
+    await activation.initialize();
+    activation.onWindowFocus();
+    await Future<void>.delayed(Duration.zero);
+    activation.onWindowFocus();
+    await Future<void>.delayed(Duration.zero);
+    expect(activationCount, 1);
+
+    activation.onWindowClose();
+    activation.onWindowFocus();
+    await Future<void>.delayed(Duration.zero);
+    expect(activationCount, 2);
     activation.dispose();
   });
 }

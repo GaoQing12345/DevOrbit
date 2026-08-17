@@ -52,6 +52,10 @@ class Win32Window {
   // If true, closing this window will quit the application.
   void SetQuitOnClose(bool quit_on_close);
 
+  // If true, a close request hides the reusable window instead of destroying
+  // it.
+  void SetHideOnClose(bool hide_on_close);
+
   // Return a RECT representing the bounds of the current client area.
   RECT GetClientArea();
 
@@ -91,6 +95,7 @@ class Win32Window {
   static void UpdateTheme(HWND const window);
 
   bool quit_on_close_ = false;
+  bool hide_on_close_ = false;
 
   // window handle for top level window.
   HWND window_handle_ = nullptr;

@@ -19,7 +19,11 @@ constexpr wchar_t kToolWindowReadyProperty[] =
     L"DevOrbitToolWindowReady";
 constexpr UINT_PTR kPasteCaptureRetryTimer = 0xD30B;
 constexpr UINT kPasteCaptureRetryDelayMs = 5;
-constexpr int kPasteCaptureMaxRetries = 8;
+// Clipboard providers such as QuickClipboard clear the clipboard and then
+// publish several formats one after another. Keep polling long enough for the
+// final text format to become available instead of treating each intermediate
+// update as a different paste operation.
+constexpr int kPasteCaptureMaxRetries = 32;
 
 struct WindowActivationRequest {
   DWORD process_id;
@@ -420,19 +424,19 @@ void FlutterWindow::HandleClipboardUpdate() {
     return;
   }
   const DWORD sequence = GetClipboardSequenceNumber();
-  if (sequence == paste_capture_baseline_sequence_) {
+  if (sequence == 0 || sequence == paste_capture_baseline_sequence_) {
     return;
   }
-  if (paste_capture_observed_sequence_ == 0) {
-    if (sequence - paste_capture_baseline_sequence_ != 1) {
-      paste_capture_observed_sequence_ = sequence;
-      InvalidatePasteCapture();
-      return;
-    }
+
+  // A single logical paste may produce multiple WM_CLIPBOARDUPDATE messages:
+  // EmptyClipboard followed by CF_UNICODETEXT/HTML/etc. Do not require a
+  // contiguous sequence number and do not invalidate when a newer format
+  // arrives before the text handle is readable. The first readable text is
+  // the item selected in the third-party clipboard and must be retained even
+  // if that tool changes the clipboard again during paste.
+  if (paste_capture_observed_sequence_ != sequence) {
     paste_capture_observed_sequence_ = sequence;
-  } else if (paste_capture_observed_sequence_ != sequence) {
-    InvalidatePasteCapture();
-    return;
+    paste_capture_retry_count_ = 0;
   }
   if (!CaptureObservedPasteText()) {
     RetryPendingPasteCapture();
@@ -454,11 +458,23 @@ void FlutterWindow::RetryPendingPasteCapture() {
 
 bool FlutterWindow::CaptureObservedPasteText() {
   if (!paste_capture_armed_ || paste_capture_invalidated_ ||
-      paste_capture_observed_sequence_ == 0 ||
-      GetClipboardSequenceNumber() != paste_capture_observed_sequence_) {
-    InvalidatePasteCapture();
+      paste_capture_observed_sequence_ == 0) {
     return false;
   }
+
+  // The clipboard sequence can advance while a provider is publishing its
+  // formats. Refresh the candidate sequence instead of rejecting the capture;
+  // OpenClipboard/GetClipboardData below is the authoritative availability
+  // check for the current update.
+  const DWORD sequence = GetClipboardSequenceNumber();
+  if (sequence == 0 || sequence == paste_capture_baseline_sequence_) {
+    return false;
+  }
+  if (paste_capture_observed_sequence_ != sequence) {
+    paste_capture_observed_sequence_ = sequence;
+    paste_capture_retry_count_ = 0;
+  }
+
   if (!OpenClipboard(GetHandle())) {
     return false;
   }

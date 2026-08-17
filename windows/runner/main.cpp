@@ -30,11 +30,20 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   const bool is_standalone_tool_window =
       has_argument("--json-formatter-window") ||
       has_argument("--translator-window") ||
-      has_argument("--text-compare-window");
+      has_argument("--text-compare-window") ||
+      has_argument("--timestamp-window") ||
+      has_argument("--sql-log-window");
+  const bool is_reusable_tool_window =
+      has_argument("--translator-window") ||
+      has_argument("--text-compare-window") ||
+      has_argument("--timestamp-window") ||
+      has_argument("--sql-log-window");
   const bool is_prewarmed_tool_window =
       has_argument("--json-formatter-prewarm") ||
       has_argument("--translator-prewarm") ||
-      has_argument("--text-compare-prewarm");
+      has_argument("--text-compare-prewarm") ||
+      has_argument("--timestamp-prewarm") ||
+      has_argument("--sql-log-prewarm");
 
   project.set_dart_entrypoint_arguments(std::move(command_line_arguments));
 
@@ -46,6 +55,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
     return EXIT_FAILURE;
   }
   window.SetQuitOnClose(is_standalone_tool_window);
+  window.SetHideOnClose(is_reusable_tool_window);
 
   ::MSG msg;
   while (::GetMessage(&msg, nullptr, 0, 0)) {
