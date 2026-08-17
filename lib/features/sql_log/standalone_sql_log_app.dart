@@ -77,6 +77,7 @@ class _StandaloneSqlLogApp extends StatefulWidget {
 class _StandaloneSqlLogAppState extends State<_StandaloneSqlLogApp> {
   late final SqlLogController _controller;
   late final StandaloneWindowActivation _windowActivation;
+  bool _didImportInitialClipboard = false;
 
   @override
   void initState() {
@@ -93,6 +94,8 @@ class _StandaloneSqlLogAppState extends State<_StandaloneSqlLogApp> {
   }
 
   Future<void> _importClipboard() async {
+    if (_didImportInitialClipboard) return;
+    _didImportInitialClipboard = true;
     await importSqlLogClipboard(
       controller: _controller,
       readClipboard: () => Clipboard.getData(Clipboard.kTextPlain),

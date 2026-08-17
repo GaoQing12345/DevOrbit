@@ -18,7 +18,6 @@ class _SqlLogPageState extends State<SqlLogPage> {
   late final SqlLogController _controller;
   late final bool _ownsController;
   late final TextEditingController _inputController;
-  late final TextEditingController _outputController;
   final _inputFocusNode = FocusNode();
   late final DesktopClipboardFocusRestorer _focusRestorer;
 
@@ -28,7 +27,6 @@ class _SqlLogPageState extends State<SqlLogPage> {
     _ownsController = widget.controller == null;
     _controller = widget.controller ?? SqlLogController();
     _inputController = TextEditingController(text: _controller.sourceText);
-    _outputController = TextEditingController(text: _controller.result.output);
     _controller.addListener(_syncFromController);
     _focusRestorer = DesktopClipboardFocusRestorer(
       targets: [
@@ -47,7 +45,6 @@ class _SqlLogPageState extends State<SqlLogPage> {
     _controller.removeListener(_syncFromController);
     if (_ownsController) _controller.dispose();
     _inputController.dispose();
-    _outputController.dispose();
     _inputFocusNode.dispose();
     super.dispose();
   }
@@ -60,9 +57,6 @@ class _SqlLogPageState extends State<SqlLogPage> {
         text: text,
         selection: TextSelection.collapsed(offset: text.length),
       );
-    }
-    if (_outputController.text != _controller.result.output) {
-      _outputController.text = _controller.result.output;
     }
     setState(() {});
   }
@@ -79,6 +73,17 @@ class _SqlLogPageState extends State<SqlLogPage> {
     if (mounted) _showMessage('SQL 已复制');
   }
 
+  Future<void> _copyStatement(int index, String sql) async {
+    if (sql.isEmpty) return;
+    try {
+      await Clipboard.setData(ClipboardData(text: sql));
+    } on PlatformException {
+      if (mounted) _showMessage('复制失败');
+      return;
+    }
+    if (mounted) _showMessage('第 ${index + 1} 条 SQL 已复制');
+  }
+
   void _showMessage(String message) {
     ScaffoldMessenger.of(context)
       ..clearSnackBars()
@@ -89,103 +94,97 @@ class _SqlLogPageState extends State<SqlLogPage> {
   Widget build(BuildContext context) {
     _focusRestorer.active = Visibility.of(context);
     final result = _controller.result;
-    return Material(
-      color: Theme.of(context).colorScheme.surfaceContainerLowest,
-      child: Column(
-        children: [
-          _Toolbar(
-            dialect: _controller.dialect,
-            canCopy: result.output.isNotEmpty,
-            onDialectChanged: _controller.setDialect,
-            onConvert: _controller.convertNow,
-            onCopy: _copyOutput,
-            onClear: _controller.clear,
-          ),
-          _StatusBar(
-            result: result,
-            hasInput: _controller.sourceText.isNotEmpty,
-          ),
-          if (result.allWarnings.isNotEmpty)
-            _WarningBanner(messages: result.allWarnings),
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
-              child: LayoutBuilder(
-                builder: (context, constraints) {
-                  final input = _EditorPanel(
-                    title: 'MyBatis 日志',
-                    icon: Icons.article_outlined,
-                    trailing: IconButton(
-                      tooltip: '粘贴',
-                      onPressed: _focusRestorer.pasteFocusedTarget,
-                      icon: const Icon(Icons.content_paste_rounded, size: 19),
-                    ),
-                    child: TextField(
-                      key: const ValueKey('sql-log-input'),
-                      controller: _inputController,
-                      focusNode: _inputFocusNode,
-                      autofocus: true,
-                      expands: true,
-                      minLines: null,
-                      maxLines: null,
-                      keyboardType: TextInputType.multiline,
-                      textAlignVertical: TextAlignVertical.top,
-                      onChanged: _controller.updateSource,
-                      contextMenuBuilder: (context, editableTextState) =>
-                          AdaptiveTextSelectionToolbar.editableText(
-                            editableTextState: editableTextState,
-                          ),
-                      style: _editorTextStyle(context),
-                      decoration: _editorDecoration(context),
-                    ),
-                  );
-                  final output = _EditorPanel(
-                    title: '格式化 SQL',
-                    icon: Icons.data_object_rounded,
-                    trailing: IconButton(
-                      tooltip: '复制全部 SQL',
-                      onPressed: result.output.isEmpty ? null : _copyOutput,
-                      icon: const Icon(Icons.copy_rounded, size: 19),
-                    ),
-                    child: TextField(
-                      key: const ValueKey('sql-log-output'),
-                      controller: _outputController,
-                      readOnly: true,
-                      expands: true,
-                      minLines: null,
-                      maxLines: null,
-                      textAlignVertical: TextAlignVertical.top,
-                      contextMenuBuilder: (context, editableTextState) =>
-                          AdaptiveTextSelectionToolbar.editableText(
-                            editableTextState: editableTextState,
-                          ),
-                      style: _editorTextStyle(context),
-                      decoration: _editorDecoration(context),
-                    ),
-                  );
-                  if (constraints.maxWidth >= 820) {
-                    return Row(
+    return DesktopClipboardPasteRegion(
+      onPaste: _focusRestorer.pasteFocusedTarget,
+      child: Material(
+        color: Theme.of(context).colorScheme.surfaceContainerLowest,
+        child: Column(
+          children: [
+            _Toolbar(
+              dialect: _controller.dialect,
+              canCopy: result.output.isNotEmpty,
+              onDialectChanged: _controller.setDialect,
+              onConvert: _controller.convertNow,
+              onCopy: _copyOutput,
+              onClear: _controller.clear,
+            ),
+            _StatusBar(
+              result: result,
+              hasInput: _controller.sourceText.isNotEmpty,
+            ),
+            if (result.allWarnings.isNotEmpty)
+              _WarningBanner(messages: result.allWarnings),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    final input = _EditorPanel(
+                      title: 'MyBatis 日志',
+                      icon: Icons.article_outlined,
+                      trailing: IconButton(
+                        tooltip: '粘贴',
+                        onPressed: _focusRestorer.pasteFocusedTarget,
+                        icon: const Icon(Icons.content_paste_rounded, size: 19),
+                      ),
+                      child: TextField(
+                        key: const ValueKey('sql-log-input'),
+                        controller: _inputController,
+                        focusNode: _inputFocusNode,
+                        autofocus: true,
+                        expands: true,
+                        minLines: null,
+                        maxLines: null,
+                        keyboardType: TextInputType.multiline,
+                        textAlignVertical: TextAlignVertical.top,
+                        onChanged: _controller.updateSource,
+                        contextMenuBuilder: (context, editableTextState) =>
+                            AdaptiveTextSelectionToolbar.editableText(
+                              editableTextState: editableTextState,
+                            ),
+                        style: _editorTextStyle(context),
+                        decoration: _editorDecoration(context),
+                      ),
+                    );
+                    final output = _EditorPanel(
+                      title: '格式化 SQL',
+                      icon: Icons.data_object_rounded,
+                      trailing: IconButton(
+                        tooltip: '复制全部 SQL',
+                        onPressed: result.output.isEmpty ? null : _copyOutput,
+                        icon: const Icon(Icons.copy_rounded, size: 19),
+                      ),
+                      child: _SqlOutputList(
+                        key: const ValueKey('sql-log-output'),
+                        statements: result.statements,
+                        textStyle: _editorTextStyle(context),
+                        onCopy: _copyStatement,
+                      ),
+                    );
+                    if (constraints.maxWidth >= 820) {
+                      return Row(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Expanded(child: input),
+                          const SizedBox(width: 12),
+                          Expanded(child: output),
+                        ],
+                      );
+                    }
+                    return Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
                         Expanded(child: input),
-                        const SizedBox(width: 12),
+                        const SizedBox(height: 12),
                         Expanded(child: output),
                       ],
                     );
-                  }
-                  return Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Expanded(child: input),
-                      const SizedBox(height: 12),
-                      Expanded(child: output),
-                    ],
-                  );
-                },
+                  },
+                ),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -394,6 +393,113 @@ class _WarningBanner extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _SqlOutputList extends StatelessWidget {
+  const _SqlOutputList({
+    super.key,
+    required this.statements,
+    required this.textStyle,
+    required this.onCopy,
+  });
+
+  final List<SqlLogStatementResult> statements;
+  final TextStyle textStyle;
+  final void Function(int index, String sql) onCopy;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    if (statements.isEmpty) {
+      return Center(
+        child: Text(
+          '转换后的 SQL 会显示在这里',
+          style: Theme.of(
+            context,
+          ).textTheme.bodyMedium?.copyWith(color: scheme.onSurfaceVariant),
+        ),
+      );
+    }
+
+    return ListView.separated(
+      padding: const EdgeInsets.all(12),
+      itemCount: statements.length,
+      separatorBuilder: (_, _) => const SizedBox(height: 12),
+      itemBuilder: (context, index) {
+        final statement = statements[index];
+        return Container(
+          key: ValueKey('sql-output-block-$index'),
+          clipBehavior: Clip.antiAlias,
+          decoration: BoxDecoration(
+            color: scheme.surfaceContainerLowest,
+            border: Border.all(color: scheme.outlineVariant),
+            borderRadius: BorderRadius.circular(5),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Container(
+                constraints: const BoxConstraints(minHeight: 38),
+                padding: const EdgeInsets.only(left: 12, right: 4),
+                color: scheme.surfaceContainerLow,
+                child: Row(
+                  children: [
+                    Container(
+                      width: 24,
+                      height: 24,
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        color: scheme.primaryContainer,
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        '${index + 1}',
+                        style: Theme.of(context).textTheme.labelMedium
+                            ?.copyWith(
+                              color: scheme.onPrimaryContainer,
+                              fontWeight: FontWeight.w700,
+                            ),
+                      ),
+                    ),
+                    const SizedBox(width: 9),
+                    Text(
+                      'SQL ${index + 1}',
+                      style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        '参数 ${statement.substitutedCount} / ${statement.placeholderCount}',
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.labelMedium
+                            ?.copyWith(color: scheme.onSurfaceVariant),
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: '复制此 SQL',
+                      onPressed: () => onCopy(index, statement.formattedSql),
+                      icon: const Icon(Icons.copy_rounded, size: 17),
+                    ),
+                  ],
+                ),
+              ),
+              Divider(height: 1, color: scheme.outlineVariant),
+              Padding(
+                padding: const EdgeInsets.all(14),
+                child: SelectableText(
+                  statement.formattedSql,
+                  key: ValueKey('sql-output-block-text-$index'),
+                  style: textStyle,
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }

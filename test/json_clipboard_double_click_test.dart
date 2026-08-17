@@ -33,8 +33,7 @@ void main() {
     revision.pendingPasteText = '-inserted-';
     revision.revision++;
     await sendWindowEvent('focus');
-    await tester.pump(const Duration(milliseconds: 1));
-    await tester.pump();
+    await pasteWithMeta(tester);
 
     expect(fixture.controller.text, 'abc-inserted-def');
     await tester.pump(const Duration(milliseconds: 350));
@@ -73,8 +72,7 @@ void main() {
     revision.pendingPasteText = 'XX';
     revision.revision++;
     await sendWindowEvent('focus');
-    await tester.pump(const Duration(milliseconds: 200));
-    await tester.pump();
+    await pasteWithControl(tester);
 
     expect(field.controller!.text, 'abXXcd');
     await disposeEditor(tester);
@@ -105,8 +103,7 @@ void main() {
     revision.pendingPasteText = 'same';
     revision.revision++;
     await sendWindowEvent('focus');
-    await tester.pump(const Duration(milliseconds: 200));
-    await tester.pump();
+    await pasteWithControl(tester);
 
     expect(fixture.controller.text, 'abcsamedef');
     await tester.pump(const Duration(milliseconds: 350));
@@ -147,8 +144,7 @@ void main() {
     revision.pendingPasteText = 'YY';
     revision.revision++;
     await sendWindowEvent('focus');
-    await tester.pump(const Duration(milliseconds: 200));
-    await tester.pump();
+    await pasteWithControl(tester);
 
     expect(field.controller!.text, 'abYYcd');
     await disposeEditor(tester);

@@ -107,89 +107,93 @@ class _TranslatorPageState extends State<TranslatorPage> {
     };
     return CallbackShortcuts(
       bindings: shortcuts,
-      child: Focus(
-        autofocus: true,
-        child: Material(
-          color: Theme.of(context).colorScheme.surfaceContainerLowest,
-          child: Column(
-            children: [
-              _Toolbar(
-                controller: widget.controller,
-                initialized: _initialized,
-                onConfigureApiKey: _configureApiKey,
-              ),
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
-                  child: LayoutBuilder(
-                    builder: (context, constraints) {
-                      final horizontal = constraints.maxWidth >= 720;
-                      final source = _TranslationPane(
-                        title: '原文',
-                        footer: '${widget.controller.sourceText.length} 字符',
-                        icon: Icons.edit_note_rounded,
-                        emphasized: _sourceFocusNode.hasFocus,
-                        child: TextField(
-                          key: const ValueKey('translator-source'),
-                          controller: _sourceController,
-                          focusNode: _sourceFocusNode,
-                          autofocus: true,
-                          expands: true,
-                          maxLines: null,
-                          minLines: null,
-                          textAlignVertical: TextAlignVertical.top,
-                          style: const TextStyle(fontSize: 15, height: 1.65),
-                          decoration: const InputDecoration(
-                            hintText: '输入或粘贴文本',
-                            border: InputBorder.none,
-                            enabledBorder: InputBorder.none,
-                            focusedBorder: InputBorder.none,
-                            filled: false,
-                            contentPadding: EdgeInsets.all(18),
+      child: DesktopClipboardPasteRegion(
+        onPaste: _focusRestorer.pasteFocusedTarget,
+        child: Focus(
+          autofocus: true,
+          child: Material(
+            color: Theme.of(context).colorScheme.surfaceContainerLowest,
+            child: Column(
+              children: [
+                _Toolbar(
+                  controller: widget.controller,
+                  initialized: _initialized,
+                  onConfigureApiKey: _configureApiKey,
+                ),
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
+                    child: LayoutBuilder(
+                      builder: (context, constraints) {
+                        final horizontal = constraints.maxWidth >= 720;
+                        final source = _TranslationPane(
+                          title: '原文',
+                          footer: '${widget.controller.sourceText.length} 字符',
+                          icon: Icons.edit_note_rounded,
+                          emphasized: _sourceFocusNode.hasFocus,
+                          child: TextField(
+                            key: const ValueKey('translator-source'),
+                            controller: _sourceController,
+                            focusNode: _sourceFocusNode,
+                            autofocus: true,
+                            expands: true,
+                            maxLines: null,
+                            minLines: null,
+                            textAlignVertical: TextAlignVertical.top,
+                            style: const TextStyle(fontSize: 15, height: 1.65),
+                            decoration: const InputDecoration(
+                              hintText: '输入或粘贴文本',
+                              border: InputBorder.none,
+                              enabledBorder: InputBorder.none,
+                              focusedBorder: InputBorder.none,
+                              filled: false,
+                              contentPadding: EdgeInsets.all(18),
+                            ),
+                            onChanged: widget.controller.updateSource,
                           ),
-                          onChanged: widget.controller.updateSource,
-                        ),
-                      );
-                      final result = _TranslationPane(
-                        title: _resultTitle(),
-                        icon: Icons.translate_rounded,
-                        emphasized: widget.controller.translatedText.isNotEmpty,
-                        footer: widget.controller.translatedText.isEmpty
-                            ? ''
-                            : '${widget.controller.translatedText.length} 字符',
-                        trailing: IconButton(
-                          tooltip: '复制译文',
-                          onPressed: widget.controller.translatedText.isEmpty
-                              ? null
-                              : _copyResult,
-                          icon: const Icon(Icons.copy_rounded, size: 19),
-                        ),
-                        child: _TranslationResult(
-                          controller: widget.controller,
-                        ),
-                      );
-                      if (!horizontal) {
-                        return Column(
+                        );
+                        final result = _TranslationPane(
+                          title: _resultTitle(),
+                          icon: Icons.translate_rounded,
+                          emphasized:
+                              widget.controller.translatedText.isNotEmpty,
+                          footer: widget.controller.translatedText.isEmpty
+                              ? ''
+                              : '${widget.controller.translatedText.length} 字符',
+                          trailing: IconButton(
+                            tooltip: '复制译文',
+                            onPressed: widget.controller.translatedText.isEmpty
+                                ? null
+                                : _copyResult,
+                            icon: const Icon(Icons.copy_rounded, size: 19),
+                          ),
+                          child: _TranslationResult(
+                            controller: widget.controller,
+                          ),
+                        );
+                        if (!horizontal) {
+                          return Column(
+                            children: [
+                              Expanded(child: source),
+                              const SizedBox(height: 12),
+                              Expanded(child: result),
+                            ],
+                          );
+                        }
+                        return Row(
                           children: [
                             Expanded(child: source),
-                            const SizedBox(height: 12),
+                            const SizedBox(width: 12),
                             Expanded(child: result),
                           ],
                         );
-                      }
-                      return Row(
-                        children: [
-                          Expanded(child: source),
-                          const SizedBox(width: 12),
-                          Expanded(child: result),
-                        ],
-                      );
-                    },
+                      },
+                    ),
                   ),
                 ),
-              ),
-              _StatusBar(controller: widget.controller),
-            ],
+                _StatusBar(controller: widget.controller),
+              ],
+            ),
           ),
         ),
       ),

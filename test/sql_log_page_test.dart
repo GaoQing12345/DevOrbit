@@ -29,11 +29,41 @@ void main() {
     );
     await tester.pump(const Duration(milliseconds: 180));
 
-    final output = tester.widget<TextField>(
-      find.byKey(const ValueKey('sql-log-output')),
+    final output = tester.widget<SelectableText>(
+      find.byKey(const ValueKey('sql-output-block-text-0')),
     );
-    expect(output.controller!.text, contains("'Alice'"));
+    expect(output.data, contains("'Alice'"));
     expect(find.text('已识别 1 条 SQL'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('shows multiple SQL statements as distinct blocks', (
+    tester,
+  ) async {
+    final controller = SqlLogController();
+    addTearDown(controller.dispose);
+    await tester.binding.setSurfaceSize(const Size(1040, 680));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    controller.updateSource(
+      'select * from users where id = ?\n'
+      'Parameters: 1(Long)\n'
+      'delete from sessions where owner = ?\n'
+      'Parameters: alice(String)',
+      immediate: true,
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.light(),
+        home: Scaffold(body: SqlLogPage(controller: controller)),
+      ),
+    );
+
+    expect(find.byKey(const ValueKey('sql-output-block-0')), findsOneWidget);
+    expect(find.byKey(const ValueKey('sql-output-block-1')), findsOneWidget);
+    expect(find.text('SQL 1'), findsOneWidget);
+    expect(find.text('SQL 2'), findsOneWidget);
+    expect(find.text('已识别 2 条 SQL'), findsOneWidget);
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
@@ -76,6 +106,9 @@ void main() {
     await tester.pump();
     nativeClipboard.pendingPasteText = ' inserted ';
     await _sendWindowEvent('focus');
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyV);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
     await tester.pump();
 
     expect(field.controller!.text, 'before inserted after');

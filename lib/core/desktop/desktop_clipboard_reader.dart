@@ -7,14 +7,14 @@ class DesktopClipboardReader {
   const DesktopClipboardReader();
 
   static const _channel = MethodChannel('dev_orbit/clipboard');
-  static final _capturedPasteSessions = StreamController<int>.broadcast(
+  static final _pasteRequestSessions = StreamController<int>.broadcast(
     sync: true,
   );
-  static bool _captureHandlerInstalled = false;
+  static bool _pasteRequestHandlerInstalled = false;
 
-  Stream<int> get capturedPasteSessions {
-    _installCaptureHandler();
-    return _capturedPasteSessions.stream;
+  Stream<int> get pasteRequestSessions {
+    _installPasteRequestHandler();
+    return _pasteRequestSessions.stream;
   }
 
   Future<void> armPasteCapture(int sessionId) {
@@ -74,15 +74,15 @@ class DesktopClipboardReader {
         platform == TargetPlatform.windows;
   }
 
-  static void _installCaptureHandler() {
-    if (_captureHandlerInstalled) return;
-    _captureHandlerInstalled = true;
+  static void _installPasteRequestHandler() {
+    if (_pasteRequestHandlerInstalled) return;
+    _pasteRequestHandlerInstalled = true;
     _channel.setMethodCallHandler((call) async {
-      if (call.method != 'pasteTextCaptured') return;
+      if (call.method != 'pasteRequested') return;
       final arguments = call.arguments;
       if (arguments is! Map) return;
       final sessionId = arguments['sessionId'];
-      if (sessionId is int) _capturedPasteSessions.add(sessionId);
+      if (sessionId is int) _pasteRequestSessions.add(sessionId);
     });
   }
 

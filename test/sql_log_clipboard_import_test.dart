@@ -12,8 +12,8 @@ void main() {
       controller: controller,
       readClipboard: () async => const ClipboardData(
         text:
-            '==> Preparing: select * from t where id = ?\n'
-            '==> Parameters: 8(Long)',
+            'select * from t where id = ?\n'
+            'Parameters: 8(Long)',
       ),
     );
 

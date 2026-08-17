@@ -379,15 +379,12 @@ void FlutterWindow::ArmPasteCapture(int64_t session_id) {
   if (paste_capture_armed_) {
     if (!paste_capture_session_id_) {
       paste_capture_session_id_ = session_id;
-      if (pending_paste_text_) {
-        NotifyPendingPasteText();
-      } else {
+      if (!pending_paste_text_) {
         HandleClipboardUpdate();
       }
       return;
     }
     if (*paste_capture_session_id_ == session_id) {
-      NotifyPendingPasteText();
       return;
     }
   }
@@ -495,13 +492,12 @@ bool FlutterWindow::CaptureObservedPasteText() {
   CloseClipboard();
   if (pending_paste_text_) {
     KillTimer(GetHandle(), kPasteCaptureRetryTimer);
-    NotifyPendingPasteText();
   }
   return pending_paste_text_.has_value();
 }
 
-void FlutterWindow::NotifyPendingPasteText() {
-  if (paste_capture_notification_sent_ || !clipboard_channel_ ||
+void FlutterWindow::NotifyPasteRequested() {
+  if (paste_request_notification_sent_ || !clipboard_channel_ ||
       !paste_capture_session_id_ || !pending_paste_text_) {
     return;
   }
@@ -509,9 +505,9 @@ void FlutterWindow::NotifyPendingPasteText() {
   flutter::EncodableMap arguments;
   arguments[flutter::EncodableValue("sessionId")] = flutter::EncodableValue(
       *paste_capture_session_id_);
-  paste_capture_notification_sent_ = true;
+  paste_request_notification_sent_ = true;
   clipboard_channel_->InvokeMethod(
-      "pasteTextCaptured",
+      "pasteRequested",
       std::make_unique<flutter::EncodableValue>(arguments));
 }
 
@@ -531,7 +527,7 @@ void FlutterWindow::ResetPasteCapture() {
   paste_capture_observed_sequence_ = 0;
   paste_capture_retry_count_ = 0;
   paste_capture_invalidated_ = false;
-  paste_capture_notification_sent_ = false;
+  paste_request_notification_sent_ = false;
 }
 
 void FlutterWindow::SetRadialMode(bool enabled) {
@@ -633,6 +629,9 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
     // different threads. Re-check synchronously at the actual paste boundary
     // so a queued WM_CLIPBOARDUPDATE cannot make Flutter read stale content.
     HandleClipboardUpdate();
+  }
+  if (is_paste_key && paste_capture_armed_) {
+    NotifyPasteRequested();
   }
   if (message == WM_CLIPBOARDUPDATE && paste_capture_armed_) {
     HandleClipboardUpdate();

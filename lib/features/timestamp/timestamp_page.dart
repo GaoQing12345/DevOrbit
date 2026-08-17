@@ -130,62 +130,65 @@ class _TimestampPageState extends State<TimestampPage> {
   Widget build(BuildContext context) {
     _focusRestorer.active = Visibility.of(context);
     final current = TimestampConverter.convertDateTime(_now);
-    return Material(
-      color: Theme.of(context).colorScheme.surfaceContainerLowest,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(18, 18, 18, 16),
-        child: Column(
-          children: [
-            _CurrentTimeSection(
-              dateTime: TimestampConverter.formatDateTime(_now),
-              seconds: current.seconds.toString(),
-              milliseconds: current.milliseconds.toString(),
-              onCopy: _copyValue,
-            ),
-            const SizedBox(height: 14),
-            Expanded(
-              child: LayoutBuilder(
-                builder: (context, constraints) {
-                  final timestampPanel = _TimestampToDateTimePanel(
-                    controller: _timestampController,
-                    focusNode: _timestampFocusNode,
-                    conversion: _timestampConversion,
-                    error: _timestampError,
-                    onChanged: _convertTimestamp,
-                    onPaste: _focusRestorer.pasteFocusedTarget,
-                    onCopy: _copyValue,
-                  );
-                  final dateTimePanel = _DateTimeToTimestampPanel(
-                    controller: _dateTimeController,
-                    focusNode: _dateTimeFocusNode,
-                    conversion: _dateTimeConversion,
-                    error: _dateTimeError,
-                    onChanged: _convertDateTime,
-                    onPaste: _focusRestorer.pasteFocusedTarget,
-                    onUseCurrentTime: _useCurrentTime,
-                    onCopy: _copyValue,
-                  );
-                  if (constraints.maxWidth >= 760) {
-                    return Row(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
+    return DesktopClipboardPasteRegion(
+      onPaste: _focusRestorer.pasteFocusedTarget,
+      child: Material(
+        color: Theme.of(context).colorScheme.surfaceContainerLowest,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(18, 18, 18, 16),
+          child: Column(
+            children: [
+              _CurrentTimeSection(
+                dateTime: TimestampConverter.formatDateTime(_now),
+                seconds: current.seconds.toString(),
+                milliseconds: current.milliseconds.toString(),
+                onCopy: _copyValue,
+              ),
+              const SizedBox(height: 14),
+              Expanded(
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    final timestampPanel = _TimestampToDateTimePanel(
+                      controller: _timestampController,
+                      focusNode: _timestampFocusNode,
+                      conversion: _timestampConversion,
+                      error: _timestampError,
+                      onChanged: _convertTimestamp,
+                      onPaste: _focusRestorer.pasteFocusedTarget,
+                      onCopy: _copyValue,
+                    );
+                    final dateTimePanel = _DateTimeToTimestampPanel(
+                      controller: _dateTimeController,
+                      focusNode: _dateTimeFocusNode,
+                      conversion: _dateTimeConversion,
+                      error: _dateTimeError,
+                      onChanged: _convertDateTime,
+                      onPaste: _focusRestorer.pasteFocusedTarget,
+                      onUseCurrentTime: _useCurrentTime,
+                      onCopy: _copyValue,
+                    );
+                    if (constraints.maxWidth >= 760) {
+                      return Row(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Expanded(child: timestampPanel),
+                          const SizedBox(width: 14),
+                          Expanded(child: dateTimePanel),
+                        ],
+                      );
+                    }
+                    return ListView(
                       children: [
-                        Expanded(child: timestampPanel),
-                        const SizedBox(width: 14),
-                        Expanded(child: dateTimePanel),
+                        timestampPanel,
+                        const SizedBox(height: 14),
+                        dateTimePanel,
                       ],
                     );
-                  }
-                  return ListView(
-                    children: [
-                      timestampPanel,
-                      const SizedBox(height: 14),
-                      dateTimePanel,
-                    ],
-                  );
-                },
+                  },
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

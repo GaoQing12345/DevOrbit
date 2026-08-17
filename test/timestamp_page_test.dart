@@ -91,6 +91,9 @@ void main() {
     await tester.pump();
     nativeClipboard.pendingPasteText = '56';
     await _sendWindowEvent('focus');
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyV);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
     await tester.pump();
 
     expect(field.controller!.text, '125634');

@@ -118,9 +118,10 @@ class MainFlutterWindow: NSWindow {
     pasteCaptureSessionId = sessionId
     pasteCaptureBaselineChangeCount = pasteboard.changeCount
     pasteCaptureDeadline = Date().addingTimeInterval(30)
-    let timer = Timer(timeInterval: 0.005, repeats: true) { [weak self] _ in
+    let timer = Timer(timeInterval: 0.010, repeats: true) { [weak self] _ in
       self?.pollPasteboard()
     }
+    timer.tolerance = 0.003
     pasteCaptureTimer = timer
     RunLoop.main.add(timer, forMode: .common)
   }

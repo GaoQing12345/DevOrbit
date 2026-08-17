@@ -121,11 +121,11 @@ class SqlLogConverter {
   const SqlLogConverter();
 
   static final _preparingMarker = RegExp(
-    r'==>\s*Preparing:\s*',
+    r'\bPreparing\s*:\s*',
     caseSensitive: false,
   );
   static final _parametersMarker = RegExp(
-    r'==>\s*Parameters:\s*',
+    r'\bParameters\s*:\s*',
     caseSensitive: false,
   );
   static final _logTimestamp = RegExp(
@@ -134,10 +134,15 @@ class SqlLogConverter {
   static final _typePattern = RegExp(
     r'^[A-Za-z_$][A-Za-z0-9_.$]*(?:\[\])?(?:<[^<>]+>)?$',
   );
+  static final _sqlStart = RegExp(
+    r'^\s*(?:SELECT|INSERT|UPDATE|DELETE|WITH|MERGE|REPLACE|CALL)\b',
+    caseSensitive: false,
+  );
 
   bool looksLikeSupportedLog(String source) {
-    return _preparingMarker.hasMatch(source) &&
-        _parametersMarker.hasMatch(source);
+    if (!_parametersMarker.hasMatch(source)) return false;
+    if (_preparingMarker.hasMatch(source)) return true;
+    return _normalizedLines(source).any(_looksLikeRawSqlLine);
   }
 
   SqlLogConversionResult convert(
@@ -198,7 +203,7 @@ class SqlLogConverter {
     }
 
     if (statements.isEmpty && diagnostics.isEmpty) {
-      diagnostics.add('没有找到 MyBatis Preparing 报文');
+      diagnostics.add('没有找到可识别的 SQL 报文');
     }
     return SqlLogConversionResult(
       statements: List.unmodifiable(statements),
@@ -212,10 +217,7 @@ class SqlLogConverter {
   ) {
     final statements = <_RawSqlLogStatement>[];
     _PendingSqlLogStatement? pending;
-    final lines = source
-        .replaceAll('\r\n', '\n')
-        .replaceAll('\r', '\n')
-        .split('\n');
+    final lines = _normalizedLines(source);
 
     void finishPending() {
       final current = pending;
@@ -262,6 +264,16 @@ class SqlLogConverter {
         continue;
       }
 
+      if ((pending == null || pending!.parameterLines != null) &&
+          _looksLikeRawSqlLine(line)) {
+        finishPending();
+        pending = _PendingSqlLogStatement(
+          lineNumber: index + 1,
+          sqlLines: [line.trim()],
+        );
+        continue;
+      }
+
       final current = pending;
       if (current == null) continue;
       if (current.parameterLines == null) {
@@ -275,6 +287,11 @@ class SqlLogConverter {
     finishPending();
     return statements;
   }
+
+  List<String> _normalizedLines(String source) =>
+      source.replaceAll('\r\n', '\n').replaceAll('\r', '\n').split('\n');
+
+  bool _looksLikeRawSqlLine(String line) => _sqlStart.hasMatch(line);
 
   bool _isSqlContinuation(String line) {
     final trimmed = line.trim();

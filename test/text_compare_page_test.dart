@@ -91,6 +91,9 @@ void main() {
     await tester.pump();
     nativeClipboard.pendingPasteText = 'iCopy';
     await _sendWindowEvent('focus');
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyV);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
     await tester.pump();
 
     expect(editor.controller!.text, 'abciCopydef');

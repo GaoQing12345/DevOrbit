@@ -19,6 +19,32 @@ abstract class DesktopClipboardTarget {
   void replaceSelection(String text, Object selection);
 }
 
+class DesktopClipboardPasteRegion extends StatelessWidget {
+  const DesktopClipboardPasteRegion({
+    super.key,
+    required this.onPaste,
+    required this.child,
+  });
+
+  final VoidCallback onPaste;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Actions(
+      actions: <Type, Action<Intent>>{
+        PasteTextIntent: CallbackAction<PasteTextIntent>(
+          onInvoke: (_) {
+            onPaste();
+            return null;
+          },
+        ),
+      },
+      child: child,
+    );
+  }
+}
+
 class TextEditingClipboardTarget implements DesktopClipboardTarget {
   TextEditingClipboardTarget({
     required this.controller,
@@ -116,38 +142,29 @@ class DesktopClipboardFocusRestorer with WindowListener {
     );
     windowManager.addListener(this);
     HardwareKeyboard.instance.addHandler(_handleKeyEvent);
-    _capturedPasteSubscription = _clipboardReader.capturedPasteSessions.listen(
-      _handleCapturedPasteSession,
+    _pasteRequestSubscription = _clipboardReader.pasteRequestSessions.listen(
+      _handleNativePasteRequest,
     );
   }
 
   static const _clipboardSessionLimit = Duration(seconds: 30);
   static const _resumedCaptureLimit = Duration(seconds: 3);
-  static const _captureRetryDelays = <Duration>[
-    Duration.zero,
-    Duration(milliseconds: 4),
-    Duration(milliseconds: 8),
-    Duration(milliseconds: 16),
-    Duration(milliseconds: 32),
-    Duration(milliseconds: 64),
-  ];
   static int _nextSessionId = 0;
 
   final List<DesktopClipboardTarget> _targets;
   final _clipboardReader = const DesktopClipboardReader();
   late final AppLifecycleListener _lifecycle;
-  late final StreamSubscription<int> _capturedPasteSubscription;
+  late final StreamSubscription<int> _pasteRequestSubscription;
   DesktopClipboardTarget? _lastTarget;
   _DesktopFocusSnapshot? _snapshot;
   bool _pasteFallbackArmed = false;
   bool _disposed = false;
   bool _active = true;
-  int? _autoPasteSessionId;
   Timer? _captureRetryTimer;
   Timer? _resumedCaptureTimer;
   DesktopClipboardTarget? _suppressedPasteTarget;
   DateTime? _suppressPasteUntil;
-  bool _skipNextPasteAction = false;
+  DateTime? _skipPasteActionUntil;
 
   set active(bool value) {
     if (_active == value) return;
@@ -210,9 +227,6 @@ class DesktopClipboardFocusRestorer with WindowListener {
       _resumedCaptureLimit,
       () => _cancelRestore(expected: snapshot),
     );
-    if (_autoPasteSessionId == snapshot.sessionId) return;
-    _autoPasteSessionId = snapshot.sessionId;
-    unawaited(_pasteCapturedWhenReady(snapshot));
   }
 
   void _restoreSelection(_DesktopFocusSnapshot snapshot) {
@@ -221,48 +235,10 @@ class DesktopClipboardFocusRestorer with WindowListener {
     }
   }
 
-  Future<void> _pasteCapturedWhenReady(_DesktopFocusSnapshot snapshot) async {
-    for (final delay in _captureRetryDelays) {
-      if (delay != Duration.zero) await _waitForCaptureRetry(delay);
-      if (!_canPaste(snapshot)) return;
-      final text = await _clipboardReader.readCapturedPasteText(
-        snapshot.sessionId,
-      );
-      if (!_canPaste(snapshot)) return;
-      if (text != null) {
-        if (text.isEmpty) {
-          _cancelRestore(expected: snapshot);
-        } else {
-          _pasteText(snapshot, text, suppressFollowUpPaste: true);
-        }
-        return;
-      }
-    }
-    // Native capture sends pasteTextCaptured when a delayed clipboard provider
-    // finally publishes text. Keep this session alive instead of treating the
-    // short compatibility poll as the lifetime of the paste operation.
-    if (defaultTargetPlatform != TargetPlatform.windows) {
-      _cancelRestore(expected: snapshot);
-    }
-  }
-
-  void _handleCapturedPasteSession(int sessionId) {
+  void _handleNativePasteRequest(int sessionId) {
     final snapshot = _snapshot;
     if (snapshot == null || snapshot.sessionId != sessionId) return;
-    unawaited(_pasteCapturedSession(snapshot));
-  }
-
-  Future<void> _pasteCapturedSession(_DesktopFocusSnapshot snapshot) async {
-    if (!_canPaste(snapshot)) return;
-    final text = await _clipboardReader.readCapturedPasteText(
-      snapshot.sessionId,
-    );
-    if (!_canPaste(snapshot) || text == null) return;
-    if (text.isEmpty) {
-      _cancelRestore(expected: snapshot);
-      return;
-    }
-    _pasteText(snapshot, text, suppressFollowUpPaste: true);
+    unawaited(_pasteExplicitClipboard(snapshot, suppressFollowUpPaste: true));
   }
 
   bool _canPaste(_DesktopFocusSnapshot snapshot) {
@@ -330,15 +306,12 @@ class DesktopClipboardFocusRestorer with WindowListener {
     _restoreSelection(snapshot);
     _requestFocus(snapshot.target);
     _suppressMatchingPasteAction();
-    unawaited(_pasteExplicitClipboard(snapshot));
+    unawaited(_pasteExplicitClipboard(snapshot, suppressFollowUpPaste: true));
     return true;
   }
 
   void pasteFocusedTarget() {
-    if (_skipNextPasteAction) {
-      _skipNextPasteAction = false;
-      return;
-    }
+    if (_consumeMatchingPasteAction()) return;
     if (_consumePasteSuppression()) return;
     final snapshot = _snapshot;
     if (_pasteFallbackArmed && snapshot != null && _canPaste(snapshot)) {
@@ -350,7 +323,10 @@ class DesktopClipboardFocusRestorer with WindowListener {
     if (target != null) unawaited(_pasteCurrentSelection(target));
   }
 
-  Future<void> _pasteExplicitClipboard(_DesktopFocusSnapshot snapshot) async {
+  Future<void> _pasteExplicitClipboard(
+    _DesktopFocusSnapshot snapshot, {
+    bool suppressFollowUpPaste = false,
+  }) async {
     var text = await _clipboardReader.readCapturedPasteText(snapshot.sessionId);
     if (text == null &&
         await _clipboardReader.didPasteCaptureObserveChange(
@@ -374,7 +350,7 @@ class DesktopClipboardFocusRestorer with WindowListener {
     }
     text ??= await _clipboardReader.readSystemText();
     if (!_canPaste(snapshot) || text == null || text.isEmpty) return;
-    _pasteText(snapshot, text);
+    _pasteText(snapshot, text, suppressFollowUpPaste: suppressFollowUpPaste);
   }
 
   Future<void> _pasteCurrentSelection(DesktopClipboardTarget target) async {
@@ -430,8 +406,15 @@ class DesktopClipboardFocusRestorer with WindowListener {
   }
 
   void _suppressMatchingPasteAction() {
-    _skipNextPasteAction = true;
-    scheduleMicrotask(() => _skipNextPasteAction = false);
+    _skipPasteActionUntil = DateTime.now().add(
+      const Duration(milliseconds: 300),
+    );
+  }
+
+  bool _consumeMatchingPasteAction() {
+    final deadline = _skipPasteActionUntil;
+    _skipPasteActionUntil = null;
+    return deadline != null && !DateTime.now().isAfter(deadline);
   }
 
   bool _hasExternalEditableFocus() {
@@ -449,7 +432,6 @@ class DesktopClipboardFocusRestorer with WindowListener {
     if (expected != null && !identical(snapshot, expected)) return;
     _snapshot = null;
     _pasteFallbackArmed = false;
-    _autoPasteSessionId = null;
     _captureRetryTimer?.cancel();
     _captureRetryTimer = null;
     _resumedCaptureTimer?.cancel();
@@ -468,7 +450,7 @@ class DesktopClipboardFocusRestorer with WindowListener {
   void dispose() {
     _disposed = true;
     _cancelRestore();
-    _capturedPasteSubscription.cancel();
+    _pasteRequestSubscription.cancel();
     HardwareKeyboard.instance.removeHandler(_handleKeyEvent);
     windowManager.removeListener(this);
     for (final target in _targets) {

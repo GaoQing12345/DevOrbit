@@ -55,6 +55,7 @@ class _StandaloneJsonFormatterAppState
     extends State<_StandaloneJsonFormatterApp> {
   late final JsonDocumentController _controller;
   late final StandaloneWindowActivation _windowActivation;
+  bool _didImportInitialClipboard = false;
 
   @override
   void initState() {
@@ -70,7 +71,8 @@ class _StandaloneJsonFormatterAppState
   }
 
   Future<void> _importClipboard() async {
-    if (!mounted) return;
+    if (!mounted || _didImportInitialClipboard) return;
+    _didImportInitialClipboard = true;
     await importInitialClipboardJson(
       controller: _controller,
       indentSize: widget.settings.value.indentSize,

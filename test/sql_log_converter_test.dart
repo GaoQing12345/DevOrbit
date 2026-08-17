@@ -58,6 +58,32 @@ unrelated log line
     );
   });
 
+  test('restores raw SQL followed by a Parameters log without Preparing', () {
+    const source = '''
+select u.user_id, u.login_name from sys_user u where u.user_id = ?
+2026-08-17 10:39:45.017 [http-nio-8080-exec-3] DEBUG mapper - ==> Parameters: 1(Long)
+''';
+
+    final result = converter.convert(source);
+
+    expect(result.statements, hasLength(1));
+    expect(result.statements.single.placeholderCount, 1);
+    expect(result.statements.single.substitutedCount, 1);
+    expect(_singleLine(result.output), contains('u.user_id = 1'));
+  });
+
+  test('accepts Preparing and Parameters markers without arrows', () {
+    const source = '''
+2026-08-17 10:39:45.017 DEBUG mapper - Preparing: select * from t where id = ?
+2026-08-17 10:39:45.017 DEBUG mapper - Parameters: 8(Long)
+''';
+
+    final result = converter.convert(source);
+
+    expect(result.statements, hasLength(1));
+    expect(_singleLine(result.output), contains('id = 8'));
+  });
+
   test('keeps question marks inside literals identifiers and comments', () {
     const source = '''
 ==> Preparing: select '?' as literal, `?` as marker from t where id = ? /* ? */ and enabled = ?
@@ -138,10 +164,22 @@ unrelated log line
     expect(result.statements.single.warnings, hasLength(2));
   });
 
-  test('recognizes clipboard content only when both markers exist', () {
+  test('recognizes supported clipboard log shapes', () {
     expect(
       converter.looksLikeSupportedLog(
         '==> Preparing: select ?\n==> Parameters: 1(Integer)',
+      ),
+      isTrue,
+    );
+    expect(
+      converter.looksLikeSupportedLog(
+        'Preparing: select ?\nParameters: 1(Integer)',
+      ),
+      isTrue,
+    );
+    expect(
+      converter.looksLikeSupportedLog(
+        'select * from t where id = ?\nParameters: 1(Integer)',
       ),
       isTrue,
     );

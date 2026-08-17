@@ -78,6 +78,7 @@ class _StandaloneTranslatorApp extends StatefulWidget {
 class _StandaloneTranslatorAppState extends State<_StandaloneTranslatorApp> {
   late final TranslatorController _controller;
   late final StandaloneWindowActivation _windowActivation;
+  bool _didImportInitialClipboard = false;
 
   @override
   void initState() {
@@ -96,7 +97,9 @@ class _StandaloneTranslatorAppState extends State<_StandaloneTranslatorApp> {
   }
 
   Future<void> _importClipboard() async {
-    if (!mounted || _controller.sourceText.isNotEmpty) return;
+    if (!mounted || _didImportInitialClipboard) return;
+    _didImportInitialClipboard = true;
+    if (_controller.sourceText.isNotEmpty) return;
     try {
       final text = (await Clipboard.getData(Clipboard.kTextPlain))?.text;
       if (mounted && _controller.sourceText.isEmpty && text != null) {

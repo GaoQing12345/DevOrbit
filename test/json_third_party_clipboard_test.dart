@@ -80,7 +80,7 @@ void main() {
       nativeClipboard.pendingPasteText = 'QuickClipboard item';
       nativeClipboard.revision += 2;
       await _focusWindow(tester);
-      await tester.pump(const Duration(milliseconds: 200));
+      await _pasteWithControl(tester);
 
       expect(fixture.controller.text, 'abcQuickClipboard itemdef');
       await tester.pump(const Duration(milliseconds: 350));
@@ -88,6 +88,32 @@ void main() {
       debugDefaultTargetPlatformOverride = null;
     },
   );
+
+  testWidgets('clipboard changes do not insert without a paste action', (
+    tester,
+  ) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    final fixture = await JsonFormatterFixture.create(text: 'abcdef');
+    mockClipboard(tester, initialText: 'copied text');
+    final nativeClipboard = mockClipboardRevision(tester);
+    await tester.pumpWidget(fixture.widget);
+    final editor = tester.widget<CodeEditor>(find.byType(CodeEditor));
+    editor.controller!.selection = const CodeLineSelection.collapsed(
+      index: 0,
+      offset: 3,
+    );
+
+    await _blurEditor(tester, editor.focusNode!);
+    nativeClipboard.pendingPasteText = 'copied text';
+    nativeClipboard.observedChange = true;
+    await _focusWindow(tester);
+    await tester.pump(const Duration(milliseconds: 500));
+
+    expect(fixture.controller.text, 'abcdef');
+    await disposeEditor(tester);
+    debugDefaultTargetPlatformOverride = null;
+  });
 
   testWidgets(
     'QuickClipboard paste survives its delayed hide animation and native event',
@@ -111,7 +137,7 @@ void main() {
 
       nativeClipboard.pendingPasteText = 'delayed QuickClipboard item';
       nativeClipboard.observedChange = true;
-      await _sendNativePasteCaptured(sessionId);
+      await _sendNativePasteRequested(sessionId);
       await tester.pump();
 
       expect(fixture.controller.text, 'abcdelayed QuickClipboard itemdef');
@@ -141,7 +167,7 @@ void main() {
       await _focusWindow(tester);
       nativeClipboard.pendingPasteText = 'QuickClipboard item';
       nativeClipboard.observedChange = true;
-      await _sendNativePasteCaptured(sessionId);
+      await _sendNativePasteRequested(sessionId);
       await tester.pump();
       await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
       await tester.sendKeyEvent(LogicalKeyboardKey.insert);
@@ -280,9 +306,9 @@ Future<void> _sendWindowEvent(String eventName) async {
       .handlePlatformMessage('window_manager', message, (_) {});
 }
 
-Future<void> _sendNativePasteCaptured(int sessionId) async {
+Future<void> _sendNativePasteRequested(int sessionId) async {
   final message = const StandardMethodCodec().encodeMethodCall(
-    MethodCall('pasteTextCaptured', {'sessionId': sessionId}),
+    MethodCall('pasteRequested', {'sessionId': sessionId}),
   );
   await TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
       .handlePlatformMessage('dev_orbit/clipboard', message, (_) {});
