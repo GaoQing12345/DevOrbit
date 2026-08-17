@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
@@ -5,6 +7,15 @@ class DesktopClipboardReader {
   const DesktopClipboardReader();
 
   static const _channel = MethodChannel('dev_orbit/clipboard');
+  static final _capturedPasteSessions = StreamController<int>.broadcast(
+    sync: true,
+  );
+  static bool _captureHandlerInstalled = false;
+
+  Stream<int> get capturedPasteSessions {
+    _installCaptureHandler();
+    return _capturedPasteSessions.stream;
+  }
 
   Future<void> armPasteCapture(int sessionId) {
     return _invokeVoid('armPasteCapture', sessionId);
@@ -61,6 +72,18 @@ class DesktopClipboardReader {
     final platform = defaultTargetPlatform;
     return platform == TargetPlatform.macOS ||
         platform == TargetPlatform.windows;
+  }
+
+  static void _installCaptureHandler() {
+    if (_captureHandlerInstalled) return;
+    _captureHandlerInstalled = true;
+    _channel.setMethodCallHandler((call) async {
+      if (call.method != 'pasteTextCaptured') return;
+      final arguments = call.arguments;
+      if (arguments is! Map) return;
+      final sessionId = arguments['sessionId'];
+      if (sessionId is int) _capturedPasteSessions.add(sessionId);
+    });
   }
 
   Future<void> _invokeVoid(String method, int sessionId) async {

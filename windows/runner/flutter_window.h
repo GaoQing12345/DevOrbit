@@ -43,6 +43,7 @@ class FlutterWindow : public Win32Window {
   void HandleClipboardUpdate();
   void RetryPendingPasteCapture();
   bool CaptureObservedPasteText();
+  void NotifyPendingPasteText();
   void InvalidatePasteCapture();
   void ResetPasteCapture();
   void SetRadialMode(bool enabled);
@@ -69,6 +70,7 @@ class FlutterWindow : public Win32Window {
   int paste_capture_retry_count_ = 0;
   bool paste_capture_armed_ = false;
   bool paste_capture_invalidated_ = false;
+  bool paste_capture_notification_sent_ = false;
   bool show_on_first_frame_ = true;
 };
 
