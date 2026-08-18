@@ -12,6 +12,40 @@ class AppDelegate: FlutterAppDelegate {
       arguments.contains("--sql-log-window")
   }
 
+  override func applicationDidFinishLaunching(_ notification: Notification) {
+    super.applicationDidFinishLaunching(notification)
+    // Standalone tools are auxiliary windows owned by DevOrbit. Keeping each
+    // helper process out of the Dock avoids one icon per tool window.
+    if isStandaloneToolWindow {
+      NSApp.setActivationPolicy(.accessory)
+    }
+  }
+
+  override func applicationDidBecomeActive(_ notification: Notification) {
+    super.applicationDidBecomeActive(notification)
+    restoreStandaloneWindow()
+  }
+
+  func applicationShouldHandleReopen(
+    _ sender: NSApplication,
+    hasVisibleWindows flag: Bool
+  ) -> Bool {
+    restoreStandaloneWindow()
+    return true
+  }
+
+  private func restoreStandaloneWindow() {
+    guard isStandaloneToolWindow else { return }
+    DispatchQueue.main.async {
+      for window in NSApp.windows where window.isMiniaturized {
+        window.deminiaturize(nil)
+      }
+      if let window = NSApp.windows.first(where: { $0 is MainFlutterWindow }) {
+        window.makeKeyAndOrderFront(nil)
+      }
+    }
+  }
+
   override func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
     return isStandaloneToolWindow
   }
