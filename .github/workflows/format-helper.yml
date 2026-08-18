@@ -12,6 +12,7 @@ jobs:
         with:
           channel: stable
           cache: true
+      - run: flutter pub get
       - run: dart format lib test
       - name: Export formatted patch
         run: git diff --binary > "$RUNNER_TEMP/devorbit-format.patch"
