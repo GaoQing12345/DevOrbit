@@ -17,13 +17,14 @@ namespace {
 
 constexpr wchar_t kToolWindowReadyProperty[] =
     L"DevOrbitToolWindowReady";
+constexpr UINT kActivateToolWindowMessage = WM_APP + 0x30B;
 constexpr UINT_PTR kPasteCaptureRetryTimer = 0xD30B;
-constexpr UINT kPasteCaptureRetryDelayMs = 5;
+constexpr UINT kPasteCaptureRetryDelayMs = 10;
 // Clipboard providers such as QuickClipboard clear the clipboard and then
 // publish several formats one after another. Keep polling long enough for the
 // final text format to become available instead of treating each intermediate
 // update as a different paste operation.
-constexpr int kPasteCaptureMaxRetries = 32;
+constexpr int kPasteCaptureMaxRetries = 250;
 
 struct WindowActivationRequest {
   DWORD process_id;
@@ -54,6 +55,63 @@ bool IsCurrentExecutable(DWORD process_id) {
   return _wcsicmp(process_path.data(), current_path.data()) == 0;
 }
 
+void ShowAndFocusProcessWindow(HWND window) {
+  if (!IsWindow(window)) {
+    return;
+  }
+
+  const DWORD current_thread_id = GetCurrentThreadId();
+  const DWORD target_thread_id = GetWindowThreadProcessId(window, nullptr);
+  const HWND foreground_window = GetForegroundWindow();
+  const DWORD foreground_thread_id = foreground_window
+                                         ? GetWindowThreadProcessId(
+                                               foreground_window, nullptr)
+                                         : 0;
+
+  // SetForegroundWindow is allowed to fail when the launcher and the prewarmed
+  // tool own different input queues. Temporarily join the queues so the shown
+  // window becomes the real keyboard foreground window, not merely the topmost
+  // visible window that still needs a mouse click before receiving Escape.
+  const bool attached_to_foreground =
+      foreground_thread_id != 0 &&
+      foreground_thread_id != current_thread_id &&
+      AttachThreadInput(current_thread_id, foreground_thread_id, TRUE);
+  const bool attached_to_target =
+      target_thread_id != 0 && target_thread_id != current_thread_id &&
+      target_thread_id != foreground_thread_id &&
+      AttachThreadInput(current_thread_id, target_thread_id, TRUE);
+
+  const int show_command = IsIconic(window) ? SW_RESTORE : SW_SHOW;
+  if (target_thread_id == current_thread_id) {
+    ShowWindow(window, show_command);
+  } else {
+    // Do not synchronously block on a target thread that already failed the
+    // bounded activation message above.
+    ShowWindowAsync(window, show_command);
+  }
+  BringWindowToTop(window);
+  SetForegroundWindow(window);
+  SetActiveWindow(window);
+
+  // The Flutter view is a child HWND. Explicitly move keyboard focus to it as
+  // the target can already be foreground, in which case WM_ACTIVATE may not be
+  // emitted again and the generated runner cannot restore child focus for us.
+  HWND child = FindWindowExW(window, nullptr, L"FLUTTERVIEW", nullptr);
+  if (!child) {
+    child = GetWindow(window, GW_CHILD);
+  }
+  if (child && IsWindowEnabled(child)) {
+    SetFocus(child);
+  }
+
+  if (attached_to_target) {
+    AttachThreadInput(current_thread_id, target_thread_id, FALSE);
+  }
+  if (attached_to_foreground) {
+    AttachThreadInput(current_thread_id, foreground_thread_id, FALSE);
+  }
+}
+
 BOOL CALLBACK ActivateProcessWindow(HWND window, LPARAM parameter) {
   auto* request = reinterpret_cast<WindowActivationRequest*>(parameter);
   DWORD window_process_id = 0;
@@ -67,13 +125,14 @@ BOOL CALLBACK ActivateProcessWindow(HWND window, LPARAM parameter) {
     return TRUE;
   }
   request->found = true;
-  if (IsIconic(window)) {
-    ShowWindow(window, SW_RESTORE);
-  } else {
-    ShowWindow(window, SW_SHOW);
+  DWORD_PTR activation_result = 0;
+  if (!SendMessageTimeoutW(window, kActivateToolWindowMessage, 0, 0,
+                           SMTO_ABORTIFHUNG, 1000,
+                           &activation_result)) {
+    // Fall back to cross-thread activation if the target has not started
+    // processing native messages yet.
+    ShowAndFocusProcessWindow(window);
   }
-  BringWindowToTop(window);
-  SetForegroundWindow(window);
   return FALSE;
 }
 
@@ -492,6 +551,9 @@ bool FlutterWindow::CaptureObservedPasteText() {
   CloseClipboard();
   if (pending_paste_text_) {
     KillTimer(GetHandle(), kPasteCaptureRetryTimer);
+    if (paste_key_pressed_) {
+      NotifyPasteRequested();
+    }
   }
   return pending_paste_text_.has_value();
 }
@@ -527,6 +589,7 @@ void FlutterWindow::ResetPasteCapture() {
   paste_capture_observed_sequence_ = 0;
   paste_capture_retry_count_ = 0;
   paste_capture_invalidated_ = false;
+  paste_key_pressed_ = false;
   paste_request_notification_sent_ = false;
 }
 
@@ -620,6 +683,13 @@ LRESULT
 FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
                               WPARAM const wparam,
                               LPARAM const lparam) noexcept {
+  if (message == kActivateToolWindowMessage) {
+    // AllowSetForegroundWindow grants the target process permission to take
+    // focus, so perform the final activation on the target UI thread.
+    ShowAndFocusProcessWindow(hwnd);
+    return 0;
+  }
+
   const bool is_paste_key =
       (message == WM_KEYDOWN || message == WM_SYSKEYDOWN) &&
       ((wparam == 'V' && (GetKeyState(VK_CONTROL) & 0x8000) != 0) ||
@@ -631,6 +701,11 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
     HandleClipboardUpdate();
   }
   if (is_paste_key && paste_capture_armed_) {
+    // QuickClipboard can finish publishing CF_UNICODETEXT slightly after the
+    // injected Ctrl+V/Shift+Insert reaches this window. Remember that the
+    // paste key was already observed so CaptureObservedPasteText can notify
+    // Flutter when the text becomes readable on a later retry.
+    paste_key_pressed_ = true;
     NotifyPasteRequested();
   }
   if (message == WM_CLIPBOARDUPDATE && paste_capture_armed_) {

@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:window_manager/window_manager.dart';
 
-class DesktopEscapeCloseRegion extends StatelessWidget {
+class DesktopEscapeCloseRegion extends StatefulWidget {
   const DesktopEscapeCloseRegion({
     super.key,
     required this.onClose,
@@ -16,14 +16,92 @@ class DesktopEscapeCloseRegion extends StatelessWidget {
   final Widget child;
 
   @override
+  State<DesktopEscapeCloseRegion> createState() =>
+      _DesktopEscapeCloseRegionState();
+}
+
+class _DesktopEscapeCloseRegionState extends State<DesktopEscapeCloseRegion>
+    with WindowListener {
+  final _focusNode = FocusNode(
+    debugLabel: 'desktop-window-escape-close-region',
+  );
+  bool _closing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    windowManager.addListener(this);
+  }
+
+  @override
+  void onWindowFocus() {
+    _restoreWindowFocus();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _restoreWindowFocus();
+    });
+  }
+
+  void _restoreWindowFocus() {
+    if (!mounted || !_focusNode.canRequestFocus) return;
+
+    // A dialog, popup menu, or dropdown route must keep ownership of Escape.
+    // This also covers the brief moment where that route has not restored its
+    // primary focus yet after the native window becomes active.
+    final regionRoute = ModalRoute.of(context);
+    if (regionRoute != null && !regionRoute.isCurrent) return;
+
+    final primaryFocus = FocusManager.instance.primaryFocus;
+    if (primaryFocus == null ||
+        identical(primaryFocus, FocusManager.instance.rootScope)) {
+      _focusNode.requestFocus();
+      return;
+    }
+
+    final focusInsideRegion =
+        identical(primaryFocus, _focusNode) ||
+        primaryFocus.ancestors.contains(_focusNode);
+    if (focusInsideRegion) return;
+
+    // A focus scope outside the home route belongs to an overlay route. Do not
+    // steal it when the app is reactivated.
+    final primaryContext = primaryFocus.context;
+    if (primaryContext != null &&
+        ModalRoute.of(primaryContext) != regionRoute) {
+      return;
+    }
+    _focusNode.requestFocus();
+  }
+
+  Future<void> _close() async {
+    if (_closing) return;
+    _closing = true;
+    try {
+      await widget.onClose();
+    } finally {
+      _closing = false;
+    }
+  }
+
+  @override
+  void dispose() {
+    windowManager.removeListener(this);
+    _focusNode.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     return CallbackShortcuts(
       bindings: {
         const SingleActivator(LogicalKeyboardKey.escape): () {
-          unawaited(onClose());
+          unawaited(_close());
         },
       },
-      child: Focus(autofocus: true, child: child),
+      child: Focus(
+        focusNode: _focusNode,
+        autofocus: true,
+        child: widget.child,
+      ),
     );
   }
 }

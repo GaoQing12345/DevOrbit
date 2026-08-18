@@ -81,11 +81,33 @@ class DesktopClipboardReader {
   }
 
   Future<String?> readSystemText() async {
-    try {
-      return (await Clipboard.getData(Clipboard.kTextPlain))?.text;
-    } on PlatformException {
-      return null;
+    // Windows clipboard providers may keep the clipboard open briefly while
+    // they publish several formats (or restore the previous value after a
+    // synthetic paste). A single Clipboard.getData call is therefore not
+    // reliable enough for desktop tools. Retry both null results and transient
+    // platform failures, but keep the first successful value unchanged.
+    for (final delay in const [
+      Duration.zero,
+      Duration(milliseconds: 8),
+      Duration(milliseconds: 16),
+      Duration(milliseconds: 32),
+      Duration(milliseconds: 64),
+      Duration(milliseconds: 128),
+      Duration(milliseconds: 256),
+    ]) {
+      if (delay > Duration.zero) {
+        await Future<void>.delayed(delay);
+      }
+      try {
+        final text = (await Clipboard.getData(Clipboard.kTextPlain))?.text;
+        if (text != null) return text;
+      } on PlatformException {
+        // The clipboard can be temporarily owned by another process. Continue
+        // with the next attempt instead of turning a timing race into a paste
+        // failure.
+      }
     }
+    return null;
   }
 
   bool get _usesNativeCapture {

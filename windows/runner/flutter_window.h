@@ -70,6 +70,7 @@ class FlutterWindow : public Win32Window {
   int paste_capture_retry_count_ = 0;
   bool paste_capture_armed_ = false;
   bool paste_capture_invalidated_ = false;
+  bool paste_key_pressed_ = false;
   bool paste_request_notification_sent_ = false;
   bool show_on_first_frame_ = true;
 };

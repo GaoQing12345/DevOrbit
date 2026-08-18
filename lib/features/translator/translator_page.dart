@@ -102,8 +102,9 @@ class _TranslatorPageState extends State<TranslatorPage> {
           widget.controller.translate,
       const SingleActivator(LogicalKeyboardKey.enter, control: true):
           widget.controller.translate,
-      const SingleActivator(LogicalKeyboardKey.escape):
-          widget.controller.isTranslating ? widget.controller.cancel : () {},
+      if (widget.controller.isTranslating)
+        const SingleActivator(LogicalKeyboardKey.escape):
+            widget.controller.cancel,
     };
     return CallbackShortcuts(
       bindings: shortcuts,
@@ -126,30 +127,42 @@ class _TranslatorPageState extends State<TranslatorPage> {
                     child: LayoutBuilder(
                       builder: (context, constraints) {
                         final horizontal = constraints.maxWidth >= 720;
-                        final source = _TranslationPane(
-                          title: '原文',
-                          footer: '${widget.controller.sourceText.length} 字符',
-                          icon: Icons.edit_note_rounded,
-                          emphasized: _sourceFocusNode.hasFocus,
-                          child: TextField(
-                            key: const ValueKey('translator-source'),
-                            controller: _sourceController,
-                            focusNode: _sourceFocusNode,
-                            autofocus: true,
-                            expands: true,
-                            maxLines: null,
-                            minLines: null,
-                            textAlignVertical: TextAlignVertical.top,
-                            style: const TextStyle(fontSize: 15, height: 1.65),
-                            decoration: const InputDecoration(
-                              hintText: '输入或粘贴文本',
-                              border: InputBorder.none,
-                              enabledBorder: InputBorder.none,
-                              focusedBorder: InputBorder.none,
-                              filled: false,
-                              contentPadding: EdgeInsets.all(18),
+                        final source = Listener(
+                          behavior: HitTestBehavior.translucent,
+                          onPointerDown: (_) {
+                            if (!_sourceFocusNode.hasFocus) {
+                              _sourceFocusNode.requestFocus();
+                            }
+                          },
+                          child: _TranslationPane(
+                            title: '原文',
+                            footer:
+                                '${widget.controller.sourceText.length} 字符',
+                            icon: Icons.edit_note_rounded,
+                            emphasized: _sourceFocusNode.hasFocus,
+                            child: TextField(
+                              key: const ValueKey('translator-source'),
+                              controller: _sourceController,
+                              focusNode: _sourceFocusNode,
+                              autofocus: true,
+                              expands: true,
+                              maxLines: null,
+                              minLines: null,
+                              textAlignVertical: TextAlignVertical.top,
+                              style: const TextStyle(
+                                fontSize: 15,
+                                height: 1.65,
+                              ),
+                              decoration: const InputDecoration(
+                                hintText: '输入或粘贴文本',
+                                border: InputBorder.none,
+                                enabledBorder: InputBorder.none,
+                                focusedBorder: InputBorder.none,
+                                filled: false,
+                                contentPadding: EdgeInsets.all(18),
+                              ),
+                              onChanged: widget.controller.updateSource,
                             ),
-                            onChanged: widget.controller.updateSource,
                           ),
                         );
                         final result = _TranslationPane(

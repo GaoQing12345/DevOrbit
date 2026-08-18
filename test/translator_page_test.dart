@@ -1,4 +1,5 @@
 import 'package:dev_orbit/app/app_theme.dart';
+import 'package:dev_orbit/core/desktop/desktop_window_shell.dart';
 import 'package:dev_orbit/features/translator/deepl_api_key_store.dart';
 import 'package:dev_orbit/features/translator/deepl_translation_client.dart';
 import 'package:dev_orbit/features/translator/translator_controller.dart';
@@ -55,6 +56,104 @@ void main() {
     expect(tester.takeException(), isNull);
     expect(find.byKey(const ValueKey('translator-source')), findsOneWidget);
     await tester.binding.setSurfaceSize(null);
+  });
+
+  testWidgets('source editor regains focus after selecting the translation', (
+    tester,
+  ) async {
+    final controller = TranslatorController(
+      client: _NoopClient(),
+      keyStore: _MemoryApiKeyStore(),
+    )
+      ..sourceText = 'source text'
+      ..translatedText = 'translated text';
+    addTearDown(controller.dispose);
+    await tester.binding.setSurfaceSize(const Size(960, 700));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.light(),
+        home: TranslatorPage(controller: controller),
+      ),
+    );
+    await tester.pump();
+
+    await tester.tap(find.text('translated text'));
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('translator-source')));
+    await tester.pump();
+
+    final field = tester.widget<TextField>(
+      find.byKey(const ValueKey('translator-source')),
+    );
+    expect(field.focusNode!.hasFocus, isTrue);
+    tester.testTextInput.enterText('edited source');
+    await tester.pump();
+    expect(field.controller!.text, 'edited source');
+    expect(controller.sourceText, 'edited source');
+  });
+
+  testWidgets('idle translator lets Escape close the standalone window', (
+    tester,
+  ) async {
+    var closeCount = 0;
+    final controller = TranslatorController(
+      client: _NoopClient(),
+      keyStore: _MemoryApiKeyStore(),
+    )..translatedText = 'translated text';
+    addTearDown(controller.dispose);
+    await tester.binding.setSurfaceSize(const Size(960, 700));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: DesktopEscapeCloseRegion(
+          onClose: () async => closeCount++,
+          child: Scaffold(body: TranslatorPage(controller: controller)),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    await tester.tap(find.text('translated text'));
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pump();
+
+    expect(closeCount, 1);
+  });
+
+  testWidgets('Escape cancels translation before closing the window', (
+    tester,
+  ) async {
+    var closeCount = 0;
+    final controller = TranslatorController(
+      client: _NoopClient(),
+      keyStore: _MemoryApiKeyStore(),
+    )..isTranslating = true;
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: DesktopEscapeCloseRegion(
+          onClose: () async => closeCount++,
+          child: Scaffold(body: TranslatorPage(controller: controller)),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pump();
+
+    expect(controller.isTranslating, isFalse);
+    expect(closeCount, 0);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pump();
+
+    expect(closeCount, 1);
   });
 
   testWidgets('QuickClipboard inserts into the previous translation cursor', (

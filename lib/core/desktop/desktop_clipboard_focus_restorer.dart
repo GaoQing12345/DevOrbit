@@ -150,6 +150,27 @@ class DesktopClipboardFocusRestorer with WindowListener {
 
   static const _clipboardSessionLimit = Duration(seconds: 30);
   static const _resumedCaptureLimit = Duration(seconds: 3);
+  static const _pasteCaptureObservationRetryDelays = <Duration>[
+    Duration(milliseconds: 4),
+    Duration(milliseconds: 8),
+    Duration(milliseconds: 16),
+    Duration(milliseconds: 32),
+    Duration(milliseconds: 64),
+    Duration(milliseconds: 128),
+    Duration(milliseconds: 256),
+  ];
+  static const _pasteCaptureTextRetryDelays = <Duration>[
+    Duration(milliseconds: 4),
+    Duration(milliseconds: 8),
+    Duration(milliseconds: 16),
+    Duration(milliseconds: 32),
+    Duration(milliseconds: 64),
+    Duration(milliseconds: 128),
+    Duration(milliseconds: 256),
+    Duration(milliseconds: 512),
+    Duration(milliseconds: 1024),
+    Duration(milliseconds: 1536),
+  ];
   static int _nextSessionId = 0;
 
   final List<DesktopClipboardTarget> _targets;
@@ -162,7 +183,9 @@ class DesktopClipboardFocusRestorer with WindowListener {
   bool _disposed = false;
   bool _active = true;
   Timer? _captureRetryTimer;
+  Completer<void>? _captureRetryCompleter;
   Timer? _resumedCaptureTimer;
+  bool _pasteOperationInFlight = false;
   DesktopClipboardTarget? _suppressedPasteTarget;
   DateTime? _suppressPasteUntil;
   DateTime? _skipPasteActionUntil;
@@ -257,7 +280,8 @@ class DesktopClipboardFocusRestorer with WindowListener {
       _pasteText(snapshot, text, suppressFollowUpPaste: true);
       return;
     }
-    unawaited(_pasteExplicitClipboard(snapshot, suppressFollowUpPaste: true));
+    _pasteFallbackArmed = false;
+    _startExplicitPaste(snapshot, suppressFollowUpPaste: true);
   }
 
   bool _canPaste(_DesktopFocusSnapshot snapshot) {
@@ -325,7 +349,7 @@ class DesktopClipboardFocusRestorer with WindowListener {
     _restoreSelection(snapshot);
     _requestFocus(snapshot.target);
     _suppressMatchingPasteAction();
-    unawaited(_pasteExplicitClipboard(snapshot, suppressFollowUpPaste: true));
+    _startExplicitPaste(snapshot, suppressFollowUpPaste: true);
     return true;
   }
 
@@ -335,11 +359,28 @@ class DesktopClipboardFocusRestorer with WindowListener {
     final snapshot = _snapshot;
     if (_pasteFallbackArmed && snapshot != null && _canPaste(snapshot)) {
       _pasteFallbackArmed = false;
-      unawaited(_pasteExplicitClipboard(snapshot));
+      _startExplicitPaste(snapshot);
       return;
     }
     final target = _focusedTarget();
     if (target != null) unawaited(_pasteCurrentSelection(target));
+  }
+
+  void _startExplicitPaste(
+    _DesktopFocusSnapshot snapshot, {
+    bool suppressFollowUpPaste = false,
+  }) {
+    // A native paste notification and Flutter's own key event can arrive in
+    // either order. Serialize the read/insert operation so the second path
+    // cannot fall back to the restored clipboard and insert a duplicate value.
+    if (_pasteOperationInFlight) return;
+    _pasteOperationInFlight = true;
+    unawaited(
+      _pasteExplicitClipboard(
+        snapshot,
+        suppressFollowUpPaste: suppressFollowUpPaste,
+      ).whenComplete(() => _pasteOperationInFlight = false),
+    );
   }
 
   Future<void> _pasteExplicitClipboard(
@@ -347,16 +388,38 @@ class DesktopClipboardFocusRestorer with WindowListener {
     bool suppressFollowUpPaste = false,
   }) async {
     var text = await _clipboardReader.readCapturedPasteText(snapshot.sessionId);
-    if (text == null &&
-        await _clipboardReader.didPasteCaptureObserveChange(
-          snapshot.sessionId,
-        )) {
-      for (final delay in const [
-        Duration(milliseconds: 4),
-        Duration(milliseconds: 8),
-        Duration(milliseconds: 16),
-        Duration(milliseconds: 32),
-      ]) {
+    var observedChange = text != null;
+    if (text == null) {
+      observedChange = await _clipboardReader.didPasteCaptureObserveChange(
+        snapshot.sessionId,
+      );
+
+      // The injected paste key can reach Flutter before Windows posts the first
+      // WM_CLIPBOARDUPDATE for a clipboard manager. Give the native capture a
+      // short observation window before falling back to the system clipboard;
+      // otherwise the fallback can read the value that QuickClipboard has just
+      // restored and insert the wrong item.
+      if (!observedChange &&
+          defaultTargetPlatform == TargetPlatform.windows) {
+        for (final delay in _pasteCaptureObservationRetryDelays) {
+          await _waitForCaptureRetry(delay);
+          if (!_canPaste(snapshot)) return;
+          text = await _clipboardReader.readCapturedPasteText(
+            snapshot.sessionId,
+          );
+          if (text != null) {
+            observedChange = true;
+            break;
+          }
+          observedChange = await _clipboardReader
+              .didPasteCaptureObserveChange(snapshot.sessionId);
+          if (observedChange) break;
+        }
+      }
+    }
+
+    if (text == null && observedChange) {
+      for (final delay in _pasteCaptureTextRetryDelays) {
         await _waitForCaptureRetry(delay);
         if (!_canPaste(snapshot)) return;
         text = await _clipboardReader.readCapturedPasteText(snapshot.sessionId);
@@ -398,13 +461,27 @@ class DesktopClipboardFocusRestorer with WindowListener {
   }
 
   Future<void> _waitForCaptureRetry(Duration delay) {
+    _cancelCaptureRetry();
     final completer = Completer<void>();
-    _captureRetryTimer?.cancel();
+    _captureRetryCompleter = completer;
     _captureRetryTimer = Timer(delay, () {
-      _captureRetryTimer = null;
-      completer.complete();
+      if (identical(_captureRetryCompleter, completer)) {
+        _captureRetryTimer = null;
+        _captureRetryCompleter = null;
+      }
+      if (!completer.isCompleted) completer.complete();
     });
     return completer.future;
+  }
+
+  void _cancelCaptureRetry() {
+    _captureRetryTimer?.cancel();
+    _captureRetryTimer = null;
+    final completer = _captureRetryCompleter;
+    _captureRetryCompleter = null;
+    if (completer != null && !completer.isCompleted) {
+      completer.complete();
+    }
   }
 
   bool _consumePasteSuppression() {
@@ -451,8 +528,7 @@ class DesktopClipboardFocusRestorer with WindowListener {
     if (expected != null && !identical(snapshot, expected)) return;
     _snapshot = null;
     _pasteFallbackArmed = false;
-    _captureRetryTimer?.cancel();
-    _captureRetryTimer = null;
+    _cancelCaptureRetry();
     _resumedCaptureTimer?.cancel();
     _resumedCaptureTimer = null;
     if (snapshot != null) {
