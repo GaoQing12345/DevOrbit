@@ -21,7 +21,7 @@ class DesktopEscapeCloseRegion extends StatefulWidget {
   static void consumeCurrentEscape() {
     final version = ++_escapeSuppressionVersion;
     _suppressedEscapeVersion = version;
-    Timer.run(() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_suppressedEscapeVersion == version) {
         _suppressedEscapeVersion = null;
       }
