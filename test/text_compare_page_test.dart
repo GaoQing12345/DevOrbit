@@ -34,6 +34,7 @@ void main() {
     expect(find.text('开始比对'), findsOneWidget);
     expect(find.text('忽略大小写'), findsOneWidget);
     expect(find.text('忽略行尾空白'), findsOneWidget);
+    expect(find.text('折叠未更改行'), findsOneWidget);
     expect(find.byType(CodeEditor), findsNWidgets(2));
     await tester.pumpWidget(const SizedBox.shrink());
   });
@@ -103,6 +104,83 @@ void main() {
     await tester.pump(const Duration(milliseconds: 120));
     await tester.pumpWidget(const SizedBox.shrink());
     debugDefaultTargetPlatformOverride = null;
+  });
+
+  testWidgets('folds unchanged runs and restores every line when disabled', (
+    tester,
+  ) async {
+    final controller = TextCompareController(service: _ImmediateService());
+    addTearDown(controller.dispose);
+    controller.updateLeft(
+      [for (var index = 0; index < 12; index++) 'line $index'].join('\n'),
+    );
+    controller.updateRight(
+      [
+        for (var index = 0; index < 12; index++)
+          index == 5 ? 'changed line' : 'line $index',
+      ].join('\n'),
+    );
+    await controller.compare();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(body: TextComparePage(controller: controller)),
+      ),
+    );
+    final editors = tester
+        .widgetList<CodeEditor>(find.byType(CodeEditor))
+        .toList(growable: false);
+    expect(editors.first.controller!.codeLines.length, 12);
+
+    await tester.tap(find.text('折叠未更改行'));
+    await tester.pump();
+    await tester.pump();
+
+    expect(editors.first.controller!.codeLines.length, lessThan(12));
+    expect(editors.first.controller!.text.split('\n'), hasLength(12));
+
+    await tester.tap(find.text('折叠未更改行'));
+    await tester.pump();
+    await tester.pump();
+
+    expect(editors.first.controller!.codeLines.length, 12);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('keeps the two editors vertically aligned while scrolling', (
+    tester,
+  ) async {
+    final controller = TextCompareController(service: _ImmediateService());
+    addTearDown(controller.dispose);
+    final text = [
+      for (var index = 0; index < 80; index++) 'line $index',
+    ].join('\n');
+    controller.updateLeft(text);
+    controller.updateRight(text);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 1100,
+            height: 600,
+            child: TextComparePage(controller: controller),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    final editors = tester
+        .widgetList<CodeEditor>(find.byType(CodeEditor))
+        .toList(growable: false);
+    final leftScroll = editors.first.scrollController!.verticalScroller;
+    final rightScroll = editors.last.scrollController!.verticalScroller;
+
+    leftScroll.jumpTo(180);
+    await tester.pump();
+
+    expect(rightScroll.offset, closeTo(180, 0.5));
+    await tester.pumpWidget(const SizedBox.shrink());
   });
 }
 

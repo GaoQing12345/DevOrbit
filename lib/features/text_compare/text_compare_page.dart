@@ -22,15 +22,23 @@ class TextComparePage extends StatefulWidget {
 class _TextComparePageState extends State<TextComparePage> {
   late final CodeLineEditingController _leftEditor;
   late final CodeLineEditingController _rightEditor;
+  late final CodeScrollController _leftScrollController;
+  late final CodeScrollController _rightScrollController;
   final _leftFocusNode = FocusNode();
   final _rightFocusNode = FocusNode();
   late final DesktopClipboardFocusRestorer _focusRestorer;
+  bool _foldUnchanged = false;
+  bool _syncingScroll = false;
 
   @override
   void initState() {
     super.initState();
     _leftEditor = _createEditor(TextCompareSide.left);
     _rightEditor = _createEditor(TextCompareSide.right);
+    _leftScrollController = CodeScrollController();
+    _rightScrollController = CodeScrollController();
+    _leftScrollController.verticalScroller.addListener(_syncLeftScroll);
+    _rightScrollController.verticalScroller.addListener(_syncRightScroll);
     _focusRestorer = DesktopClipboardFocusRestorer(
       targets: [
         CodeLineClipboardTarget(
@@ -77,6 +85,14 @@ class _TextComparePageState extends State<TextComparePage> {
   void dispose() {
     widget.controller.removeListener(_syncFromController);
     _focusRestorer.dispose();
+    _leftScrollController.verticalScroller.removeListener(_syncLeftScroll);
+    _rightScrollController.verticalScroller.removeListener(_syncRightScroll);
+    _leftScrollController.dispose();
+    _rightScrollController.dispose();
+    _leftScrollController.verticalScroller.dispose();
+    _leftScrollController.horizontalScroller.dispose();
+    _rightScrollController.verticalScroller.dispose();
+    _rightScrollController.horizontalScroller.dispose();
     _leftFocusNode.removeListener(_handleFocusChange);
     _rightFocusNode.removeListener(_handleFocusChange);
     _leftEditor.dispose();
@@ -90,6 +106,34 @@ class _TextComparePageState extends State<TextComparePage> {
     if (mounted) setState(() {});
   }
 
+  void _syncLeftScroll() {
+    _syncVerticalScroll(
+      source: _leftScrollController.verticalScroller,
+      target: _rightScrollController.verticalScroller,
+    );
+  }
+
+  void _syncRightScroll() {
+    _syncVerticalScroll(
+      source: _rightScrollController.verticalScroller,
+      target: _leftScrollController.verticalScroller,
+    );
+  }
+
+  void _syncVerticalScroll({
+    required ScrollController source,
+    required ScrollController target,
+  }) {
+    if (_syncingScroll || !source.hasClients || !target.hasClients) return;
+    final nextOffset = source.offset
+        .clamp(0.0, target.position.maxScrollExtent)
+        .toDouble();
+    if ((target.offset - nextOffset).abs() < 0.5) return;
+    _syncingScroll = true;
+    target.jumpTo(nextOffset);
+    _syncingScroll = false;
+  }
+
   void _syncFromController() {
     if (_leftEditor.text != widget.controller.leftText) {
       _leftEditor.text = widget.controller.leftText;
@@ -97,7 +141,69 @@ class _TextComparePageState extends State<TextComparePage> {
     if (_rightEditor.text != widget.controller.rightText) {
       _rightEditor.text = widget.controller.rightText;
     }
-    if (mounted) setState(() {});
+    if (mounted) {
+      setState(() {});
+      _scheduleFoldingUpdate();
+    }
+  }
+
+  void _setFoldUnchanged(bool value) {
+    if (_foldUnchanged == value) return;
+    setState(() => _foldUnchanged = value);
+    _scheduleFoldingUpdate();
+  }
+
+  void _scheduleFoldingUpdate() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _updateFolding();
+    });
+  }
+
+  void _updateFolding() {
+    _expandAllChunks(_leftEditor);
+    _expandAllChunks(_rightEditor);
+    if (!_foldUnchanged) return;
+    final result = widget.controller.result;
+    if (result == null) return;
+    _collapseUnchangedRuns(_leftEditor, result.leftLines);
+    _collapseUnchangedRuns(_rightEditor, result.rightLines);
+  }
+
+  void _expandAllChunks(CodeLineEditingController editor) {
+    for (var index = editor.codeLines.length - 1; index >= 0; index--) {
+      if (editor.codeLines[index].chunkParent) {
+        editor.expandChunk(index);
+      }
+    }
+  }
+
+  void _collapseUnchangedRuns(
+    CodeLineEditingController editor,
+    List<TextDiffLine> lines,
+  ) {
+    const contextLines = 2;
+    final ranges = <({int start, int end})>[];
+    var runStart = -1;
+    for (var index = 0; index <= lines.length; index++) {
+      final unchanged =
+          index < lines.length &&
+          lines[index].status == TextDiffLineStatus.unchanged;
+      if (unchanged && runStart < 0) {
+        runStart = index;
+      } else if (!unchanged && runStart >= 0) {
+        final runEnd = index - 1;
+        if (runEnd - runStart + 1 > contextLines * 2) {
+          ranges.add((
+            start: runStart + contextLines - 1,
+            end: runEnd - contextLines + 2,
+          ));
+        }
+        runStart = -1;
+      }
+    }
+    for (final range in ranges.reversed) {
+      editor.collapseChunk(range.start, range.end);
+    }
   }
 
   Future<void> _openFile(TextCompareSide side) async {
@@ -133,61 +239,86 @@ class _TextComparePageState extends State<TextComparePage> {
     final lines = side == TextCompareSide.left
         ? result?.leftLines
         : result?.rightLines;
-    if (lines == null || index >= lines.length) {
+    final editor = side == TextCompareSide.left ? _leftEditor : _rightEditor;
+    final originalIndex = editor.codeLines.index2lineIndex(index);
+    if (lines == null || originalIndex < 0 || originalIndex >= lines.length) {
       return TextSpan(text: text, style: style);
     }
-    final line = lines[index];
+    final line = lines[originalIndex];
     final colors = _diffColors(context, side, line.status);
+    final lineStyle = style.copyWith(
+      backgroundColor: colors.line,
+      fontWeight: line.status == TextDiffLineStatus.unchanged
+          ? style.fontWeight
+          : FontWeight.w600,
+    );
     if (line.ranges.isEmpty) {
-      return TextSpan(
-        text: text,
-        style: style.copyWith(backgroundColor: colors.line),
-      );
+      return TextSpan(text: text, style: lineStyle);
     }
     final children = <TextSpan>[];
     var offset = 0;
     for (final range in line.ranges) {
       if (range.start > offset) {
-        children.add(TextSpan(text: text.substring(offset, range.start)));
+        children.add(
+          TextSpan(text: text.substring(offset, range.start), style: lineStyle),
+        );
       }
       children.add(
         TextSpan(
           text: text.substring(range.start, range.end),
-          style: style.copyWith(backgroundColor: colors.character),
+          style: lineStyle.copyWith(
+            backgroundColor: colors.character,
+            color: colors.characterText,
+            fontWeight: FontWeight.w700,
+          ),
         ),
       );
       offset = range.end;
     }
     if (offset < text.length) {
-      children.add(TextSpan(text: text.substring(offset)));
+      children.add(TextSpan(text: text.substring(offset), style: lineStyle));
     }
-    return TextSpan(
-      style: style.copyWith(backgroundColor: colors.line),
-      children: children,
-    );
+    return TextSpan(style: lineStyle, children: children);
   }
 
-  ({Color line, Color character}) _diffColors(
+  ({Color line, Color character, Color characterText}) _diffColors(
     BuildContext context,
     TextCompareSide side,
     TextDiffLineStatus status,
   ) {
     final dark = Theme.of(context).brightness == Brightness.dark;
     final line = switch (status) {
-      TextDiffLineStatus.added => Color.fromARGB(dark ? 66 : 38, 46, 155, 99),
-      TextDiffLineStatus.removed => Color.fromARGB(dark ? 66 : 34, 204, 74, 82),
-      TextDiffLineStatus.modified => Color.fromARGB(
-        dark ? 64 : 34,
-        209,
-        138,
-        22,
-      ),
+      TextDiffLineStatus.added =>
+        dark ? const Color(0xFF183B2C) : const Color(0xFFE0F2E7),
+      TextDiffLineStatus.removed =>
+        dark ? const Color(0xFF432220) : const Color(0xFFFBE3E0),
+      TextDiffLineStatus.modified =>
+        dark ? const Color(0xFF493514) : const Color(0xFFFFEBC7),
       TextDiffLineStatus.unchanged => Colors.transparent,
     };
-    final character = side == TextCompareSide.left
-        ? Color.fromARGB(dark ? 138 : 86, 204, 74, 82)
-        : Color.fromARGB(dark ? 132 : 78, 46, 155, 99);
-    return (line: line, character: character);
+    final character = switch (status) {
+      TextDiffLineStatus.added =>
+        dark ? const Color(0xFF246B49) : const Color(0xFFB9E7CA),
+      TextDiffLineStatus.removed =>
+        dark ? const Color(0xFF8B3D3A) : const Color(0xFFFFC7C2),
+      TextDiffLineStatus.modified =>
+        side == TextCompareSide.left
+            ? (dark ? const Color(0xFF8B3D3A) : const Color(0xFFFFC7C2))
+            : (dark ? const Color(0xFF246B49) : const Color(0xFFB9E7CA)),
+      TextDiffLineStatus.unchanged => Colors.transparent,
+    };
+    final characterText = switch (status) {
+      TextDiffLineStatus.added =>
+        dark ? const Color(0xFFE8FFF0) : const Color(0xFF0B4A2D),
+      TextDiffLineStatus.removed =>
+        dark ? const Color(0xFFFFECEA) : const Color(0xFF711C17),
+      TextDiffLineStatus.modified =>
+        side == TextCompareSide.left
+            ? (dark ? const Color(0xFFFFECEA) : const Color(0xFF711C17))
+            : (dark ? const Color(0xFFE8FFF0) : const Color(0xFF0B4A2D)),
+      TextDiffLineStatus.unchanged => Theme.of(context).colorScheme.onSurface,
+    };
+    return (line: line, character: character, characterText: characterText);
   }
 
   @override
@@ -208,6 +339,8 @@ class _TextComparePageState extends State<TextComparePage> {
             children: [
               _CompareToolbar(
                 controller: widget.controller,
+                foldUnchanged: _foldUnchanged,
+                onFoldUnchangedChanged: _setFoldUnchanged,
                 onOpenLeft: () => _openFile(TextCompareSide.left),
                 onOpenRight: () => _openFile(TextCompareSide.right),
                 onCopySummary: _copySummary,
@@ -222,6 +355,7 @@ class _TextComparePageState extends State<TextComparePage> {
                           side: TextCompareSide.left,
                           controller: widget.controller,
                           editor: _leftEditor,
+                          scrollController: _leftScrollController,
                           focusNode: _leftFocusNode,
                           emphasized: _leftFocusNode.hasFocus,
                           onPaste: _focusRestorer.pasteFocusedTarget,
@@ -235,6 +369,7 @@ class _TextComparePageState extends State<TextComparePage> {
                           side: TextCompareSide.right,
                           controller: widget.controller,
                           editor: _rightEditor,
+                          scrollController: _rightScrollController,
                           focusNode: _rightFocusNode,
                           emphasized: _rightFocusNode.hasFocus,
                           onPaste: _focusRestorer.pasteFocusedTarget,
@@ -258,12 +393,16 @@ class _TextComparePageState extends State<TextComparePage> {
 class _CompareToolbar extends StatelessWidget {
   const _CompareToolbar({
     required this.controller,
+    required this.foldUnchanged,
+    required this.onFoldUnchangedChanged,
     required this.onOpenLeft,
     required this.onOpenRight,
     required this.onCopySummary,
   });
 
   final TextCompareController controller;
+  final bool foldUnchanged;
+  final ValueChanged<bool> onFoldUnchangedChanged;
   final VoidCallback onOpenLeft;
   final VoidCallback onOpenRight;
   final VoidCallback onCopySummary;
@@ -295,6 +434,12 @@ class _CompareToolbar extends StatelessWidget {
               value: controller.options.ignoreTrailingWhitespace,
               onChanged: controller.updateIgnoreTrailingWhitespace,
             ),
+            _OptionToggle(
+              label: '折叠未更改行',
+              value: foldUnchanged,
+              onChanged: onFoldUnchangedChanged,
+            ),
+            const _DiffLegend(),
             FilledButton.icon(
               onPressed: controller.canCompare ? controller.compare : null,
               icon: controller.isComparing
@@ -392,11 +537,62 @@ class _ToolbarAction extends StatelessWidget {
   }
 }
 
+class _DiffLegend extends StatelessWidget {
+  const _DiffLegend();
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _LegendItem(color: scheme.error, label: '删除'),
+        const SizedBox(width: 7),
+        _LegendItem(color: const Color(0xFFD18A16), label: '修改'),
+        const SizedBox(width: 7),
+        _LegendItem(color: const Color(0xFF2E9B63), label: '新增'),
+      ],
+    );
+  }
+}
+
+class _LegendItem extends StatelessWidget {
+  const _LegendItem({required this.color, required this.label});
+
+  final Color color;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 7,
+          height: 7,
+          decoration: BoxDecoration(
+            color: color,
+            borderRadius: BorderRadius.circular(2),
+          ),
+        ),
+        const SizedBox(width: 4),
+        Text(
+          label,
+          style: Theme.of(context).textTheme.labelSmall?.copyWith(
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 class _TextPane extends StatelessWidget {
   const _TextPane({
     required this.side,
     required this.controller,
     required this.editor,
+    required this.scrollController,
     required this.focusNode,
     required this.emphasized,
     required this.onPaste,
@@ -406,6 +602,7 @@ class _TextPane extends StatelessWidget {
   final TextCompareSide side;
   final TextCompareController controller;
   final CodeLineEditingController editor;
+  final CodeScrollController scrollController;
   final FocusNode focusNode;
   final bool emphasized;
   final VoidCallback onPaste;
@@ -476,6 +673,7 @@ class _TextPane extends StatelessWidget {
               child: CodeEditor(
                 key: ValueKey('${side.name}-${controller.highlightRevision}'),
                 controller: editor,
+                scrollController: scrollController,
                 focusNode: focusNode,
                 shortcutOverrideActions: {
                   CodeShortcutPasteIntent:

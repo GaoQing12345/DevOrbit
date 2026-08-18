@@ -45,8 +45,9 @@ class TextCompareIndicator extends StatelessWidget {
             left: 0,
             top: 0,
             bottom: 0,
-            width: 4,
+            width: 6,
             child: _DiffStripe(
+              controller: controller,
               notifier: notifier,
               lines: lines,
               scheme: scheme,
@@ -60,18 +61,20 @@ class TextCompareIndicator extends StatelessWidget {
 
 class _DiffStripe extends LeafRenderObjectWidget {
   const _DiffStripe({
+    required this.controller,
     required this.notifier,
     required this.lines,
     required this.scheme,
   });
 
+  final CodeLineEditingController controller;
   final CodeIndicatorValueNotifier notifier;
   final List<TextDiffLine> lines;
   final ColorScheme scheme;
 
   @override
   RenderObject createRenderObject(BuildContext context) {
-    return _DiffStripeRenderObject(notifier, lines, scheme);
+    return _DiffStripeRenderObject(controller, notifier, lines, scheme);
   }
 
   @override
@@ -80,6 +83,7 @@ class _DiffStripe extends LeafRenderObjectWidget {
     covariant _DiffStripeRenderObject renderObject,
   ) {
     renderObject
+      ..controller = controller
       ..notifier = notifier
       ..lines = lines
       ..scheme = scheme;
@@ -87,13 +91,25 @@ class _DiffStripe extends LeafRenderObjectWidget {
 }
 
 class _DiffStripeRenderObject extends RenderBox {
-  _DiffStripeRenderObject(this._notifier, this._lines, this._scheme) {
+  _DiffStripeRenderObject(
+    this._controller,
+    this._notifier,
+    this._lines,
+    this._scheme,
+  ) {
     _notifier.addListener(markNeedsPaint);
   }
 
+  CodeLineEditingController _controller;
   CodeIndicatorValueNotifier _notifier;
   List<TextDiffLine> _lines;
   ColorScheme _scheme;
+
+  set controller(CodeLineEditingController value) {
+    if (identical(_controller, value)) return;
+    _controller = value;
+    markNeedsPaint();
+  }
 
   set notifier(CodeIndicatorValueNotifier value) {
     if (identical(_notifier, value)) return;
@@ -125,11 +141,17 @@ class _DiffStripeRenderObject extends RenderBox {
     final canvas = context.canvas;
     final paragraphs = _notifier.value?.paragraphs ?? const [];
     for (final paragraph in paragraphs) {
-      if (paragraph.index >= _lines.length) continue;
-      final color = switch (_lines[paragraph.index].status) {
+      final originalIndex = _controller.codeLines.index2lineIndex(
+        paragraph.index,
+      );
+      if (originalIndex < 0 || originalIndex >= _lines.length) continue;
+      final color = switch (_lines[originalIndex].status) {
         TextDiffLineStatus.added => const Color(0xFF2E9B63),
-        TextDiffLineStatus.removed => _scheme.error,
-        TextDiffLineStatus.modified => const Color(0xFFD18A16),
+        TextDiffLineStatus.removed =>
+          _scheme.brightness == Brightness.dark
+              ? const Color(0xFFFF716B)
+              : const Color(0xFFCC332E),
+        TextDiffLineStatus.modified => const Color(0xFFE0991B),
         TextDiffLineStatus.unchanged => Colors.transparent,
       };
       if (color == Colors.transparent) continue;

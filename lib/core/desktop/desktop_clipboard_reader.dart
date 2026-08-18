@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
+import 'desktop_clipboard_diagnostics.dart';
+
 class DesktopPasteRequest {
   const DesktopPasteRequest({this.sessionId, this.text});
 
@@ -39,18 +41,36 @@ class DesktopClipboardReader {
   }
 
   Future<bool> armPasteCapture(int sessionId) async {
-    if (!_usesNativeCapture) return false;
+    if (!_usesNativeCapture) {
+      DesktopClipboardDiagnostics.write('arm_skip', {'session': sessionId});
+      return false;
+    }
+    DesktopClipboardDiagnostics.write('arm_start', {'session': sessionId});
     try {
       final supported =
           await _channel.invokeMethod<bool>('supportsPasteCapture') ?? false;
+      DesktopClipboardDiagnostics.write('arm_supports', {
+        'session': sessionId,
+        'supported': supported,
+      });
       if (!supported) return false;
       await _channel.invokeMethod<void>('armPasteCapture', {
         'sessionId': sessionId,
       });
+      DesktopClipboardDiagnostics.write('arm_success', {'session': sessionId});
       return true;
     } on MissingPluginException {
+      DesktopClipboardDiagnostics.write('arm_error', {
+        'session': sessionId,
+        'type': 'missing_plugin',
+      });
       return false;
-    } on PlatformException {
+    } on PlatformException catch (error) {
+      DesktopClipboardDiagnostics.write('arm_error', {
+        'session': sessionId,
+        'type': error.code,
+        'message': error.message,
+      });
       return false;
     }
   }
@@ -62,12 +82,27 @@ class DesktopClipboardReader {
   Future<String?> readCapturedPasteText(int sessionId) async {
     if (!_usesNativeCapture) return null;
     try {
-      return await _channel.invokeMethod<String>('takePendingPasteText', {
+      final text = await _channel.invokeMethod<String>('takePendingPasteText', {
         'sessionId': sessionId,
       });
+      DesktopClipboardDiagnostics.write('capture_read', {
+        'session': sessionId,
+        'available': text != null,
+        'length': text?.length,
+      });
+      return text;
     } on MissingPluginException {
+      DesktopClipboardDiagnostics.write('capture_read_error', {
+        'session': sessionId,
+        'type': 'missing_plugin',
+      });
       return null;
-    } on PlatformException {
+    } on PlatformException catch (error) {
+      DesktopClipboardDiagnostics.write('capture_read_error', {
+        'session': sessionId,
+        'type': error.code,
+        'message': error.message,
+      });
       return null;
     }
   }
@@ -75,13 +110,28 @@ class DesktopClipboardReader {
   Future<bool> didPasteCaptureObserveChange(int sessionId) async {
     if (!_usesNativeCapture) return false;
     try {
-      return await _channel.invokeMethod<bool>('didPasteCaptureObserveChange', {
+      final observed =
+          await _channel.invokeMethod<bool>('didPasteCaptureObserveChange', {
             'sessionId': sessionId,
           }) ??
           false;
+      DesktopClipboardDiagnostics.write('capture_observed', {
+        'session': sessionId,
+        'observed': observed,
+      });
+      return observed;
     } on MissingPluginException {
+      DesktopClipboardDiagnostics.write('capture_observed_error', {
+        'session': sessionId,
+        'type': 'missing_plugin',
+      });
       return false;
-    } on PlatformException {
+    } on PlatformException catch (error) {
+      DesktopClipboardDiagnostics.write('capture_observed_error', {
+        'session': sessionId,
+        'type': error.code,
+        'message': error.message,
+      });
       return false;
     }
   }
@@ -114,8 +164,18 @@ class DesktopClipboardReader {
       }
       try {
         final text = (await Clipboard.getData(Clipboard.kTextPlain))?.text;
+        DesktopClipboardDiagnostics.write('system_read', {
+          'delay_ms': delay.inMilliseconds,
+          'available': text != null,
+          'length': text?.length,
+        });
         if (text != null) return text;
-      } on PlatformException {
+      } on PlatformException catch (error) {
+        DesktopClipboardDiagnostics.write('system_read_error', {
+          'delay_ms': delay.inMilliseconds,
+          'type': error.code,
+          'message': error.message,
+        });
         // The clipboard can be temporarily owned by another process. Continue
         // with the next attempt instead of turning a timing race into a paste
         // failure.
@@ -136,10 +196,21 @@ class DesktopClipboardReader {
     _channel.setMethodCallHandler((call) async {
       if (call.method != 'pasteRequested') return;
       final arguments = call.arguments;
-      if (arguments is! Map) return;
+      if (arguments is! Map) {
+        DesktopClipboardDiagnostics.write('native_request_invalid');
+        return;
+      }
       final sessionId = arguments['sessionId'];
       final text = arguments['text'];
-      if (sessionId is! int && text is! String) return;
+      if (sessionId is! int && text is! String) {
+        DesktopClipboardDiagnostics.write('native_request_invalid_fields');
+        return;
+      }
+      DesktopClipboardDiagnostics.write('native_request', {
+        'session': sessionId,
+        'has_text': text is String,
+        'length': text is String ? text.length : null,
+      });
       _pasteRequests.add(
         DesktopPasteRequest(
           sessionId: sessionId is int ? sessionId : null,
@@ -156,9 +227,24 @@ class DesktopClipboardReader {
         method,
         sessionId == null ? null : {'sessionId': sessionId},
       );
+      DesktopClipboardDiagnostics.write('channel_success', {
+        'method': method,
+        'session': sessionId,
+      });
     } on MissingPluginException {
+      DesktopClipboardDiagnostics.write('channel_error', {
+        'method': method,
+        'session': sessionId,
+        'type': 'missing_plugin',
+      });
       return;
-    } on PlatformException {
+    } on PlatformException catch (error) {
+      DesktopClipboardDiagnostics.write('channel_error', {
+        'method': method,
+        'session': sessionId,
+        'type': error.code,
+        'message': error.message,
+      });
       return;
     }
   }

@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:re_editor/re_editor.dart';
 import 'package:window_manager/window_manager.dart';
 
+import 'desktop_clipboard_diagnostics.dart';
 import 'desktop_clipboard_reader.dart';
 
 abstract class DesktopClipboardTarget {
@@ -218,9 +219,32 @@ class DesktopClipboardFocusRestorer with WindowListener {
   void _suspendFocus() => _captureFocusSnapshot();
 
   void _captureFocusSnapshot({bool armNative = true}) {
-    if (!_active || _snapshot != null || _hasExternalEditableFocus()) return;
+    if (!_active) {
+      DesktopClipboardDiagnostics.write('snapshot_skip', {
+        'reason': 'inactive',
+      });
+      return;
+    }
+    if (_snapshot != null) {
+      DesktopClipboardDiagnostics.write('snapshot_skip', {
+        'reason': 'already_active',
+        'session': _snapshot!.sessionId,
+      });
+      return;
+    }
+    if (_hasExternalEditableFocus()) {
+      DesktopClipboardDiagnostics.write('snapshot_skip', {
+        'reason': 'external_focus',
+      });
+      return;
+    }
     final target = _focusedTarget() ?? _lastTarget;
-    if (target == null || !target.isAvailable) return;
+    if (target == null || !target.isAvailable) {
+      DesktopClipboardDiagnostics.write('snapshot_skip', {
+        'reason': 'no_target',
+      });
+      return;
+    }
     final sessionId = ++_nextSessionId;
     _clearPasteSuppression();
     final snapshot = _DesktopFocusSnapshot(
@@ -236,6 +260,13 @@ class DesktopClipboardFocusRestorer with WindowListener {
     _snapshot = snapshot;
     _pasteFallbackArmed = true;
     _resumedCaptureTimer?.cancel();
+    DesktopClipboardDiagnostics.write('snapshot_captured', {
+      'session': sessionId,
+      'target': _targetIndex(target),
+      'selection': snapshot.selection,
+      'text_length': snapshot.content.length,
+      'arm_native': armNative,
+    });
   }
 
   void _restoreFocus() {
@@ -246,6 +277,9 @@ class DesktopClipboardFocusRestorer with WindowListener {
     final snapshot = _snapshot;
     if (snapshot == null) {
       _pasteFallbackArmed = false;
+      DesktopClipboardDiagnostics.write('restore_skip', {
+        'reason': 'no_snapshot',
+      });
       return;
     }
     _restoreSelection(snapshot);
@@ -255,6 +289,10 @@ class DesktopClipboardFocusRestorer with WindowListener {
       _resumedCaptureLimit,
       () => _cancelRestore(expected: snapshot),
     );
+    DesktopClipboardDiagnostics.write('focus_restored', {
+      'session': snapshot.sessionId,
+      'target': _targetIndex(snapshot.target),
+    });
   }
 
   void _restoreSelection(_DesktopFocusSnapshot snapshot) {
@@ -264,16 +302,40 @@ class DesktopClipboardFocusRestorer with WindowListener {
   }
 
   void _handleNativePasteRequest(DesktopPasteRequest request) {
+    DesktopClipboardDiagnostics.write('request_handling', {
+      'session': request.sessionId,
+      'has_text': request.text != null,
+      'length': request.text?.length,
+      'active_session': _snapshot?.sessionId,
+    });
     if (_snapshot == null && request.text != null) {
       _captureFocusSnapshot(armNative: false);
     }
     final snapshot = _snapshot;
-    if (snapshot == null) return;
+    if (snapshot == null) {
+      DesktopClipboardDiagnostics.write('request_drop', {
+        'reason': 'no_snapshot',
+      });
+      return;
+    }
     final sessionId = request.sessionId;
-    if (sessionId != null && snapshot.sessionId != sessionId) return;
+    if (sessionId != null && snapshot.sessionId != sessionId) {
+      DesktopClipboardDiagnostics.write('request_drop', {
+        'reason': 'session_mismatch',
+        'session': sessionId,
+        'active_session': snapshot.sessionId,
+      });
+      return;
+    }
     final text = request.text;
     if (text != null) {
-      if (text.isEmpty || !_canPaste(snapshot)) return;
+      if (text.isEmpty || !_canPaste(snapshot)) {
+        DesktopClipboardDiagnostics.write('request_drop', {
+          'reason': text.isEmpty ? 'empty_text' : 'snapshot_invalid',
+          'session': snapshot.sessionId,
+        });
+        return;
+      }
       _pasteFallbackArmed = false;
       _restoreSelection(snapshot);
       _requestFocus(snapshot.target);
@@ -292,17 +354,37 @@ class DesktopClipboardFocusRestorer with WindowListener {
   }
 
   bool _canPaste(_DesktopFocusSnapshot snapshot) {
-    if (_disposed || !_active || !identical(_snapshot, snapshot)) return false;
+    if (_disposed || !_active || !identical(_snapshot, snapshot)) {
+      DesktopClipboardDiagnostics.write('paste_rejected', {
+        'reason': 'snapshot_state',
+        'session': snapshot.sessionId,
+      });
+      return false;
+    }
     if (DateTime.now().difference(snapshot.suspendedAt) >
         _clipboardSessionLimit) {
+      DesktopClipboardDiagnostics.write('paste_rejected', {
+        'reason': 'session_expired',
+        'session': snapshot.sessionId,
+      });
       _cancelRestore(expected: snapshot);
       return false;
     }
     if (!snapshot.target.isAvailable || !_contentMatches(snapshot)) {
+      DesktopClipboardDiagnostics.write('paste_rejected', {
+        'reason': 'target_changed',
+        'session': snapshot.sessionId,
+        'target_available': snapshot.target.isAvailable,
+        'content_matches': _contentMatches(snapshot),
+      });
       _cancelRestore(expected: snapshot);
       return false;
     }
     if (_hasExternalEditableFocus()) {
+      DesktopClipboardDiagnostics.write('paste_rejected', {
+        'reason': 'external_focus',
+        'session': snapshot.sessionId,
+      });
       _cancelRestore(expected: snapshot);
       return false;
     }
@@ -342,6 +424,11 @@ class DesktopClipboardFocusRestorer with WindowListener {
     if (!isPasteShortcut) {
       return false;
     }
+    DesktopClipboardDiagnostics.write('paste_key', {
+      'session': _snapshot?.sessionId,
+      'fallback_armed': _pasteFallbackArmed,
+      'external_focus': _hasExternalEditableFocus(),
+    });
     if (_consumePasteSuppression()) {
       _suppressMatchingPasteAction();
       return true;
@@ -361,6 +448,13 @@ class DesktopClipboardFocusRestorer with WindowListener {
   }
 
   void pasteFocusedTarget() {
+    DesktopClipboardDiagnostics.write('paste_action', {
+      'session': _snapshot?.sessionId,
+      'fallback_armed': _pasteFallbackArmed,
+      'focused_target': _focusedTarget() == null
+          ? null
+          : _targetIndex(_focusedTarget()!),
+    });
     if (_consumeMatchingPasteAction()) return;
     if (_consumePasteSuppression()) return;
     final snapshot = _snapshot;
@@ -380,8 +474,18 @@ class DesktopClipboardFocusRestorer with WindowListener {
     // A native paste notification and Flutter's own key event can arrive in
     // either order. Serialize the read/insert operation so the second path
     // cannot fall back to the restored clipboard and insert a duplicate value.
-    if (_pasteOperationInFlight) return;
+    if (_pasteOperationInFlight) {
+      DesktopClipboardDiagnostics.write('paste_start_skip', {
+        'reason': 'already_in_flight',
+        'session': snapshot.sessionId,
+      });
+      return;
+    }
     _pasteOperationInFlight = true;
+    DesktopClipboardDiagnostics.write('paste_start', {
+      'session': snapshot.sessionId,
+      'suppress_follow_up': suppressFollowUpPaste,
+    });
     unawaited(
       _pasteExplicitClipboard(
         snapshot,
@@ -395,6 +499,10 @@ class DesktopClipboardFocusRestorer with WindowListener {
     bool suppressFollowUpPaste = false,
   }) async {
     final nativeCaptureReady = await snapshot.nativeCaptureReady;
+    DesktopClipboardDiagnostics.write('paste_capture_ready', {
+      'session': snapshot.sessionId,
+      'native_ready': nativeCaptureReady,
+    });
     if (!_canPaste(snapshot)) return;
     var text = nativeCaptureReady
         ? await _clipboardReader.readCapturedPasteText(snapshot.sessionId)
@@ -444,6 +552,12 @@ class DesktopClipboardFocusRestorer with WindowListener {
       }
     }
     text ??= await _clipboardReader.readSystemText();
+    DesktopClipboardDiagnostics.write('paste_text_selected', {
+      'session': snapshot.sessionId,
+      'source': observedChange ? 'native_capture' : 'system_clipboard',
+      'available': text != null,
+      'length': text?.length,
+    });
     if (!_canPaste(snapshot) || text == null || text.isEmpty) return;
     _pasteText(snapshot, text, suppressFollowUpPaste: suppressFollowUpPaste);
   }
@@ -462,6 +576,12 @@ class DesktopClipboardFocusRestorer with WindowListener {
     String text, {
     bool suppressFollowUpPaste = false,
   }) {
+    DesktopClipboardDiagnostics.write('paste_insert', {
+      'session': snapshot.sessionId,
+      'target': _targetIndex(snapshot.target),
+      'length': text.length,
+      'suppress_follow_up': suppressFollowUpPaste,
+    });
     snapshot.target.replaceSelection(text, snapshot.selection);
     if (suppressFollowUpPaste) {
       _suppressedPasteTarget = snapshot.target;
@@ -536,9 +656,20 @@ class DesktopClipboardFocusRestorer with WindowListener {
     return _targets.any((target) => target.focusNode == focus);
   }
 
+  int? _targetIndex(DesktopClipboardTarget target) {
+    final index = _targets.indexOf(target);
+    return index < 0 ? null : index;
+  }
+
   void _cancelRestore({_DesktopFocusSnapshot? expected}) {
     final snapshot = _snapshot;
     if (expected != null && !identical(snapshot, expected)) return;
+    if (snapshot != null) {
+      DesktopClipboardDiagnostics.write('snapshot_cancelled', {
+        'session': snapshot.sessionId,
+        'expected_match': expected == null || identical(snapshot, expected),
+      });
+    }
     _snapshot = null;
     _pasteFallbackArmed = false;
     _cancelCaptureRetry();

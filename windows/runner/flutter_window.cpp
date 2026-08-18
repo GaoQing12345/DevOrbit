@@ -5,6 +5,8 @@
 #include <tlhelp32.h>
 #include <wincred.h>
 #include <cstdlib>
+#include <cstdio>
+#include <cstring>
 #include <optional>
 #include <string>
 #include <vector>
@@ -25,6 +27,41 @@ constexpr UINT kPasteCaptureRetryDelayMs = 10;
 // final text format to become available instead of treating each intermediate
 // update as a different paste operation.
 constexpr int kPasteCaptureMaxRetries = 250;
+
+void ClipboardTrace(const std::string& event,
+                    const std::string& details = std::string()) noexcept {
+  try {
+  const char* disabled = std::getenv("DEV_ORBIT_CLIPBOARD_TRACE");
+  if (disabled != nullptr && std::strcmp(disabled, "0") == 0) return;
+  wchar_t temp_path[MAX_PATH] = {};
+  const DWORD length = GetTempPathW(MAX_PATH, temp_path);
+  if (length == 0 || length >= MAX_PATH) return;
+  std::wstring path(temp_path, length);
+  path += L"dev_orbit_clipboard_trace.log";
+
+  SYSTEMTIME now = {};
+  GetLocalTime(&now);
+  char prefix[192] = {};
+  sprintf_s(prefix, sizeof(prefix),
+            "%04u-%02u-%02uT%02u:%02u:%02u.%03u pid=%lu tid=%lu platform=windows ",
+            now.wYear, now.wMonth, now.wDay, now.wHour, now.wMinute,
+            now.wSecond, now.wMilliseconds, GetCurrentProcessId(),
+            GetCurrentThreadId());
+  std::string line = std::string(prefix) + "event=" + event;
+  if (!details.empty()) line += " " + details;
+  line += "\r\n";
+  HANDLE file = CreateFileW(path.c_str(), FILE_APPEND_DATA,
+                            FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
+                            OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+  if (file == INVALID_HANDLE_VALUE) return;
+  DWORD written = 0;
+  WriteFile(file, line.data(), static_cast<DWORD>(line.size()), &written,
+            nullptr);
+  CloseHandle(file);
+  } catch (...) {
+    // Diagnostics must never affect clipboard behavior.
+  }
+}
 
 struct WindowActivationRequest {
   DWORD process_id;
@@ -222,22 +259,33 @@ void FlutterWindow::RegisterClipboardChannel() {
           &flutter::StandardMethodCodec::GetInstance());
   clipboard_channel_->SetMethodCallHandler(
       [this](const auto& call, auto result) {
+        ClipboardTrace("channel_call", "method=" + call.method_name());
         if (call.method_name() == "getChangeCount") {
+          ClipboardTrace("change_count",
+                         "sequence=" +
+                             std::to_string(GetClipboardSequenceNumber()));
           result->Success(flutter::EncodableValue(
               static_cast<int64_t>(GetClipboardSequenceNumber())));
           return;
         }
         if (call.method_name() == "supportsPasteCapture") {
+          ClipboardTrace("supports_capture", "supported=true");
           result->Success(flutter::EncodableValue(true));
           return;
         }
         if (call.method_name() == "takePendingPasteText") {
           const auto session_id = ClipboardSessionId(call);
           if (!session_id) {
+            ClipboardTrace("take_pending_error", "reason=missing_session");
             result->Error("invalid_arguments", "Missing clipboard session ID");
             return;
           }
           const auto text = TakePendingPasteText(*session_id);
+          ClipboardTrace(
+              "take_pending",
+              "session=" + std::to_string(*session_id) +
+                  " available=" + (text ? "true" : "false") +
+                  " length=" + (text ? std::to_string(text->size()) : "0"));
           if (text) {
             result->Success(flutter::EncodableValue(*text));
           } else {
@@ -248,9 +296,11 @@ void FlutterWindow::RegisterClipboardChannel() {
         if (call.method_name() == "armPasteCapture") {
           const auto session_id = ClipboardSessionId(call);
           if (!session_id) {
+            ClipboardTrace("arm_error", "reason=missing_session");
             result->Error("invalid_arguments", "Missing clipboard session ID");
             return;
           }
+          ClipboardTrace("arm_call", "session=" + std::to_string(*session_id));
           ArmPasteCapture(*session_id);
           result->Success();
           return;
@@ -258,19 +308,28 @@ void FlutterWindow::RegisterClipboardChannel() {
         if (call.method_name() == "didPasteCaptureObserveChange") {
           const auto session_id = ClipboardSessionId(call);
           if (!session_id) {
+            ClipboardTrace("observe_error", "reason=missing_session");
             result->Error("invalid_arguments", "Missing clipboard session ID");
             return;
           }
+          const bool observed = DidPasteCaptureObserveChange(*session_id);
+          ClipboardTrace("observe_call", "session=" +
+                                             std::to_string(*session_id) +
+                                             " observed=" +
+                                             (observed ? "true" : "false"));
           result->Success(flutter::EncodableValue(
-              DidPasteCaptureObserveChange(*session_id)));
+              observed));
           return;
         }
         if (call.method_name() == "discardPendingPasteText") {
           const auto session_id = ClipboardSessionId(call);
           if (!session_id) {
+            ClipboardTrace("discard_error", "reason=missing_session");
             result->Error("invalid_arguments", "Missing clipboard session ID");
             return;
           }
+          ClipboardTrace("discard_call", "session=" +
+                                             std::to_string(*session_id));
           DiscardPendingPasteText(*session_id);
           result->Success();
           return;
@@ -436,18 +495,28 @@ void FlutterWindow::BeginPasteCapture(std::optional<int64_t> session_id) {
   paste_capture_armed_ = true;
   paste_capture_session_id_ = session_id;
   paste_capture_baseline_sequence_ = GetClipboardSequenceNumber();
+  ClipboardTrace(
+      "capture_begin",
+      "session=" +
+          (session_id ? std::to_string(*session_id) : std::string("none")) +
+          " baseline=" + std::to_string(paste_capture_baseline_sequence_));
 }
 
 void FlutterWindow::ArmPasteCapture(int64_t session_id) {
+  ClipboardTrace("capture_arm", "session=" + std::to_string(session_id));
   if (paste_capture_armed_) {
     if (!paste_capture_session_id_) {
       paste_capture_session_id_ = session_id;
       if (!pending_paste_text_) {
         HandleClipboardUpdate();
       }
+      ClipboardTrace("capture_arm_reuse", "session=" +
+                                             std::to_string(session_id));
       return;
     }
     if (*paste_capture_session_id_ == session_id) {
+      ClipboardTrace("capture_arm_duplicate", "session=" +
+                                                    std::to_string(session_id));
       return;
     }
   }
@@ -457,6 +526,8 @@ void FlutterWindow::ArmPasteCapture(int64_t session_id) {
 bool FlutterWindow::DidPasteCaptureObserveChange(int64_t session_id) {
   if (!paste_capture_armed_ || !paste_capture_session_id_ ||
       *paste_capture_session_id_ != session_id) {
+    ClipboardTrace("capture_observe_reject", "session=" +
+                                                  std::to_string(session_id));
     return false;
   }
   HandleClipboardUpdate();
@@ -467,8 +538,11 @@ bool FlutterWindow::DidPasteCaptureObserveChange(int64_t session_id) {
 void FlutterWindow::DiscardPendingPasteText(int64_t session_id) {
   if (!paste_capture_session_id_ ||
       *paste_capture_session_id_ != session_id) {
+    ClipboardTrace("capture_discard_reject", "session=" +
+                                                   std::to_string(session_id));
     return;
   }
+  ClipboardTrace("capture_discard", "session=" + std::to_string(session_id));
   ResetPasteCapture();
 }
 
@@ -476,6 +550,8 @@ std::optional<std::string> FlutterWindow::TakePendingPasteText(
     int64_t session_id) {
   if (!paste_capture_armed_ || !paste_capture_session_id_ ||
       *paste_capture_session_id_ != session_id || !pending_paste_text_) {
+    ClipboardTrace("capture_take_empty", "session=" +
+                                               std::to_string(session_id));
     return std::nullopt;
   }
   auto text = pending_paste_text_;
@@ -486,12 +562,25 @@ std::optional<std::string> FlutterWindow::TakePendingPasteText(
 void FlutterWindow::HandleClipboardUpdate() {
   if (!paste_capture_armed_ || paste_capture_invalidated_ ||
       pending_paste_text_) {
+    ClipboardTrace("clipboard_update_skip", std::string("armed=") +
+                                                   (paste_capture_armed_ ?
+                                                        "true" : "false") +
+                                                   " invalidated=" +
+                                                   (paste_capture_invalidated_ ?
+                                                        "true" : "false") +
+                                                   " pending=" +
+                                                   (pending_paste_text_ ?
+                                                        "true" : "false"));
     return;
   }
   const DWORD sequence = GetClipboardSequenceNumber();
   if (sequence == 0 || sequence == paste_capture_baseline_sequence_) {
+    ClipboardTrace("clipboard_update_unchanged", "sequence=" +
+                                                       std::to_string(sequence));
     return;
   }
+  ClipboardTrace("clipboard_update", "sequence=" +
+                                         std::to_string(sequence));
 
   // A single logical paste may produce multiple WM_CLIPBOARDUPDATE messages:
   // EmptyClipboard followed by CF_UNICODETEXT/HTML/etc. Do not require a
@@ -514,6 +603,9 @@ void FlutterWindow::RetryPendingPasteCapture() {
     return;
   }
   if (++paste_capture_retry_count_ > kPasteCaptureMaxRetries) {
+    ClipboardTrace("capture_retry_exhausted", "sequence=" +
+                                                      std::to_string(
+                                                          paste_capture_observed_sequence_));
     InvalidatePasteCapture();
     return;
   }
@@ -541,6 +633,11 @@ bool FlutterWindow::CaptureObservedPasteText() {
   }
 
   if (!OpenClipboard(GetHandle())) {
+    ClipboardTrace("capture_open_failed", "error=" +
+                                                   std::to_string(GetLastError()) +
+                                                   " retry=" +
+                                                   std::to_string(
+                                                       paste_capture_retry_count_));
     return false;
   }
 
@@ -549,8 +646,17 @@ bool FlutterWindow::CaptureObservedPasteText() {
     const wchar_t* text = static_cast<const wchar_t*>(GlobalLock(data));
     if (text) {
       pending_paste_text_ = Utf8FromUtf16(text);
+      ClipboardTrace("capture_text_ready", "sequence=" +
+                                                  std::to_string(
+                                                      paste_capture_observed_sequence_) +
+                                                  " length=" +
+                                                  std::to_string(
+                                                      pending_paste_text_->size()));
       GlobalUnlock(data);
     }
+  } else {
+    ClipboardTrace("capture_text_missing", "error=" +
+                                                  std::to_string(GetLastError()));
   }
   CloseClipboard();
   if (pending_paste_text_) {
@@ -565,6 +671,15 @@ bool FlutterWindow::CaptureObservedPasteText() {
 void FlutterWindow::NotifyPasteRequested() {
   if (paste_request_notification_sent_ || !clipboard_channel_ ||
       !paste_capture_session_id_ || !pending_paste_text_) {
+    ClipboardTrace("notify_skip", std::string("sent=") +
+                                     (paste_request_notification_sent_ ? "true" :
+                                                                          "false") +
+                                     " channel=" +
+                                     (clipboard_channel_ ? "true" : "false") +
+                                     " session=" +
+                                     (paste_capture_session_id_ ? "true" : "false") +
+                                     " pending=" +
+                                     (pending_paste_text_ ? "true" : "false"));
     return;
   }
 
@@ -572,12 +687,23 @@ void FlutterWindow::NotifyPasteRequested() {
   arguments[flutter::EncodableValue("sessionId")] = flutter::EncodableValue(
       *paste_capture_session_id_);
   paste_request_notification_sent_ = true;
+  ClipboardTrace("notify_paste_requested", "session=" +
+                                                   std::to_string(
+                                                       *paste_capture_session_id_) +
+                                                   " length=" +
+                                                   std::to_string(
+                                                       pending_paste_text_->size()));
   clipboard_channel_->InvokeMethod(
       "pasteRequested",
       std::make_unique<flutter::EncodableValue>(arguments));
 }
 
 void FlutterWindow::InvalidatePasteCapture() {
+  ClipboardTrace("capture_invalidated", "session=" +
+                                             (paste_capture_session_id_
+                                                  ? std::to_string(
+                                                        *paste_capture_session_id_)
+                                                  : std::string("none")));
   KillTimer(GetHandle(), kPasteCaptureRetryTimer);
   pending_paste_text_.reset();
   paste_capture_retry_count_ = 0;
@@ -585,6 +711,13 @@ void FlutterWindow::InvalidatePasteCapture() {
 }
 
 void FlutterWindow::ResetPasteCapture() {
+  if (paste_capture_armed_ || paste_capture_session_id_) {
+    ClipboardTrace("capture_reset", "session=" +
+                                         (paste_capture_session_id_
+                                              ? std::to_string(
+                                                    *paste_capture_session_id_)
+                                              : std::string("none")));
+  }
   KillTimer(GetHandle(), kPasteCaptureRetryTimer);
   paste_capture_armed_ = false;
   pending_paste_text_.reset();
@@ -641,7 +774,17 @@ bool FlutterWindow::OnCreate() {
   RegisterCredentialsChannel();
   RegisterProcessWindowChannel();
   RegisterAppLifecycleChannel();
-  AddClipboardFormatListener(GetHandle());
+  const BOOL clipboard_listener_added = AddClipboardFormatListener(GetHandle());
+  const DWORD clipboard_listener_error = clipboard_listener_added
+                                             ? ERROR_SUCCESS
+                                             : GetLastError();
+  ClipboardTrace("clipboard_listener", std::string("registered=") +
+                                               (clipboard_listener_added ?
+                                                    std::string("true") :
+                                                    std::string("false")) +
+                                               " error=" +
+                                               std::to_string(
+                                                   clipboard_listener_error));
 
   if (show_on_first_frame_) {
     flutter_controller_->engine()->SetNextFrameCallback([this]() {
@@ -698,6 +841,14 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
       (message == WM_KEYDOWN || message == WM_SYSKEYDOWN) &&
       ((wparam == 'V' && (GetKeyState(VK_CONTROL) & 0x8000) != 0) ||
        (wparam == VK_INSERT && (GetKeyState(VK_SHIFT) & 0x8000) != 0));
+  if (is_paste_key) {
+    ClipboardTrace("native_paste_key", std::string("armed=") +
+                                           (paste_capture_armed_ ? "true" :
+                                                                    "false") +
+                                           " pending=" +
+                                           (pending_paste_text_ ? "true" :
+                                                                  "false"));
+  }
   if (is_paste_key && paste_capture_armed_ && !pending_paste_text_) {
     // Clipboard update messages and injected keyboard messages originate on
     // different threads. Re-check synchronously at the actual paste boundary
@@ -713,9 +864,13 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
     NotifyPasteRequested();
   }
   if (message == WM_CLIPBOARDUPDATE && paste_capture_armed_) {
+    ClipboardTrace("native_clipboard_update_message");
     HandleClipboardUpdate();
   }
   if (message == WM_ACTIVATE && LOWORD(wparam) == WA_INACTIVE) {
+    ClipboardTrace("native_window_inactive", std::string("armed=") +
+                                               (paste_capture_armed_ ? "true" :
+                                                                        "false"));
     if (!paste_capture_armed_ || !paste_capture_session_id_) {
       BeginPasteCapture(std::nullopt);
     }
