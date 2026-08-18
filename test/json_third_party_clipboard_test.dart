@@ -26,10 +26,7 @@ void main() {
     await _blurEditor(tester, editor.focusNode!);
     final sessionId = nativeClipboard.armedSessionId!;
     await _focusWindow(tester);
-    await _sendNativePasteRequested(
-      sessionId: sessionId,
-      text: 'iCopy item',
-    );
+    await _sendNativePasteRequested(sessionId: sessionId, text: 'iCopy item');
     await tester.pump();
 
     expect(fixture.controller.text, 'abciCopy itemdef');

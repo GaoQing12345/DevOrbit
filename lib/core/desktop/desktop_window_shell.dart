@@ -97,11 +97,7 @@ class _DesktopEscapeCloseRegionState extends State<DesktopEscapeCloseRegion>
           unawaited(_close());
         },
       },
-      child: Focus(
-        focusNode: _focusNode,
-        autofocus: true,
-        child: widget.child,
-      ),
+      child: Focus(focusNode: _focusNode, autofocus: true, child: widget.child),
     );
   }
 }

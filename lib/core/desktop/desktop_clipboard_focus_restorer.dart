@@ -423,8 +423,9 @@ class DesktopClipboardFocusRestorer with WindowListener {
             observedChange = true;
             break;
           }
-          observedChange = await _clipboardReader
-              .didPasteCaptureObserveChange(snapshot.sessionId);
+          observedChange = await _clipboardReader.didPasteCaptureObserveChange(
+            snapshot.sessionId,
+          );
           if (observedChange) break;
         }
       }

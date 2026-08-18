@@ -37,26 +37,31 @@ void main() {
     },
   );
 
-  test('system clipboard read retries a transient unavailable result', () async {
-    debugDefaultTargetPlatformOverride = TargetPlatform.windows;
-    addTearDown(() => debugDefaultTargetPlatformOverride = null);
-    var reads = 0;
-    final messenger =
-        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
-    messenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
-      if (call.method != 'Clipboard.getData') return null;
-      reads++;
-      if (reads < 3) return null;
-      return {'text': 'eventual clipboard text'};
-    });
-    addTearDown(
-      () => messenger.setMockMethodCallHandler(SystemChannels.platform, null),
-    );
+  test(
+    'system clipboard read retries a transient unavailable result',
+    () async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+      var reads = 0;
+      final messenger =
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      messenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
+        if (call.method != 'Clipboard.getData') return null;
+        reads++;
+        if (reads < 3) return null;
+        return {'text': 'eventual clipboard text'};
+      });
+      addTearDown(
+        () => messenger.setMockMethodCallHandler(SystemChannels.platform, null),
+      );
 
-    expect(await const DesktopClipboardReader().readSystemText(),
-        'eventual clipboard text');
-    expect(reads, 3);
-  });
+      expect(
+        await const DesktopClipboardReader().readSystemText(),
+        'eventual clipboard text',
+      );
+      expect(reads, 3);
+    },
+  );
 
   test('an old discard cannot clear a newer capture session', () async {
     debugDefaultTargetPlatformOverride = TargetPlatform.windows;

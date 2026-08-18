@@ -14,8 +14,9 @@ class DesktopClipboardReader {
   const DesktopClipboardReader();
 
   static const _channel = MethodChannel('dev_orbit/clipboard');
-  static final _pasteRequests =
-      StreamController<DesktopPasteRequest>.broadcast(sync: true);
+  static final _pasteRequests = StreamController<DesktopPasteRequest>.broadcast(
+    sync: true,
+  );
   static bool _pasteRequestHandlerInstalled = false;
 
   Stream<DesktopPasteRequest> get pasteRequests {

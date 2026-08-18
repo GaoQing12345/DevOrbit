@@ -61,12 +61,13 @@ void main() {
   testWidgets('source editor regains focus after selecting the translation', (
     tester,
   ) async {
-    final controller = TranslatorController(
-      client: _NoopClient(),
-      keyStore: _MemoryApiKeyStore(),
-    )
-      ..sourceText = 'source text'
-      ..translatedText = 'translated text';
+    final controller =
+        TranslatorController(
+            client: _NoopClient(),
+            keyStore: _MemoryApiKeyStore(),
+          )
+          ..sourceText = 'source text'
+          ..translatedText = 'translated text';
     addTearDown(controller.dispose);
     await tester.binding.setSurfaceSize(const Size(960, 700));
     addTearDown(() => tester.binding.setSurfaceSize(null));

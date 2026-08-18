@@ -145,8 +145,7 @@ class _TranslatorPageState extends State<TranslatorPage> {
                           },
                           child: _TranslationPane(
                             title: '原文',
-                            footer:
-                                '${widget.controller.sourceText.length} 字符',
+                            footer: '${widget.controller.sourceText.length} 字符',
                             icon: Icons.edit_note_rounded,
                             emphasized: _sourceFocusNode.hasFocus,
                             child: TextField(
