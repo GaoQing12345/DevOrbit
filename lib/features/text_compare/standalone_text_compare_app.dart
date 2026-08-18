@@ -38,7 +38,7 @@ Future<void> runStandaloneTextCompare({bool prewarmed = false}) async {
       size: Size(1100, 720 + titleBarHeight),
       minimumSize: Size(820, 560 + titleBarHeight),
       center: true,
-      skipTaskbar: true,
+      skipTaskbar: Platform.isMacOS,
       backgroundColor: Colors.transparent,
       title: '文本比对 - DevOrbit',
       titleBarStyle: useCustomWindowsTitleBar

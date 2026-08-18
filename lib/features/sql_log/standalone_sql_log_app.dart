@@ -41,7 +41,7 @@ Future<void> runStandaloneSqlLog({bool prewarmed = false}) async {
       size: Size(1100, 720 + titleBarHeight),
       minimumSize: Size(720, 560 + titleBarHeight),
       center: true,
-      skipTaskbar: true,
+      skipTaskbar: Platform.isMacOS,
       backgroundColor: Colors.transparent,
       title: 'SQL 日志还原 - DevOrbit',
       titleBarStyle: useCustomWindowsTitleBar

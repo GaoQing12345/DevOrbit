@@ -38,7 +38,7 @@ Future<void> runStandaloneTimestamp({bool prewarmed = false}) async {
       size: Size(940, 650 + titleBarHeight),
       minimumSize: Size(660, 540 + titleBarHeight),
       center: true,
-      skipTaskbar: true,
+      skipTaskbar: Platform.isMacOS,
       backgroundColor: Colors.transparent,
       title: '时间戳转换 - DevOrbit',
       titleBarStyle: useCustomWindowsTitleBar
