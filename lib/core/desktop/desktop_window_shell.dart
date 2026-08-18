@@ -15,6 +15,25 @@ class DesktopEscapeCloseRegion extends StatefulWidget {
   final Future<void> Function() onClose;
   final Widget child;
 
+  static int _escapeSuppressionVersion = 0;
+  static int? _suppressedEscapeVersion;
+
+  static void consumeCurrentEscape() {
+    final version = ++_escapeSuppressionVersion;
+    _suppressedEscapeVersion = version;
+    Timer.run(() {
+      if (_suppressedEscapeVersion == version) {
+        _suppressedEscapeVersion = null;
+      }
+    });
+  }
+
+  static bool _takeCurrentEscapeSuppression() {
+    if (_suppressedEscapeVersion == null) return false;
+    _suppressedEscapeVersion = null;
+    return true;
+  }
+
   @override
   State<DesktopEscapeCloseRegion> createState() =>
       _DesktopEscapeCloseRegionState();
@@ -94,6 +113,7 @@ class _DesktopEscapeCloseRegionState extends State<DesktopEscapeCloseRegion>
     return CallbackShortcuts(
       bindings: {
         const SingleActivator(LogicalKeyboardKey.escape): () {
+          if (DesktopEscapeCloseRegion._takeCurrentEscapeSuppression()) return;
           unawaited(_close());
         },
       },

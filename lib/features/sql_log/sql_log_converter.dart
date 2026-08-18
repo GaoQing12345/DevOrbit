@@ -315,8 +315,9 @@ class SqlLogConverter {
       return true;
     }
     if (_logTimestamp.hasMatch(trimmed)) return true;
-    return RegExp(r'\s(?:TRACE|DEBUG|INFO|WARN|ERROR|FATAL)\s')
-            .hasMatch(line) &&
+    return RegExp(
+          r'\s(?:TRACE|DEBUG|INFO|WARN|ERROR|FATAL)\s',
+        ).hasMatch(line) &&
         line.contains(' - ');
   }
 

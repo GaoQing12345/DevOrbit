@@ -18,16 +18,18 @@ void main() {
 
     expect(lease, isNotNull);
     expect(
-      await File('${directory.path}${Platform.pathSeparator}translator.pid')
-          .readAsString(),
+      await File(
+        '${directory.path}${Platform.pathSeparator}translator.pid',
+      ).readAsString(),
       '7321',
     );
 
     await lease!.release();
     await lease.release();
     expect(
-      File('${directory.path}${Platform.pathSeparator}translator.pid')
-          .existsSync(),
+      File(
+        '${directory.path}${Platform.pathSeparator}translator.pid',
+      ).existsSync(),
       isFalse,
     );
   });

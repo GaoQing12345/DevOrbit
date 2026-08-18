@@ -13,10 +13,8 @@ import 'single_instance_registry.dart';
 const standaloneJsonFormatterFlag = '--json-formatter-window';
 const standaloneJsonFormatterPrewarmFlag = '--json-formatter-prewarm';
 
-typedef DetachedProcessStarter = Future<int> Function(
-  String executable,
-  List<String> arguments,
-);
+typedef DetachedProcessStarter =
+    Future<int> Function(String executable, List<String> arguments);
 typedef ProcessTerminator = bool Function(int processId);
 
 abstract interface class StandaloneToolWindowLauncher {

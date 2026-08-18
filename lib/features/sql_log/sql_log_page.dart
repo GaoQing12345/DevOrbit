@@ -242,8 +242,9 @@ class _Toolbar extends StatelessWidget {
           const SizedBox(width: 10),
           Text(
             'SQL 日志还原',
-            style: Theme.of(context).textTheme.titleMedium
-                ?.copyWith(fontWeight: FontWeight.w600),
+            style: Theme.of(
+              context,
+            ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
           ),
           const Spacer(),
           SizedBox(
@@ -349,8 +350,9 @@ class _StatusItem extends StatelessWidget {
         const SizedBox(width: 5),
         Text(
           text,
-          style: Theme.of(context).textTheme.labelMedium
-              ?.copyWith(color: foreground),
+          style: Theme.of(
+            context,
+          ).textTheme.labelMedium?.copyWith(color: foreground),
         ),
       ],
     );
@@ -414,8 +416,9 @@ class _SqlOutputList extends StatelessWidget {
       return Center(
         child: Text(
           '转换后的 SQL 会显示在这里',
-          style: Theme.of(context).textTheme.bodyMedium
-              ?.copyWith(color: scheme.onSurfaceVariant),
+          style: Theme.of(
+            context,
+          ).textTheme.bodyMedium?.copyWith(color: scheme.onSurfaceVariant),
         ),
       );
     }
@@ -463,8 +466,9 @@ class _SqlOutputList extends StatelessWidget {
                     const SizedBox(width: 9),
                     Text(
                       'SQL ${index + 1}',
-                      style: Theme.of(context).textTheme.labelLarge
-                          ?.copyWith(fontWeight: FontWeight.w600),
+                      style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                     const SizedBox(width: 12),
                     Expanded(

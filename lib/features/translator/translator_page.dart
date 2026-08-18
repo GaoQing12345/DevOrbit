@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../core/desktop/desktop_clipboard_focus_restorer.dart';
+import '../../core/desktop/desktop_window_shell.dart';
 import 'translation_language.dart';
 import 'translator_controller.dart';
 
@@ -64,6 +65,7 @@ class _TranslatorPageState extends State<TranslatorPage> {
         !widget.controller.isTranslating) {
       return false;
     }
+    DesktopEscapeCloseRegion.consumeCurrentEscape();
     widget.controller.cancel();
     return true;
   }
