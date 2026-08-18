@@ -1,0 +1,21 @@
+name: Format Helper
+
+on:
+  workflow_dispatch:
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - run: dart format lib test
+      - name: Export formatted patch
+        run: git diff --binary > "$RUNNER_TEMP/devorbit-format.patch"
+      - uses: actions/upload-artifact@v5
+        with:
+          name: devorbit-format-patch
+          path: ${{ runner.temp }}/devorbit-format.patch
