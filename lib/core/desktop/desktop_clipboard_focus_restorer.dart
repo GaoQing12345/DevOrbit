@@ -229,13 +229,13 @@ class DesktopClipboardFocusRestorer with WindowListener {
       selection: target.selection,
       suspendedAt: DateTime.now(),
       sessionId: sessionId,
+      nativeCaptureReady: armNative
+          ? _clipboardReader.armPasteCapture(sessionId)
+          : Future<bool>.value(false),
     );
     _snapshot = snapshot;
     _pasteFallbackArmed = true;
     _resumedCaptureTimer?.cancel();
-    if (armNative) {
-      unawaited(_clipboardReader.armPasteCapture(sessionId));
-    }
   }
 
   void _restoreFocus() {
@@ -281,6 +281,13 @@ class DesktopClipboardFocusRestorer with WindowListener {
       return;
     }
     _pasteFallbackArmed = false;
+    if (_pasteOperationInFlight) {
+      // Windows can report that the paste key was pressed before the selected
+      // clipboard text becomes readable. Wake the in-flight retry immediately
+      // instead of dropping the native notification behind the operation lock.
+      _cancelCaptureRetry();
+      return;
+    }
     _startExplicitPaste(snapshot, suppressFollowUpPaste: true);
   }
 
@@ -387,7 +394,11 @@ class DesktopClipboardFocusRestorer with WindowListener {
     _DesktopFocusSnapshot snapshot, {
     bool suppressFollowUpPaste = false,
   }) async {
-    var text = await _clipboardReader.readCapturedPasteText(snapshot.sessionId);
+    final nativeCaptureReady = await snapshot.nativeCaptureReady;
+    if (!_canPaste(snapshot)) return;
+    var text = nativeCaptureReady
+        ? await _clipboardReader.readCapturedPasteText(snapshot.sessionId)
+        : null;
     var observedChange = text != null;
     if (text == null) {
       observedChange = await _clipboardReader.didPasteCaptureObserveChange(
@@ -400,6 +411,7 @@ class DesktopClipboardFocusRestorer with WindowListener {
       // otherwise the fallback can read the value that QuickClipboard has just
       // restored and insert the wrong item.
       if (!observedChange &&
+          nativeCaptureReady &&
           defaultTargetPlatform == TargetPlatform.windows) {
         for (final delay in _pasteCaptureObservationRetryDelays) {
           await _waitForCaptureRetry(delay);
@@ -564,6 +576,7 @@ class _DesktopFocusSnapshot {
     required this.selection,
     required this.suspendedAt,
     required this.sessionId,
+    required this.nativeCaptureReady,
   });
 
   final DesktopClipboardTarget target;
@@ -571,4 +584,5 @@ class _DesktopFocusSnapshot {
   final Object selection;
   final DateTime suspendedAt;
   final int sessionId;
+  final Future<bool> nativeCaptureReady;
 }

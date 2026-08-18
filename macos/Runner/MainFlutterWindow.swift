@@ -72,6 +72,8 @@ class MainFlutterWindow: NSWindow {
       switch call.method {
       case "getChangeCount":
         result(NSPasteboard.general.changeCount)
+      case "supportsPasteCapture":
+        result(true)
       case "registerPasteTarget":
         self?.pasteTargetClientCount += 1
         result(nil)

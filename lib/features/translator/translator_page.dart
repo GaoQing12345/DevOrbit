@@ -27,6 +27,7 @@ class _TranslatorPageState extends State<TranslatorPage> {
     _sourceController = TextEditingController(
       text: widget.initialText ?? widget.controller.sourceText,
     );
+    HardwareKeyboard.instance.addHandler(_handleKeyEvent);
     _focusRestorer = DesktopClipboardFocusRestorer(
       targets: [
         TextEditingClipboardTarget(
@@ -49,11 +50,22 @@ class _TranslatorPageState extends State<TranslatorPage> {
   @override
   void dispose() {
     widget.controller.removeListener(_syncFromController);
+    HardwareKeyboard.instance.removeHandler(_handleKeyEvent);
     _focusRestorer.dispose();
     _sourceFocusNode.removeListener(_handleFocusChange);
     _sourceController.dispose();
     _sourceFocusNode.dispose();
     super.dispose();
+  }
+
+  bool _handleKeyEvent(KeyEvent event) {
+    if (event is! KeyDownEvent ||
+        event.logicalKey != LogicalKeyboardKey.escape ||
+        !widget.controller.isTranslating) {
+      return false;
+    }
+    widget.controller.cancel();
+    return true;
   }
 
   void _handleFocusChange() {
@@ -102,9 +114,6 @@ class _TranslatorPageState extends State<TranslatorPage> {
           widget.controller.translate,
       const SingleActivator(LogicalKeyboardKey.enter, control: true):
           widget.controller.translate,
-      if (widget.controller.isTranslating)
-        const SingleActivator(LogicalKeyboardKey.escape):
-            widget.controller.cancel,
     };
     return CallbackShortcuts(
       bindings: shortcuts,

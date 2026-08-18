@@ -150,6 +150,7 @@ class ClipboardRevisionState {
 
   Future<Object?> handleMethodCall(MethodCall call) async {
     if (call.method == 'getChangeCount') return revision;
+    if (call.method == 'supportsPasteCapture') return true;
     if (call.method == 'armPasteCapture') {
       armedSessionId = _sessionId(call);
       pendingPasteText = null;

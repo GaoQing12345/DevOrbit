@@ -37,8 +37,21 @@ class DesktopClipboardReader {
     return _invokeVoid('unregisterPasteTarget');
   }
 
-  Future<void> armPasteCapture(int sessionId) {
-    return _invokeVoid('armPasteCapture', sessionId: sessionId);
+  Future<bool> armPasteCapture(int sessionId) async {
+    if (!_usesNativeCapture) return false;
+    try {
+      final supported =
+          await _channel.invokeMethod<bool>('supportsPasteCapture') ?? false;
+      if (!supported) return false;
+      await _channel.invokeMethod<void>('armPasteCapture', {
+        'sessionId': sessionId,
+      });
+      return true;
+    } on MissingPluginException {
+      return false;
+    } on PlatformException {
+      return false;
+    }
   }
 
   Future<void> discardPendingPasteText(int sessionId) {

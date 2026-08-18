@@ -67,6 +67,7 @@ void main() {
     final messenger =
         TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
     messenger.setMockMethodCallHandler(nativeChannel, (call) async {
+      if (call.method == 'supportsPasteCapture') return true;
       final sessionId =
           (call.arguments as Map<Object?, Object?>)['sessionId']! as int;
       if (call.method == 'armPasteCapture') {

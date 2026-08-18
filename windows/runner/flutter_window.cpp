@@ -227,6 +227,10 @@ void FlutterWindow::RegisterClipboardChannel() {
               static_cast<int64_t>(GetClipboardSequenceNumber())));
           return;
         }
+        if (call.method_name() == "supportsPasteCapture") {
+          result->Success(flutter::EncodableValue(true));
+          return;
+        }
         if (call.method_name() == "takePendingPasteText") {
           const auto session_id = ClipboardSessionId(call);
           if (!session_id) {
