@@ -563,11 +563,39 @@ class DesktopClipboardFocusRestorer with WindowListener {
   }
 
   Future<void> _pasteCurrentSelection(DesktopClipboardTarget target) async {
+    DesktopClipboardDiagnostics.write('paste_current_start', {
+      'target': _targetIndex(target),
+      'focused': target.focusNode.hasFocus,
+    });
     final selection = target.selection;
     final text = await _clipboardReader.readSystemText();
-    if (_disposed || text == null || text.isEmpty) return;
-    if (!target.isAvailable || !target.focusNode.hasFocus) return;
+    if (_disposed || text == null || text.isEmpty) {
+      DesktopClipboardDiagnostics.write('paste_current_rejected', {
+        'reason': _disposed ? 'disposed' : 'empty_text',
+        'target': _targetIndex(target),
+      });
+      return;
+    }
+    if (!target.isAvailable) {
+      DesktopClipboardDiagnostics.write('paste_current_rejected', {
+        'reason': 'target_unavailable',
+        'target': _targetIndex(target),
+      });
+      return;
+    }
+    if (!target.focusNode.hasFocus) _requestFocus(target);
+    if (!target.focusNode.hasFocus) {
+      DesktopClipboardDiagnostics.write('paste_current_rejected', {
+        'reason': 'focus_not_restored',
+        'target': _targetIndex(target),
+      });
+      return;
+    }
     target.replaceSelection(text, selection);
+    DesktopClipboardDiagnostics.write('paste_current_insert', {
+      'target': _targetIndex(target),
+      'length': text.length,
+    });
     _requestFocus(target);
   }
 

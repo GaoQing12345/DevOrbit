@@ -110,6 +110,19 @@ class SettingsPage extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 28),
+            _SettingsSection(
+              title: '诊断',
+              children: [
+                _SettingsRow(
+                  title: '剪贴板诊断日志',
+                  trailing: Switch(
+                    value: value.clipboardTraceEnabled,
+                    onChanged: controller.updateClipboardTrace,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 28),
             const _SettingsSection(
               title: '关于',
               children: [

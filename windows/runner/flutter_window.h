@@ -35,6 +35,7 @@ class FlutterWindow : public Win32Window {
   void RegisterCredentialsChannel();
   void RegisterProcessWindowChannel();
   void RegisterAppLifecycleChannel();
+  void EnsureClipboardListener();
   void BeginPasteCapture(std::optional<int64_t> session_id);
   void ArmPasteCapture(int64_t session_id);
   bool DidPasteCaptureObserveChange(int64_t session_id);
@@ -72,6 +73,7 @@ class FlutterWindow : public Win32Window {
   bool paste_capture_invalidated_ = false;
   bool paste_key_pressed_ = false;
   bool paste_request_notification_sent_ = false;
+  bool clipboard_listener_registered_ = false;
   bool show_on_first_frame_ = true;
 };
 

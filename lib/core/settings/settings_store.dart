@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../desktop/desktop_clipboard_diagnostics.dart';
 import 'app_settings.dart';
 
 class SettingsStore extends ValueNotifier<AppSettings> {
@@ -15,18 +16,25 @@ class SettingsStore extends ValueNotifier<AppSettings> {
     final preferences = await SharedPreferences.getInstance();
     final encoded = preferences.getString(_storageKey);
     if (encoded == null) {
-      return SettingsStore._(preferences, AppSettings.defaults());
+      final store = SettingsStore._(preferences, AppSettings.defaults());
+      DesktopClipboardDiagnostics.configure(store.value.clipboardTraceEnabled);
+      return store;
     }
     try {
       final json = jsonDecode(encoded) as Map<String, dynamic>;
-      return SettingsStore._(preferences, AppSettings.fromJson(json));
+      final store = SettingsStore._(preferences, AppSettings.fromJson(json));
+      DesktopClipboardDiagnostics.configure(store.value.clipboardTraceEnabled);
+      return store;
     } catch (_) {
-      return SettingsStore._(preferences, AppSettings.defaults());
+      final store = SettingsStore._(preferences, AppSettings.defaults());
+      DesktopClipboardDiagnostics.configure(store.value.clipboardTraceEnabled);
+      return store;
     }
   }
 
   Future<void> update(AppSettings settings) async {
     value = settings;
+    DesktopClipboardDiagnostics.configure(settings.clipboardTraceEnabled);
     await _preferences.setString(_storageKey, jsonEncode(settings.toJson()));
   }
 }

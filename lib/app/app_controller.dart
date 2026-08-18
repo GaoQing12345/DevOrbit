@@ -148,6 +148,12 @@ class AppController extends ChangeNotifier {
     await settings.update(settings.value.copyWith(launchAtStartup: enabled));
   }
 
+  Future<void> updateClipboardTrace(bool enabled) {
+    return settings.update(
+      settings.value.copyWith(clipboardTraceEnabled: enabled),
+    );
+  }
+
   void _handleWindowBlur() {
     if (_mode == AppViewMode.radial) dismissRadial();
   }

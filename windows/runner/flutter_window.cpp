@@ -27,43 +27,47 @@ constexpr UINT kPasteCaptureRetryDelayMs = 10;
 // final text format to become available instead of treating each intermediate
 // update as a different paste operation.
 constexpr int kPasteCaptureMaxRetries = 250;
+bool g_clipboard_trace_enabled = true;
 
 void ClipboardTrace(const std::string& event,
                     const std::string& details = std::string()) noexcept {
   try {
-  char* disabled = nullptr;
-  size_t disabled_size = 0;
-  if (_dupenv_s(&disabled, &disabled_size, "DEV_ORBIT_CLIPBOARD_TRACE") == 0 &&
-      disabled != nullptr) {
-    const bool trace_disabled = std::strcmp(disabled, "0") == 0;
-    std::free(disabled);
-    if (trace_disabled) return;
-  }
-  wchar_t temp_path[MAX_PATH] = {};
-  const DWORD length = GetTempPathW(MAX_PATH, temp_path);
-  if (length == 0 || length >= MAX_PATH) return;
-  std::wstring path(temp_path, length);
-  path += L"dev_orbit_clipboard_trace.log";
+    if (!g_clipboard_trace_enabled) return;
+    char* disabled = nullptr;
+    size_t disabled_size = 0;
+    if (_dupenv_s(&disabled, &disabled_size, "DEV_ORBIT_CLIPBOARD_TRACE") ==
+            0 &&
+        disabled != nullptr) {
+      const bool trace_disabled = std::strcmp(disabled, "0") == 0;
+      std::free(disabled);
+      if (trace_disabled) return;
+    }
+    wchar_t temp_path[MAX_PATH] = {};
+    const DWORD length = GetTempPathW(MAX_PATH, temp_path);
+    if (length == 0 || length >= MAX_PATH) return;
+    std::wstring path(temp_path, length);
+    path += L"dev_orbit_clipboard_trace.log";
 
-  SYSTEMTIME now = {};
-  GetLocalTime(&now);
-  char prefix[192] = {};
-  sprintf_s(prefix, sizeof(prefix),
-            "%04u-%02u-%02uT%02u:%02u:%02u.%03u pid=%lu tid=%lu platform=windows ",
-            now.wYear, now.wMonth, now.wDay, now.wHour, now.wMinute,
-            now.wSecond, now.wMilliseconds, GetCurrentProcessId(),
-            GetCurrentThreadId());
-  std::string line = std::string(prefix) + "event=" + event;
-  if (!details.empty()) line += " " + details;
-  line += "\r\n";
-  HANDLE file = CreateFileW(path.c_str(), FILE_APPEND_DATA,
-                            FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
-                            OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
-  if (file == INVALID_HANDLE_VALUE) return;
-  DWORD written = 0;
-  WriteFile(file, line.data(), static_cast<DWORD>(line.size()), &written,
-            nullptr);
-  CloseHandle(file);
+    SYSTEMTIME now = {};
+    GetLocalTime(&now);
+    char prefix[192] = {};
+    sprintf_s(
+        prefix, sizeof(prefix),
+        "%04u-%02u-%02uT%02u:%02u:%02u.%03u pid=%lu tid=%lu platform=windows ",
+        now.wYear, now.wMonth, now.wDay, now.wHour, now.wMinute,
+        now.wSecond, now.wMilliseconds, GetCurrentProcessId(),
+        GetCurrentThreadId());
+    std::string line = std::string(prefix) + "event=" + event;
+    if (!details.empty()) line += " " + details;
+    line += "\r\n";
+    HANDLE file = CreateFileW(path.c_str(), FILE_APPEND_DATA,
+                              FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
+                              OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file == INVALID_HANDLE_VALUE) return;
+    DWORD written = 0;
+    WriteFile(file, line.data(), static_cast<DWORD>(line.size()), &written,
+              nullptr);
+    CloseHandle(file);
   } catch (...) {
     // Diagnostics must never affect clipboard behavior.
   }
@@ -266,6 +270,21 @@ void FlutterWindow::RegisterClipboardChannel() {
   clipboard_channel_->SetMethodCallHandler(
       [this](const auto& call, auto result) {
         ClipboardTrace("channel_call", "method=" + call.method_name());
+        if (call.method_name() == "setDiagnosticsEnabled") {
+          if (call.arguments() &&
+              std::holds_alternative<flutter::EncodableMap>(*call.arguments())) {
+            const auto& args = std::get<flutter::EncodableMap>(*call.arguments());
+            const auto enabled_it =
+                args.find(flutter::EncodableValue("enabled"));
+            if (enabled_it != args.end() &&
+                std::holds_alternative<bool>(enabled_it->second)) {
+              g_clipboard_trace_enabled =
+                  std::get<bool>(enabled_it->second);
+            }
+          }
+          result->Success();
+          return;
+        }
         if (call.method_name() == "getChangeCount") {
           ClipboardTrace("change_count",
                          "sequence=" +
@@ -508,6 +527,16 @@ void FlutterWindow::BeginPasteCapture(std::optional<int64_t> session_id) {
           " baseline=" + std::to_string(paste_capture_baseline_sequence_));
 }
 
+void FlutterWindow::EnsureClipboardListener() {
+  if (clipboard_listener_registered_) return;
+  const BOOL registered = AddClipboardFormatListener(GetHandle());
+  const DWORD error = registered ? ERROR_SUCCESS : GetLastError();
+  ClipboardTrace("clipboard_listener", std::string("registered=") +
+                                               (registered ? "true" : "false") +
+                                               " error=" + std::to_string(error));
+  clipboard_listener_registered_ = registered == TRUE;
+}
+
 void FlutterWindow::ArmPasteCapture(int64_t session_id) {
   ClipboardTrace("capture_arm", "session=" + std::to_string(session_id));
   if (paste_capture_armed_) {
@@ -518,15 +547,18 @@ void FlutterWindow::ArmPasteCapture(int64_t session_id) {
       }
       ClipboardTrace("capture_arm_reuse", "session=" +
                                              std::to_string(session_id));
+      EnsureClipboardListener();
       return;
     }
     if (*paste_capture_session_id_ == session_id) {
       ClipboardTrace("capture_arm_duplicate", "session=" +
                                                     std::to_string(session_id));
+      EnsureClipboardListener();
       return;
     }
   }
   BeginPasteCapture(session_id);
+  EnsureClipboardListener();
 }
 
 bool FlutterWindow::DidPasteCaptureObserveChange(int64_t session_id) {
@@ -734,6 +766,10 @@ void FlutterWindow::ResetPasteCapture() {
   paste_capture_invalidated_ = false;
   paste_key_pressed_ = false;
   paste_request_notification_sent_ = false;
+  if (clipboard_listener_registered_) {
+    RemoveClipboardFormatListener(GetHandle());
+    clipboard_listener_registered_ = false;
+  }
 }
 
 void FlutterWindow::SetRadialMode(bool enabled) {
@@ -780,18 +816,6 @@ bool FlutterWindow::OnCreate() {
   RegisterCredentialsChannel();
   RegisterProcessWindowChannel();
   RegisterAppLifecycleChannel();
-  const BOOL clipboard_listener_added = AddClipboardFormatListener(GetHandle());
-  const DWORD clipboard_listener_error = clipboard_listener_added
-                                             ? ERROR_SUCCESS
-                                             : GetLastError();
-  ClipboardTrace("clipboard_listener", std::string("registered=") +
-                                               (clipboard_listener_added ?
-                                                    std::string("true") :
-                                                    std::string("false")) +
-                                               " error=" +
-                                               std::to_string(
-                                                   clipboard_listener_error));
-
   if (show_on_first_frame_) {
     flutter_controller_->engine()->SetNextFrameCallback([this]() {
       Show();
@@ -809,7 +833,6 @@ bool FlutterWindow::OnCreate() {
 void FlutterWindow::OnDestroy() {
   ResetPasteCapture();
   RemovePropW(GetHandle(), kToolWindowReadyProperty);
-  RemoveClipboardFormatListener(GetHandle());
   if (window_effects_channel_) {
     window_effects_channel_ = nullptr;
   }
@@ -877,9 +900,6 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
     ClipboardTrace("native_window_inactive", std::string("armed=") +
                                                (paste_capture_armed_ ? "true" :
                                                                         "false"));
-    if (!paste_capture_armed_ || !paste_capture_session_id_) {
-      BeginPasteCapture(std::nullopt);
-    }
   }
   if (message == WM_TIMER && wparam == kPasteCaptureRetryTimer) {
     KillTimer(GetHandle(), kPasteCaptureRetryTimer);

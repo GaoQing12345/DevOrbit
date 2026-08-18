@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 
 /// Writes a short cross-layer trace for desktop clipboard investigations.
 ///
@@ -11,13 +12,24 @@ class DesktopClipboardDiagnostics {
   const DesktopClipboardDiagnostics._();
 
   static const fileName = 'dev_orbit_clipboard_trace.log';
+  static const _channel = MethodChannel('dev_orbit/clipboard');
   static Future<void> _pendingWrite = Future<void>.value();
+  static bool _enabled = true;
+
+  static bool get enabled => _enabled;
+
+  static void configure(bool enabled) {
+    _enabled = enabled;
+    if (!_isDesktop) return;
+    unawaited(_configureNative(enabled));
+  }
 
   static String get path =>
       '${Directory.systemTemp.path}${Platform.pathSeparator}$fileName';
 
   static void write(String event, [Map<String, Object?> fields = const {}]) {
     if (!_isDesktop ||
+        !_enabled ||
         Platform.environment['DEV_ORBIT_CLIPBOARD_TRACE'] == '0') {
       return;
     }
@@ -42,6 +54,16 @@ class DesktopClipboardDiagnostics {
   static bool get _isDesktop =>
       defaultTargetPlatform == TargetPlatform.windows ||
       defaultTargetPlatform == TargetPlatform.macOS;
+
+  static Future<void> _configureNative(bool enabled) async {
+    try {
+      await _channel.invokeMethod<void>('setDiagnosticsEnabled', {
+        'enabled': enabled,
+      });
+    } on Object {
+      // Older native runners may not implement the optional setting yet.
+    }
+  }
 
   static String _sanitize(Object? value) {
     if (value == null) return 'null';

@@ -11,6 +11,7 @@ class AppSettings {
     this.indentSize = 2,
     this.themeMode = ThemeMode.system,
     this.launchAtStartup = false,
+    this.clipboardTraceEnabled = true,
   });
 
   factory AppSettings.defaults() {
@@ -30,18 +31,22 @@ class AppSettings {
   final int indentSize;
   final ThemeMode themeMode;
   final bool launchAtStartup;
+  final bool clipboardTraceEnabled;
 
   AppSettings copyWith({
     HotKey? hotKey,
     int? indentSize,
     ThemeMode? themeMode,
     bool? launchAtStartup,
+    bool? clipboardTraceEnabled,
   }) {
     return AppSettings(
       hotKey: hotKey ?? this.hotKey,
       indentSize: indentSize ?? this.indentSize,
       themeMode: themeMode ?? this.themeMode,
       launchAtStartup: launchAtStartup ?? this.launchAtStartup,
+      clipboardTraceEnabled:
+          clipboardTraceEnabled ?? this.clipboardTraceEnabled,
     );
   }
 
@@ -51,6 +56,7 @@ class AppSettings {
       'indentSize': indentSize,
       'themeMode': themeMode.name,
       'launchAtStartup': launchAtStartup,
+      'clipboardTraceEnabled': clipboardTraceEnabled,
     };
   }
 
@@ -66,6 +72,7 @@ class AppSettings {
           orElse: () => ThemeMode.system,
         ),
         launchAtStartup: json['launchAtStartup'] == true,
+        clipboardTraceEnabled: json['clipboardTraceEnabled'] != false,
       );
     } catch (_) {
       return defaults;

@@ -10,6 +10,19 @@ import 'text_compare_controller.dart';
 import 'text_compare_indicator.dart';
 import 'text_compare_models.dart';
 
+class _TextCompareChunkAnalyzer implements CodeChunkAnalyzer {
+  const _TextCompareChunkAnalyzer();
+
+  @override
+  List<CodeChunk> run(CodeLines codeLines) {
+    return [
+      for (var index = 0; index < codeLines.length; index++)
+        if (codeLines[index].chunkParent)
+          CodeChunk(index, index + codeLines[index].chunks.length + 1),
+    ];
+  }
+}
+
 class TextComparePage extends StatefulWidget {
   const TextComparePage({super.key, required this.controller});
 
@@ -75,6 +88,7 @@ class _TextComparePageState extends State<TextComparePage> {
             context: context,
             side: side,
             index: index,
+            codeLine: codeLine,
             text: codeLine.text,
             style: style,
           ),
@@ -232,9 +246,19 @@ class _TextComparePageState extends State<TextComparePage> {
     required BuildContext context,
     required TextCompareSide side,
     required int index,
+    required CodeLine codeLine,
     required String text,
     required TextStyle style,
   }) {
+    if (codeLine.chunkParent) {
+      final hiddenLines = codeLine.chunks.length;
+      final collapsedStyle = style.copyWith(
+        color: Theme.of(context).colorScheme.onSurfaceVariant,
+        backgroundColor: Theme.of(context).colorScheme.surfaceContainerHigh,
+        fontWeight: FontWeight.w600,
+      );
+      return TextSpan(text: '  $hiddenLines 行未更改行已折叠  ', style: collapsedStyle);
+    }
     final result = widget.controller.result;
     final lines = side == TextCompareSide.left
         ? result?.leftLines
@@ -684,7 +708,7 @@ class _TextPane extends StatelessWidget {
                 autofocus: false,
                 wordWrap: false,
                 autocompleteSymbols: false,
-                chunkAnalyzer: const NonCodeChunkAnalyzer(),
+                chunkAnalyzer: const _TextCompareChunkAnalyzer(),
                 onChanged: onChanged,
                 hint: isLeft ? '输入或粘贴旧文本' : '输入或粘贴新文本',
                 padding: const EdgeInsets.fromLTRB(14, 12, 14, 18),
