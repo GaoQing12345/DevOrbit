@@ -121,7 +121,6 @@ class NativeDesktopShell
 
   @override
   Future<void> showRadial() async {
-    await _restoreIfMinimized();
     if (await windowManager.isVisible()) {
       await _rememberToolBounds();
     }
@@ -177,7 +176,6 @@ class NativeDesktopShell
 
   @override
   Future<void> showToolWindow({bool focus = true}) async {
-    await _restoreIfMinimized();
     await windowManager.setMaximumSize(_maximumSize);
     await windowManager.setMinimumSize(toolMinimumSize);
     await windowManager.setResizable(true);
@@ -193,12 +191,6 @@ class NativeDesktopShell
     await windowManager.setBounds(_lastToolBounds);
     await windowManager.show(inactive: !focus);
     if (focus) await windowManager.focus();
-  }
-
-  Future<void> _restoreIfMinimized() async {
-    if (await windowManager.isMinimized()) {
-      await windowManager.restore();
-    }
   }
 
   @override

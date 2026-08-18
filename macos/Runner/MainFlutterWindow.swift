@@ -297,7 +297,6 @@ class MainFlutterWindow: NSWindow {
         result(false)
         return
       }
-      application.unhide()
       application.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
       result(true)
     }
