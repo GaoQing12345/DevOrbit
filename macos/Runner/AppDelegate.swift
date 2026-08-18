@@ -26,7 +26,7 @@ class AppDelegate: FlutterAppDelegate {
     restoreStandaloneWindow()
   }
 
-  func applicationShouldHandleReopen(
+  override func applicationShouldHandleReopen(
     _ sender: NSApplication,
     hasVisibleWindows flag: Bool
   ) -> Bool {
