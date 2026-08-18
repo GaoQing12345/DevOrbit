@@ -41,6 +41,7 @@ class _TextComparePageState extends State<TextComparePage> {
   final _rightFocusNode = FocusNode();
   late final DesktopClipboardFocusRestorer _focusRestorer;
   bool _foldUnchanged = false;
+  int _foldedLineCount = 0;
   bool _syncingScroll = false;
 
   @override
@@ -176,11 +177,23 @@ class _TextComparePageState extends State<TextComparePage> {
   void _updateFolding() {
     _expandAllChunks(_leftEditor);
     _expandAllChunks(_rightEditor);
-    if (!_foldUnchanged) return;
+    if (!_foldUnchanged) {
+      _setFoldedLineCount(0);
+      return;
+    }
     final result = widget.controller.result;
-    if (result == null) return;
-    _collapseUnchangedRuns(_leftEditor, result.leftLines);
-    _collapseUnchangedRuns(_rightEditor, result.rightLines);
+    if (result == null) {
+      _setFoldedLineCount(0);
+      return;
+    }
+    final leftCount = _collapseUnchangedRuns(_leftEditor, result.leftLines);
+    final rightCount = _collapseUnchangedRuns(_rightEditor, result.rightLines);
+    _setFoldedLineCount(leftCount > rightCount ? leftCount : rightCount);
+  }
+
+  void _setFoldedLineCount(int count) {
+    if (_foldedLineCount == count || !mounted) return;
+    setState(() => _foldedLineCount = count);
   }
 
   void _expandAllChunks(CodeLineEditingController editor) {
@@ -191,7 +204,7 @@ class _TextComparePageState extends State<TextComparePage> {
     }
   }
 
-  void _collapseUnchangedRuns(
+  int _collapseUnchangedRuns(
     CodeLineEditingController editor,
     List<TextDiffLine> lines,
   ) {
@@ -206,18 +219,22 @@ class _TextComparePageState extends State<TextComparePage> {
         runStart = index;
       } else if (!unchanged && runStart >= 0) {
         final runEnd = index - 1;
-        if (runEnd - runStart + 1 > contextLines * 2) {
-          ranges.add((
-            start: runStart + contextLines - 1,
-            end: runEnd - contextLines + 2,
-          ));
+        final start = runStart + contextLines - 1;
+        // collapseChunk keeps the line at `end` visible, so this is the first
+        // of the trailing context lines rather than the last hidden line.
+        final end = runEnd - contextLines + 1;
+        if (end > start + 1) {
+          ranges.add((start: start, end: end));
         }
         runStart = -1;
       }
     }
+    var foldedLineCount = 0;
     for (final range in ranges.reversed) {
       editor.collapseChunk(range.start, range.end);
+      foldedLineCount += range.end - range.start - 1;
     }
+    return foldedLineCount;
   }
 
   Future<void> _openFile(TextCompareSide side) async {
@@ -364,6 +381,7 @@ class _TextComparePageState extends State<TextComparePage> {
               _CompareToolbar(
                 controller: widget.controller,
                 foldUnchanged: _foldUnchanged,
+                foldedLineCount: _foldedLineCount,
                 onFoldUnchangedChanged: _setFoldUnchanged,
                 onOpenLeft: () => _openFile(TextCompareSide.left),
                 onOpenRight: () => _openFile(TextCompareSide.right),
@@ -418,6 +436,7 @@ class _CompareToolbar extends StatelessWidget {
   const _CompareToolbar({
     required this.controller,
     required this.foldUnchanged,
+    required this.foldedLineCount,
     required this.onFoldUnchangedChanged,
     required this.onOpenLeft,
     required this.onOpenRight,
@@ -426,6 +445,7 @@ class _CompareToolbar extends StatelessWidget {
 
   final TextCompareController controller;
   final bool foldUnchanged;
+  final int foldedLineCount;
   final ValueChanged<bool> onFoldUnchangedChanged;
   final VoidCallback onOpenLeft;
   final VoidCallback onOpenRight;
@@ -463,6 +483,13 @@ class _CompareToolbar extends StatelessWidget {
               value: foldUnchanged,
               onChanged: onFoldUnchangedChanged,
             ),
+            if (foldUnchanged)
+              Text(
+                foldedLineCount > 0 ? '已折叠 $foldedLineCount 行' : '无可折叠行',
+                style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                  color: scheme.onSurfaceVariant,
+                ),
+              ),
             const _DiffLegend(),
             FilledButton.icon(
               onPressed: controller.canCompare ? controller.compare : null,

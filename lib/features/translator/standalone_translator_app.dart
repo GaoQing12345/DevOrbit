@@ -41,6 +41,7 @@ Future<void> runStandaloneTranslator({bool prewarmed = false}) async {
       size: Size(980, 700 + titleBarHeight),
       minimumSize: Size(720, 540 + titleBarHeight),
       center: true,
+      skipTaskbar: true,
       backgroundColor: Colors.transparent,
       title: '文本翻译 - DevOrbit',
       titleBarStyle: useCustomWindowsTitleBar

@@ -194,7 +194,10 @@ class DesktopClipboardFocusRestorer with WindowListener {
   set active(bool value) {
     if (_active == value) return;
     _active = value;
-    if (!value) _cancelRestore();
+    // Visibility can briefly become false while the desktop window is being
+    // replaced by the Windows clipboard panel or a radial overlay. Do not
+    // cancel the focus snapshot here: that snapshot is exactly what allows
+    // paste to return to the editor after the external UI closes.
   }
 
   void _trackFocus() {
@@ -219,12 +222,6 @@ class DesktopClipboardFocusRestorer with WindowListener {
   void _suspendFocus() => _captureFocusSnapshot();
 
   void _captureFocusSnapshot({bool armNative = true}) {
-    if (!_active) {
-      DesktopClipboardDiagnostics.write('snapshot_skip', {
-        'reason': 'inactive',
-      });
-      return;
-    }
     if (_snapshot != null) {
       DesktopClipboardDiagnostics.write('snapshot_skip', {
         'reason': 'already_active',
@@ -270,10 +267,6 @@ class DesktopClipboardFocusRestorer with WindowListener {
   }
 
   void _restoreFocus() {
-    if (!_active) {
-      _cancelRestore();
-      return;
-    }
     final snapshot = _snapshot;
     if (snapshot == null) {
       _pasteFallbackArmed = false;
@@ -354,7 +347,7 @@ class DesktopClipboardFocusRestorer with WindowListener {
   }
 
   bool _canPaste(_DesktopFocusSnapshot snapshot) {
-    if (_disposed || !_active || !identical(_snapshot, snapshot)) {
+    if (_disposed || !identical(_snapshot, snapshot)) {
       DesktopClipboardDiagnostics.write('paste_rejected', {
         'reason': 'snapshot_state',
         'session': snapshot.sessionId,
@@ -404,7 +397,7 @@ class DesktopClipboardFocusRestorer with WindowListener {
   }
 
   bool _handleKeyEvent(KeyEvent event) {
-    if (!_active || event is! KeyDownEvent) return false;
+    if (event is! KeyDownEvent) return false;
     final keyboard = HardwareKeyboard.instance;
     final isMacOS = defaultTargetPlatform == TargetPlatform.macOS;
     final isV = event.logicalKey == LogicalKeyboardKey.keyV;

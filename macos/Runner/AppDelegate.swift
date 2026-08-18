@@ -21,6 +21,11 @@ class AppDelegate: FlutterAppDelegate {
     }
   }
 
+  override func applicationWillBecomeActive(_ notification: Notification) {
+    super.applicationWillBecomeActive(notification)
+    restoreStandaloneWindow()
+  }
+
   override func applicationDidBecomeActive(_ notification: Notification) {
     super.applicationDidBecomeActive(notification)
     restoreStandaloneWindow()
@@ -37,6 +42,7 @@ class AppDelegate: FlutterAppDelegate {
   private func restoreStandaloneWindow() {
     guard isStandaloneToolWindow else { return }
     DispatchQueue.main.async {
+      NSApp.unhide(nil)
       for window in NSApp.windows where window.isMiniaturized {
         window.deminiaturize(nil)
       }

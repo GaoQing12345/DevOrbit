@@ -25,6 +25,10 @@ Future<void> runStandaloneJsonFormatter({bool prewarmed = false}) async {
       size: Size(960, 700 + titleBarHeight),
       minimumSize: Size(720, 520 + titleBarHeight),
       center: true,
+      // Standalone tools are helper windows owned by the main app. Keep each
+      // helper process out of the macOS Dock, including after window_manager
+      // applies the WindowOptions.
+      skipTaskbar: true,
       backgroundColor: Colors.transparent,
       title: 'JSON 格式化 - DevOrbit',
       titleBarStyle: useCustomWindowsTitleBar
