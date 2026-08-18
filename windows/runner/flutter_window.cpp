@@ -31,8 +31,14 @@ constexpr int kPasteCaptureMaxRetries = 250;
 void ClipboardTrace(const std::string& event,
                     const std::string& details = std::string()) noexcept {
   try {
-  const char* disabled = std::getenv("DEV_ORBIT_CLIPBOARD_TRACE");
-  if (disabled != nullptr && std::strcmp(disabled, "0") == 0) return;
+  char* disabled = nullptr;
+  size_t disabled_size = 0;
+  if (_dupenv_s(&disabled, &disabled_size, "DEV_ORBIT_CLIPBOARD_TRACE") == 0 &&
+      disabled != nullptr) {
+    const bool trace_disabled = std::strcmp(disabled, "0") == 0;
+    std::free(disabled);
+    if (trace_disabled) return;
+  }
   wchar_t temp_path[MAX_PATH] = {};
   const DWORD length = GetTempPathW(MAX_PATH, temp_path);
   if (length == 0 || length >= MAX_PATH) return;
