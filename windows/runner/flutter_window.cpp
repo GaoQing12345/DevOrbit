@@ -23,7 +23,10 @@ constexpr wchar_t kToolWindowReadyProperty[] =
 constexpr UINT kActivateToolWindowMessage = WM_APP + 0x30B;
 constexpr UINT kInjectedPasteKeyMessage = WM_APP + 0x30C;
 constexpr UINT_PTR kPasteCaptureRetryTimer = 0xD30B;
+constexpr UINT_PTR kPasteCaptureActivationProbeTimer = 0xD30C;
 constexpr UINT kPasteCaptureRetryDelayMs = 10;
+constexpr UINT kPasteCaptureActivationProbeDelayMs = 10;
+constexpr int kPasteCaptureActivationProbeLimit = 25;
 constexpr ULONGLONG kTransientPasteReturnLimitMs = 1500;
 // Clipboard providers such as QuickClipboard clear the clipboard and then
 // publish several formats one after another. Keep polling long enough for the
@@ -613,6 +616,17 @@ void FlutterWindow::BeginPasteCapture(std::optional<int64_t> session_id) {
   paste_capture_armed_ = true;
   paste_capture_session_id_ = session_id;
   paste_capture_baseline_sequence_ = GetClipboardSequenceNumber();
+  if (OpenClipboard(GetHandle())) {
+    HANDLE data = ::GetClipboardData(CF_UNICODETEXT);
+    if (data) {
+      const wchar_t* text = static_cast<const wchar_t*>(GlobalLock(data));
+      if (text) {
+        paste_capture_baseline_text_ = Utf8FromUtf16(text);
+        GlobalUnlock(data);
+      }
+    }
+    CloseClipboard();
+  }
   EnsurePasteKeyboardHook();
   ClipboardTrace(
       "capture_begin",
@@ -724,13 +738,26 @@ void FlutterWindow::HandleInjectedPasteKey(DWORD key, bool targets_owner) {
 
 void FlutterWindow::HandlePasteCaptureActivation(HWND activated_window,
                                                   bool active) {
+  if (!paste_capture_armed_) {
+    KillTimer(GetHandle(), kPasteCaptureActivationProbeTimer);
+    return;
+  }
   if (!active) {
-    const HWND activated_root = activated_window
-                                    ? GetAncestor(activated_window, GA_ROOT)
-                                    : nullptr;
+    paste_capture_focus_returned_ = false;
+    paste_capture_return_tick_ = 0;
+    paste_capture_activation_probe_count_ = 0;
+    HWND target = activated_window;
+    if (!target || GetAncestor(target, GA_ROOT) == GetHandle()) {
+      target = GetForegroundWindow();
+    }
+    const HWND activated_root =
+        target ? GetAncestor(target, GA_ROOT) : nullptr;
     const LONG_PTR ex_style = activated_root
                                   ? GetWindowLongPtrW(activated_root, GWL_EXSTYLE)
                                   : 0;
+    const LONG_PTR style = activated_root
+                               ? GetWindowLongPtrW(activated_root, GWL_STYLE)
+                               : 0;
     const bool owned =
         activated_root && GetWindow(activated_root, GW_OWNER) != nullptr;
     DWORD activated_process_id = 0;
@@ -744,19 +771,25 @@ void FlutterWindow::HandlePasteCaptureActivation(HWND activated_window,
         activated_root && activated_root != GetHandle() &&
         external_process &&
         (owned || (ex_style & WS_EX_TOOLWINDOW) != 0 ||
-         (ex_style & WS_EX_TOPMOST) != 0);
+         (ex_style & WS_EX_TOPMOST) != 0 || (style & WS_POPUP) != 0);
     ClipboardTrace(
         "paste_activation_target",
-        "window=" +
+        "source=immediate window=" +
             std::to_string(reinterpret_cast<std::uintptr_t>(activated_root)) +
             " process=" + std::to_string(activated_process_id) +
+            " style=" + std::to_string(style) +
             " ex_style=" + std::to_string(ex_style) +
             " owned=" + (owned ? "true" : "false") +
             " transient=" +
             (paste_capture_left_for_transient_window_ ? "true" : "false"));
+    if (!paste_capture_left_for_transient_window_) {
+      SetTimer(GetHandle(), kPasteCaptureActivationProbeTimer,
+               kPasteCaptureActivationProbeDelayMs, nullptr);
+    }
     return;
   }
 
+  KillTimer(GetHandle(), kPasteCaptureActivationProbeTimer);
   // WM_CLIPBOARDUPDATE can still be queued behind WM_ACTIVATE. Sample the
   // sequence synchronously before deciding whether a transient clipboard
   // window completed a selection without sending Ctrl+V. Do not read text
@@ -764,43 +797,123 @@ void FlutterWindow::HandlePasteCaptureActivation(HWND activated_window,
   if (paste_capture_armed_) {
     HandleClipboardUpdate(false, false);
   }
-  const ULONGLONG now = GetTickCount64();
-  const ULONGLONG elapsed = return_paste_candidate_update_tick_ == 0
-                                ? 0
-                                : now - return_paste_candidate_update_tick_;
-  const bool changed = return_paste_candidate_text_.has_value();
-  const bool recent = return_paste_candidate_update_tick_ != 0 &&
-                      elapsed <= kTransientPasteReturnLimitMs;
-  const bool should_paste =
-      paste_capture_armed_ && !paste_key_pressed_ &&
-      paste_capture_left_for_transient_window_ && changed && recent;
+  paste_capture_focus_returned_ = true;
+  paste_capture_return_tick_ = GetTickCount64();
   ClipboardTrace(
       "paste_activation_return",
       std::string("armed=") + (paste_capture_armed_ ? "true" : "false") +
           " transient=" +
           (paste_capture_left_for_transient_window_ ? "true" : "false") +
-          " changed=" + (changed ? "true" : "false") +
-          " elapsed_ms=" + std::to_string(elapsed) +
-          " auto_paste=" + (should_paste ? "true" : "false"));
-  paste_capture_left_for_transient_window_ = false;
-  if (!should_paste) return;
+          " changed=" +
+          (return_paste_candidate_text_ ? "true" : "false") +
+          " updates=" + std::to_string(paste_capture_update_count_) +
+          " external_owner=" +
+          (paste_capture_external_clipboard_owner_ ? "true" : "false"));
+  TryCompletePasteCaptureAfterTransientReturn();
+  if (paste_capture_armed_ && paste_capture_left_for_transient_window_ &&
+      !paste_key_pressed_) {
+    SetTimer(GetHandle(), kPasteCaptureRetryTimer,
+             kPasteCaptureRetryDelayMs, nullptr);
+  }
+}
+
+void FlutterWindow::ProbePasteCaptureActivation() {
+  if (!paste_capture_armed_ || paste_capture_focus_returned_ ||
+      paste_capture_left_for_transient_window_) {
+    return;
+  }
+
+  const HWND foreground = GetForegroundWindow();
+  const HWND foreground_root =
+      foreground ? GetAncestor(foreground, GA_ROOT) : nullptr;
+  const LONG_PTR ex_style =
+      foreground_root
+          ? GetWindowLongPtrW(foreground_root, GWL_EXSTYLE)
+          : 0;
+  const LONG_PTR style =
+      foreground_root ? GetWindowLongPtrW(foreground_root, GWL_STYLE) : 0;
+  const bool owned =
+      foreground_root && GetWindow(foreground_root, GW_OWNER) != nullptr;
+  DWORD foreground_process_id = 0;
+  if (foreground_root) {
+    GetWindowThreadProcessId(foreground_root, &foreground_process_id);
+  }
+  const bool external_process =
+      foreground_process_id != 0 &&
+      foreground_process_id != GetCurrentProcessId();
+  paste_capture_left_for_transient_window_ =
+      foreground_root && foreground_root != GetHandle() &&
+      external_process &&
+      (owned || (ex_style & WS_EX_TOOLWINDOW) != 0 ||
+       (ex_style & WS_EX_TOPMOST) != 0 || (style & WS_POPUP) != 0);
+  ClipboardTrace(
+      "paste_activation_target",
+      "source=probe window=" +
+          std::to_string(reinterpret_cast<std::uintptr_t>(foreground_root)) +
+          " process=" + std::to_string(foreground_process_id) +
+          " style=" + std::to_string(style) +
+          " ex_style=" + std::to_string(ex_style) +
+          " owned=" + (owned ? "true" : "false") +
+          " transient=" +
+          (paste_capture_left_for_transient_window_ ? "true" : "false"));
+  if (!paste_capture_left_for_transient_window_ &&
+      ++paste_capture_activation_probe_count_ <
+          kPasteCaptureActivationProbeLimit) {
+    SetTimer(GetHandle(), kPasteCaptureActivationProbeTimer,
+             kPasteCaptureActivationProbeDelayMs, nullptr);
+  }
+}
+
+void FlutterWindow::TryCompletePasteCaptureAfterTransientReturn() {
+  const bool transient_signal = paste_capture_left_for_transient_window_;
+  const bool owner_signal = paste_capture_external_clipboard_owner_;
+  const bool multi_update_signal = paste_capture_update_count_ >= 2;
+  if (!paste_capture_armed_ || paste_key_pressed_ ||
+      (!transient_signal && !owner_signal && !multi_update_signal) ||
+      !paste_capture_focus_returned_ || paste_capture_return_tick_ == 0 ||
+      !return_paste_candidate_text_ ||
+      !return_paste_candidate_differs_from_baseline_) {
+    return;
+  }
+
+  const ULONGLONG elapsed = GetTickCount64() - paste_capture_return_tick_;
+  if (elapsed > kTransientPasteReturnLimitMs) {
+    ClipboardTrace("paste_activation_expired",
+                   "elapsed_ms=" + std::to_string(elapsed));
+    paste_capture_left_for_transient_window_ = false;
+    return_paste_candidate_text_.reset();
+    return;
+  }
 
   // Some clipboard popups restore the target window after changing the
   // clipboard but intermittently omit their synthetic Ctrl+V. Treat a prompt
-  // return from that transient popup as the paste boundary. The normal key
-  // path remains authoritative whenever a key is actually delivered.
+  // clipboard update after returning from that popup as the paste boundary.
+  // The normal key path remains authoritative whenever a key is delivered.
   paste_key_pressed_ = true;
+  paste_capture_left_for_transient_window_ = false;
   pending_paste_text_ = std::move(return_paste_candidate_text_);
-  return_paste_candidate_update_tick_ = 0;
   return_paste_candidate_retry_count_ = 0;
   KillTimer(GetHandle(), kPasteCaptureRetryTimer);
+  KillTimer(GetHandle(), kPasteCaptureActivationProbeTimer);
+  ClipboardTrace("paste_activation_complete",
+                 "elapsed_ms=" + std::to_string(elapsed) +
+                     " signal=" +
+                     (transient_signal
+                          ? std::string("transient")
+                          : owner_signal ? std::string("external_owner")
+                                         : std::string("multi_update")) +
+                     " length=" +
+                     std::to_string(pending_paste_text_->size()));
   NotifyPasteRequested();
 }
 
 void FlutterWindow::CaptureReturnPasteCandidate() {
   if (!paste_capture_armed_ || paste_capture_invalidated_ ||
-      !paste_capture_left_for_transient_window_ ||
-      return_paste_candidate_text_ || pending_paste_text_ ||
+      (!paste_capture_left_for_transient_window_ &&
+       !paste_capture_focus_returned_) ||
+      (return_paste_candidate_text_ &&
+       return_paste_candidate_differs_from_baseline_) ||
+      pending_paste_text_ ||
       paste_capture_observed_sequence_ == 0) {
     return;
   }
@@ -830,7 +943,9 @@ void FlutterWindow::CaptureReturnPasteCandidate() {
       const std::string candidate = Utf8FromUtf16(text);
       if (!candidate.empty()) {
         return_paste_candidate_text_ = candidate;
-        return_paste_candidate_update_tick_ = GetTickCount64();
+        return_paste_candidate_differs_from_baseline_ =
+            !paste_capture_baseline_text_ ||
+            candidate != *paste_capture_baseline_text_;
         ClipboardTrace(
             "return_candidate_ready",
             "sequence=" + std::to_string(paste_capture_observed_sequence_) +
@@ -844,6 +959,7 @@ void FlutterWindow::CaptureReturnPasteCandidate() {
 
   if (resolved_current_sequence) {
     KillTimer(GetHandle(), kPasteCaptureRetryTimer);
+    TryCompletePasteCaptureAfterTransientReturn();
   } else {
     ClipboardTrace("return_candidate_unavailable",
                    "sequence=" +
@@ -961,7 +1077,25 @@ void FlutterWindow::HandleClipboardUpdate(bool capture_text,
   // if that tool changes the clipboard again during paste.
   if (paste_capture_observed_sequence_ != sequence) {
     paste_capture_observed_sequence_ = sequence;
-    paste_capture_last_update_tick_ = GetTickCount64();
+    ++paste_capture_update_count_;
+    const HWND clipboard_owner = GetClipboardOwner();
+    DWORD clipboard_owner_process_id = 0;
+    if (clipboard_owner) {
+      GetWindowThreadProcessId(clipboard_owner,
+                               &clipboard_owner_process_id);
+    }
+    if (clipboard_owner_process_id != 0 &&
+        clipboard_owner_process_id != GetCurrentProcessId()) {
+      paste_capture_external_clipboard_owner_ = true;
+    }
+    ClipboardTrace(
+        "clipboard_update_owner",
+        "window=" +
+            std::to_string(
+                reinterpret_cast<std::uintptr_t>(clipboard_owner)) +
+            " process=" + std::to_string(clipboard_owner_process_id) +
+            " external=" +
+            (paste_capture_external_clipboard_owner_ ? "true" : "false"));
     return_paste_candidate_retry_count_ = 0;
     paste_capture_retry_count_ = 0;
   }
@@ -969,12 +1103,14 @@ void FlutterWindow::HandleClipboardUpdate(bool capture_text,
     ClipboardTrace("clipboard_update_deferred", "sequence=" +
                                                      std::to_string(sequence));
     if (capture_return_candidate &&
-        paste_capture_left_for_transient_window_) {
-      if (return_paste_candidate_text_) {
-        return_paste_candidate_update_tick_ = paste_capture_last_update_tick_;
+        (paste_capture_left_for_transient_window_ ||
+         paste_capture_focus_returned_)) {
+      if (return_paste_candidate_text_ &&
+          return_paste_candidate_differs_from_baseline_) {
         ClipboardTrace(
             "return_candidate_activity",
             "sequence=" + std::to_string(paste_capture_observed_sequence_));
+        TryCompletePasteCaptureAfterTransientReturn();
       } else {
         CaptureReturnPasteCandidate();
       }
@@ -1018,7 +1154,6 @@ bool FlutterWindow::CaptureObservedPasteText() {
   }
   if (paste_capture_observed_sequence_ != sequence) {
     paste_capture_observed_sequence_ = sequence;
-    paste_capture_last_update_tick_ = GetTickCount64();
     paste_capture_retry_count_ = 0;
   }
 
@@ -1114,6 +1249,7 @@ void FlutterWindow::InvalidatePasteCapture() {
                                                         *paste_capture_session_id_)
                                                   : std::string("none")));
   KillTimer(GetHandle(), kPasteCaptureRetryTimer);
+  KillTimer(GetHandle(), kPasteCaptureActivationProbeTimer);
   pending_paste_text_.reset();
   paste_capture_retry_count_ = 0;
   paste_capture_invalidated_ = true;
@@ -1128,20 +1264,26 @@ void FlutterWindow::ResetPasteCapture() {
                                               : std::string("none")));
   }
   KillTimer(GetHandle(), kPasteCaptureRetryTimer);
+  KillTimer(GetHandle(), kPasteCaptureActivationProbeTimer);
   paste_capture_armed_ = false;
   pending_paste_text_.reset();
+  paste_capture_baseline_text_.reset();
   paste_capture_session_id_.reset();
   paste_capture_baseline_sequence_ = 0;
   paste_capture_observed_sequence_ = 0;
-  paste_capture_last_update_tick_ = 0;
+  paste_capture_update_count_ = 0;
   return_paste_candidate_text_.reset();
-  return_paste_candidate_update_tick_ = 0;
   return_paste_candidate_retry_count_ = 0;
+  return_paste_candidate_differs_from_baseline_ = false;
+  paste_capture_activation_probe_count_ = 0;
   paste_capture_retry_count_ = 0;
   paste_capture_invalidated_ = false;
   paste_key_pressed_ = false;
   paste_request_notification_sent_ = false;
   paste_capture_left_for_transient_window_ = false;
+  paste_capture_focus_returned_ = false;
+  paste_capture_external_clipboard_owner_ = false;
+  paste_capture_return_tick_ = 0;
   if (clipboard_listener_registered_) {
     RemoveClipboardFormatListener(GetHandle());
     clipboard_listener_registered_ = false;
@@ -1293,9 +1435,27 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
   } else if (message == WM_ACTIVATE) {
     HandlePasteCaptureActivation(hwnd, true);
   }
+  if (message == WM_TIMER &&
+      wparam == kPasteCaptureActivationProbeTimer) {
+    KillTimer(GetHandle(), kPasteCaptureActivationProbeTimer);
+    ProbePasteCaptureActivation();
+    return 0;
+  }
   if (message == WM_TIMER && wparam == kPasteCaptureRetryTimer) {
     KillTimer(GetHandle(), kPasteCaptureRetryTimer);
-    if (!paste_key_pressed_ && paste_capture_left_for_transient_window_) {
+    if (paste_capture_focus_returned_ &&
+        paste_capture_return_tick_ != 0 &&
+        GetTickCount64() - paste_capture_return_tick_ >
+            kTransientPasteReturnLimitMs) {
+      ClipboardTrace(
+          "paste_activation_expired",
+          "elapsed_ms=" +
+              std::to_string(GetTickCount64() - paste_capture_return_tick_));
+      paste_capture_left_for_transient_window_ = false;
+      return_paste_candidate_text_.reset();
+      return 0;
+    }
+    if (!paste_key_pressed_ && paste_capture_focus_returned_) {
       CaptureReturnPasteCandidate();
     } else if (!CaptureObservedPasteText()) {
       RetryPendingPasteCapture();
