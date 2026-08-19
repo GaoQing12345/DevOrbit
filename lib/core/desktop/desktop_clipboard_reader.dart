@@ -12,6 +12,8 @@ class DesktopPasteRequest {
   final String? text;
 }
 
+enum DesktopPasteCaptureState { unavailable, armed, prearmed }
+
 class DesktopClipboardReader {
   const DesktopClipboardReader();
 
@@ -40,10 +42,10 @@ class DesktopClipboardReader {
     return _invokeVoid('unregisterPasteTarget');
   }
 
-  Future<bool> armPasteCapture(int sessionId) async {
+  Future<DesktopPasteCaptureState> armPasteCapture(int sessionId) async {
     if (!_usesNativeCapture) {
       DesktopClipboardDiagnostics.write('arm_skip', {'session': sessionId});
-      return false;
+      return DesktopPasteCaptureState.unavailable;
     }
     DesktopClipboardDiagnostics.write('arm_start', {'session': sessionId});
     try {
@@ -53,7 +55,7 @@ class DesktopClipboardReader {
         'session': sessionId,
         'supported': supported,
       });
-      if (!supported) return false;
+      if (!supported) return DesktopPasteCaptureState.unavailable;
       final prearmed =
           await _channel.invokeMethod<bool>('armPasteCapture', {
             'sessionId': sessionId,
@@ -63,20 +65,22 @@ class DesktopClipboardReader {
         'session': sessionId,
         'prearmed': prearmed,
       });
-      return prearmed;
+      return prearmed
+          ? DesktopPasteCaptureState.prearmed
+          : DesktopPasteCaptureState.armed;
     } on MissingPluginException {
       DesktopClipboardDiagnostics.write('arm_error', {
         'session': sessionId,
         'type': 'missing_plugin',
       });
-      return false;
+      return DesktopPasteCaptureState.unavailable;
     } on PlatformException catch (error) {
       DesktopClipboardDiagnostics.write('arm_error', {
         'session': sessionId,
         'type': error.code,
         'message': error.message,
       });
-      return false;
+      return DesktopPasteCaptureState.unavailable;
     }
   }
 

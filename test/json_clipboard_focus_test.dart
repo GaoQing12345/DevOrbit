@@ -140,7 +140,7 @@ void main() {
     await tester.pump();
 
     await pasteWithControl(tester);
-    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 80));
 
     expect(fixture.controller.text, 'abcdirect-control-vdef');
     await tester.pump(const Duration(milliseconds: 350));

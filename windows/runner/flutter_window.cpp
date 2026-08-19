@@ -580,6 +580,32 @@ void FlutterWindow::RegisterAppLifecycleChannel() {
       });
 }
 
+void FlutterWindow::ActivateToolWindow() {
+  if (IsWindowVisible(GetHandle()) || !process_window_channel_ ||
+      !flutter_controller_ || !flutter_controller_->engine()) {
+    ShowAndFocusProcessWindow(GetHandle());
+    return;
+  }
+  if (tool_window_activation_pending_) {
+    return;
+  }
+
+  // Prewarmed tools deliberately render an empty first frame while hidden.
+  // Ask Dart to reveal the real page, then expose the HWND only after that
+  // frame is ready so Windows never presents a transparent tool window.
+  tool_window_activation_pending_ = true;
+  flutter_controller_->engine()->SetNextFrameCallback([this]() {
+    tool_window_activation_pending_ = false;
+    ShowAndFocusProcessWindow(GetHandle());
+    if (process_window_channel_) {
+      process_window_channel_->InvokeMethod(
+          "activationComplete", std::make_unique<flutter::EncodableValue>());
+    }
+  });
+  process_window_channel_->InvokeMethod(
+      "prepareForActivation", std::make_unique<flutter::EncodableValue>());
+}
+
 void FlutterWindow::BeginPasteCapture(std::optional<int64_t> session_id) {
   ResetPasteCapture();
   paste_capture_armed_ = true;
@@ -690,9 +716,7 @@ void FlutterWindow::HandleInjectedPasteKey(DWORD key, bool targets_owner) {
     return;
   }
   paste_key_pressed_ = true;
-  if (!pending_paste_text_) {
-    HandleClipboardUpdate();
-  }
+  HandleClipboardUpdate(true);
   NotifyPasteRequested();
 }
 
@@ -709,9 +733,7 @@ bool FlutterWindow::ArmPasteCapture(std::optional<int64_t> session_id) {
   if (paste_capture_armed_) {
     if (!paste_capture_session_id_ && session_id) {
       paste_capture_session_id_ = *session_id;
-      if (!pending_paste_text_) {
-        HandleClipboardUpdate();
-      }
+      HandleClipboardUpdate(true);
       if (paste_key_pressed_) {
         NotifyPasteRequested();
       }
@@ -743,9 +765,8 @@ bool FlutterWindow::DidPasteCaptureObserveChange(int64_t session_id) {
                                                   std::to_string(session_id));
     return false;
   }
-  HandleClipboardUpdate();
-  return paste_capture_invalidated_ ||
-         paste_capture_observed_sequence_ != 0;
+  HandleClipboardUpdate(paste_key_pressed_);
+  return paste_capture_invalidated_ || pending_paste_text_.has_value();
 }
 
 void FlutterWindow::DiscardPendingPasteText(int64_t session_id) {
@@ -772,7 +793,7 @@ std::optional<std::string> FlutterWindow::TakePendingPasteText(
   return text;
 }
 
-void FlutterWindow::HandleClipboardUpdate() {
+void FlutterWindow::HandleClipboardUpdate(bool capture_text) {
   if (!paste_capture_armed_ || paste_capture_invalidated_ ||
       pending_paste_text_) {
     ClipboardTrace("clipboard_update_skip", std::string("armed=") +
@@ -790,6 +811,7 @@ void FlutterWindow::HandleClipboardUpdate() {
   if (sequence == 0 || sequence == paste_capture_baseline_sequence_) {
     ClipboardTrace("clipboard_update_unchanged", "sequence=" +
                                                        std::to_string(sequence));
+    if (capture_text) RetryPendingPasteCapture();
     return;
   }
   ClipboardTrace("clipboard_update", "sequence=" +
@@ -805,6 +827,11 @@ void FlutterWindow::HandleClipboardUpdate() {
     paste_capture_observed_sequence_ = sequence;
     paste_capture_retry_count_ = 0;
   }
+  if (!capture_text || !paste_key_pressed_) {
+    ClipboardTrace("clipboard_update_deferred", "sequence=" +
+                                                     std::to_string(sequence));
+    return;
+  }
   if (!CaptureObservedPasteText()) {
     RetryPendingPasteCapture();
   }
@@ -812,7 +839,7 @@ void FlutterWindow::HandleClipboardUpdate() {
 
 void FlutterWindow::RetryPendingPasteCapture() {
   if (!paste_capture_armed_ || paste_capture_invalidated_ ||
-      pending_paste_text_) {
+      pending_paste_text_ || !paste_key_pressed_) {
     return;
   }
   if (++paste_capture_retry_count_ > kPasteCaptureMaxRetries) {
@@ -828,7 +855,7 @@ void FlutterWindow::RetryPendingPasteCapture() {
 
 bool FlutterWindow::CaptureObservedPasteText() {
   if (!paste_capture_armed_ || paste_capture_invalidated_ ||
-      paste_capture_observed_sequence_ == 0) {
+      paste_capture_observed_sequence_ == 0 || !paste_key_pressed_) {
     return false;
   }
 
@@ -872,18 +899,21 @@ bool FlutterWindow::CaptureObservedPasteText() {
                                                   std::to_string(GetLastError()));
   }
   CloseClipboard();
-  if (pending_paste_text_) {
+  const bool captured = pending_paste_text_.has_value();
+  if (captured) {
     KillTimer(GetHandle(), kPasteCaptureRetryTimer);
     if (paste_key_pressed_) {
       NotifyPasteRequested();
     }
   }
-  return pending_paste_text_.has_value();
+  // A sessionless notification resets the capture after InvokeMethod. Preserve
+  // the result from before that reset so callers do not schedule another retry.
+  return captured;
 }
 
 void FlutterWindow::NotifyPasteRequested() {
   if (paste_request_notification_sent_ || !clipboard_channel_ ||
-      !paste_capture_session_id_ || !pending_paste_text_) {
+      !pending_paste_text_) {
     ClipboardTrace("notify_skip", std::string("sent=") +
                                      (paste_request_notification_sent_ ? "true" :
                                                                           "false") +
@@ -897,18 +927,34 @@ void FlutterWindow::NotifyPasteRequested() {
   }
 
   flutter::EncodableMap arguments;
-  arguments[flutter::EncodableValue("sessionId")] = flutter::EncodableValue(
-      *paste_capture_session_id_);
+  if (paste_capture_session_id_) {
+    arguments[flutter::EncodableValue("sessionId")] = flutter::EncodableValue(
+        *paste_capture_session_id_);
+  } else {
+    // The injected paste key can arrive before Flutter receives the matching
+    // blur event and assigns a session. Send the text with the request so the
+    // active editor can consume this exact clipboard item without waiting for
+    // a later window transition or reading a restored clipboard value.
+    arguments[flutter::EncodableValue("text")] = flutter::EncodableValue(
+        *pending_paste_text_);
+  }
   paste_request_notification_sent_ = true;
-  ClipboardTrace("notify_paste_requested", "session=" +
-                                                   std::to_string(
-                                                       *paste_capture_session_id_) +
-                                                   " length=" +
-                                                   std::to_string(
-                                                       pending_paste_text_->size()));
+  ClipboardTrace(
+      "notify_paste_requested",
+      "session=" +
+          (paste_capture_session_id_
+               ? std::to_string(*paste_capture_session_id_)
+               : std::string("none")) +
+          " includes_text=" +
+          (paste_capture_session_id_ ? std::string("false")
+                                     : std::string("true")) +
+          " length=" + std::to_string(pending_paste_text_->size()));
   clipboard_channel_->InvokeMethod(
       "pasteRequested",
       std::make_unique<flutter::EncodableValue>(arguments));
+  if (!paste_capture_session_id_) {
+    ResetPasteCapture();
+  }
 }
 
 void FlutterWindow::InvalidatePasteCapture() {
@@ -1038,7 +1084,7 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
   if (message == kActivateToolWindowMessage) {
     // AllowSetForegroundWindow grants the target process permission to take
     // focus, so perform the final activation on the target UI thread.
-    ShowAndFocusProcessWindow(hwnd);
+    ActivateToolWindow();
     return 0;
   }
   if (message == kInjectedPasteKeyMessage) {
@@ -1058,18 +1104,20 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
                                            (pending_paste_text_ ? "true" :
                                                                   "false"));
   }
+  if (is_paste_key && paste_capture_armed_) {
+    paste_key_pressed_ = true;
+  }
   if (is_paste_key && paste_capture_armed_ && !pending_paste_text_) {
     // Clipboard update messages and injected keyboard messages originate on
     // different threads. Re-check synchronously at the actual paste boundary
     // so a queued WM_CLIPBOARDUPDATE cannot make Flutter read stale content.
-    HandleClipboardUpdate();
+    HandleClipboardUpdate(true);
   }
   if (is_paste_key && paste_capture_armed_) {
     // QuickClipboard can finish publishing CF_UNICODETEXT slightly after the
     // injected Ctrl+V/Shift+Insert reaches this window. Remember that the
     // paste key was already observed so CaptureObservedPasteText can notify
     // Flutter when the text becomes readable on a later retry.
-    paste_key_pressed_ = true;
     NotifyPasteRequested();
   }
   if (message == WM_CLIPBOARDUPDATE && paste_capture_armed_) {

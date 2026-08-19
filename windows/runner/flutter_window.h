@@ -35,6 +35,7 @@ class FlutterWindow : public Win32Window {
   void RegisterCredentialsChannel();
   void RegisterProcessWindowChannel();
   void RegisterAppLifecycleChannel();
+  void ActivateToolWindow();
   static LRESULT CALLBACK PasteKeyboardHook(int code, WPARAM wparam,
                                              LPARAM lparam);
   void EnsurePasteKeyboardHook();
@@ -46,7 +47,7 @@ class FlutterWindow : public Win32Window {
   bool DidPasteCaptureObserveChange(int64_t session_id);
   void DiscardPendingPasteText(int64_t session_id);
   std::optional<std::string> TakePendingPasteText(int64_t session_id);
-  void HandleClipboardUpdate();
+  void HandleClipboardUpdate(bool capture_text = false);
   void RetryPendingPasteCapture();
   bool CaptureObservedPasteText();
   void NotifyPasteRequested();
@@ -85,6 +86,7 @@ class FlutterWindow : public Win32Window {
   bool paste_hook_shift_pressed_ = false;
   int paste_target_client_count_ = 0;
   bool show_on_first_frame_ = true;
+  bool tool_window_activation_pending_ = false;
 };
 
 #endif  // RUNNER_FLUTTER_WINDOW_H_

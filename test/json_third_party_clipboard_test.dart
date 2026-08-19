@@ -274,6 +274,35 @@ void main() {
     },
   );
 
+  testWidgets(
+    'sessionless Windows native paste beats the restored system clipboard',
+    (tester) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+      final fixture = await JsonFormatterFixture.create(text: 'abcdef');
+      mockClipboard(tester, initialText: 'restored old value');
+      final nativeClipboard = mockClipboardRevision(tester);
+      nativeClipboard.pasteCapturePrearmed = false;
+      await tester.pumpWidget(fixture.widget);
+      final editor = tester.widget<CodeEditor>(find.byType(CodeEditor));
+      editor.controller!.selection = const CodeLineSelection.collapsed(
+        index: 0,
+        offset: 3,
+      );
+      editor.focusNode!.requestFocus();
+      await tester.pump();
+
+      await _pasteWithControl(tester);
+      await _sendNativePasteRequested(text: 'selected clipboard item');
+      await tester.pump();
+
+      expect(fixture.controller.text, 'abcselected clipboard itemdef');
+      await tester.pump(const Duration(milliseconds: 350));
+      await disposeEditor(tester);
+      debugDefaultTargetPlatformOverride = null;
+    },
+  );
+
   testWidgets('QuickClipboard paste restores the previous find cursor', (
     tester,
   ) async {

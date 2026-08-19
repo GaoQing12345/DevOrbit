@@ -58,6 +58,30 @@ void main() {
     expect(activation.visible, isFalse);
   });
 
+  test(
+    'native activation reveals a prewarmed frame before window focus',
+    () async {
+      var activationCount = 0;
+      final activation = StandaloneWindowActivation(
+        prewarmed: true,
+        onActivated: () async => activationCount++,
+      );
+      await activation.initialize();
+
+      expect(activation.visible, isFalse);
+      await _sendProcessWindowCall('prepareForActivation');
+
+      expect(activation.visible, isTrue);
+      expect(activationCount, 0);
+      expect(windowCalls, isEmpty);
+
+      await _sendProcessWindowCall('activationComplete');
+      await Future<void>.delayed(Duration.zero);
+      expect(activationCount, 1);
+      activation.dispose();
+    },
+  );
+
   test('cold window is shown and focused before activation work', () async {
     var activationCount = 0;
     final activation = StandaloneWindowActivation(
@@ -103,4 +127,12 @@ void main() {
     expect(activation.visible, isTrue);
     activation.dispose();
   });
+}
+
+Future<void> _sendProcessWindowCall(String method) async {
+  final message = const StandardMethodCodec().encodeMethodCall(
+    MethodCall(method),
+  );
+  await TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+      .handlePlatformMessage('dev_orbit/process_window', message, (_) {});
 }

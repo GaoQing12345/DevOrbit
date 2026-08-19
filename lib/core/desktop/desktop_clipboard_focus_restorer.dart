@@ -162,6 +162,12 @@ class DesktopClipboardFocusRestorer with WindowListener {
     Duration(milliseconds: 128),
     Duration(milliseconds: 256),
   ];
+  static const _newPasteCaptureObservationRetryDelays = <Duration>[
+    Duration(milliseconds: 4),
+    Duration(milliseconds: 8),
+    Duration(milliseconds: 16),
+    Duration(milliseconds: 32),
+  ];
   static const _pasteCaptureTextRetryDelays = <Duration>[
     Duration(milliseconds: 4),
     Duration(milliseconds: 8),
@@ -270,9 +276,11 @@ class DesktopClipboardFocusRestorer with WindowListener {
       selection: target.selection,
       suspendedAt: DateTime.now(),
       sessionId: sessionId,
-      nativeCapturePrearmed: armNative
+      nativeCaptureState: armNative
           ? _clipboardReader.armPasteCapture(sessionId)
-          : Future<bool>.value(false),
+          : Future<DesktopPasteCaptureState>.value(
+              DesktopPasteCaptureState.unavailable,
+            ),
     );
     _snapshot = snapshot;
     _pasteFallbackArmed = true;
@@ -534,9 +542,14 @@ class DesktopClipboardFocusRestorer with WindowListener {
     _DesktopFocusSnapshot snapshot, {
     bool suppressFollowUpPaste = false,
   }) async {
-    final nativeCapturePrearmed = await snapshot.nativeCapturePrearmed;
+    final nativeCaptureState = await snapshot.nativeCaptureState;
+    final nativeCaptureAvailable =
+        nativeCaptureState != DesktopPasteCaptureState.unavailable;
+    final nativeCapturePrearmed =
+        nativeCaptureState == DesktopPasteCaptureState.prearmed;
     DesktopClipboardDiagnostics.write('paste_capture_ready', {
       'session': snapshot.sessionId,
+      'native_available': nativeCaptureAvailable,
       'native_prearmed': nativeCapturePrearmed,
     });
     if (!_canPaste(snapshot)) return;
@@ -555,9 +568,12 @@ class DesktopClipboardFocusRestorer with WindowListener {
       // otherwise the fallback can read the value that QuickClipboard has just
       // restored and insert the wrong item.
       if (!observedChange &&
-          nativeCapturePrearmed &&
+          nativeCaptureAvailable &&
           defaultTargetPlatform == TargetPlatform.windows) {
-        for (final delay in _pasteCaptureObservationRetryDelays) {
+        final retryDelays = nativeCapturePrearmed
+            ? _pasteCaptureObservationRetryDelays
+            : _newPasteCaptureObservationRetryDelays;
+        for (final delay in retryDelays) {
           await _waitForCaptureRetry(delay);
           if (!_canPaste(snapshot)) return;
           text = await _clipboardReader.readCapturedPasteText(
@@ -778,7 +794,7 @@ class _DesktopFocusSnapshot {
     required this.selection,
     required this.suspendedAt,
     required this.sessionId,
-    required this.nativeCapturePrearmed,
+    required this.nativeCaptureState,
   });
 
   final DesktopClipboardTarget target;
@@ -786,5 +802,5 @@ class _DesktopFocusSnapshot {
   final Object selection;
   final DateTime suspendedAt;
   final int sessionId;
-  final Future<bool> nativeCapturePrearmed;
+  final Future<DesktopPasteCaptureState> nativeCaptureState;
 }

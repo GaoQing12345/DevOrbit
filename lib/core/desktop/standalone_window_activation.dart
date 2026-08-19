@@ -12,6 +12,7 @@ class StandaloneWindowActivation extends ChangeNotifier with WindowListener {
     required this.onActivated,
     this.reactivateAfterClose = false,
   }) : _visible = !prewarmed {
+    _processWindowChannel.setMethodCallHandler(_handleNativeCall);
     if (_listensToWindow) windowManager.addListener(this);
   }
 
@@ -30,6 +31,20 @@ class StandaloneWindowActivation extends ChangeNotifier with WindowListener {
   bool get visible => _visible;
 
   bool get _listensToWindow => prewarmed || reactivateAfterClose;
+
+  Future<void> _handleNativeCall(MethodCall call) async {
+    if (_disposed) return;
+    if (call.method == 'activationComplete') {
+      unawaited(_activateWindow(alreadyShownAndFocused: true));
+      return;
+    }
+    if (call.method != 'prepareForActivation') return;
+
+    // Windows keeps prewarmed helper HWNDs hidden on an empty Flutter frame.
+    // Rebuild the actual page first; the native runner shows the window from
+    // that frame's completion callback, avoiding a transparent first paint.
+    _setVisible(true);
+  }
 
   Future<void> initialize() async {
     if (_disposed) return;
@@ -59,8 +74,8 @@ class StandaloneWindowActivation extends ChangeNotifier with WindowListener {
       if (!_disposed) {
         _setVisible(true);
         await onActivated();
+        _activated = true;
       }
-      _activated = true;
     } finally {
       _activating = false;
     }
@@ -84,6 +99,7 @@ class StandaloneWindowActivation extends ChangeNotifier with WindowListener {
   void dispose() {
     _visible = false;
     _disposed = true;
+    _processWindowChannel.setMethodCallHandler(null);
     if (_listensToWindow) windowManager.removeListener(this);
     super.dispose();
   }
