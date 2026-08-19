@@ -98,8 +98,7 @@ class MainFlutterWindow: NSWindow {
           result(FlutterError(code: "invalid_arguments", message: "Missing clipboard session ID", details: nil))
           return
         }
-        self?.armPasteCapture(sessionId: sessionId)
-        result(nil)
+        result(self?.armPasteCapture(sessionId: sessionId) ?? false)
       case "didPasteCaptureObserveChange":
         guard let sessionId = Self.clipboardSessionId(from: call) else {
           result(FlutterError(code: "invalid_arguments", message: "Missing clipboard session ID", details: nil))
@@ -156,17 +155,22 @@ class MainFlutterWindow: NSWindow {
     pasteCaptureBaselineChangeCount = pasteboard.changeCount
   }
 
-  private func armPasteCapture(sessionId: Int64) {
+  private func armPasteCapture(sessionId: Int64) -> Bool {
+    guard pasteTargetClientCount > 0 else {
+      resetPasteCapture()
+      return false
+    }
     if pasteCaptureArmed {
       if pasteCaptureSessionId == nil {
         pasteCaptureSessionId = sessionId
-        return
+        return true
       }
       if pasteCaptureSessionId == sessionId {
-        return
+        return true
       }
     }
     beginPasteCapture(sessionId: sessionId)
+    return false
   }
 
   private func pollPasteboard() {

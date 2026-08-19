@@ -85,8 +85,9 @@ class _AppViewport extends StatelessWidget {
       child: Stack(
         fit: StackFit.expand,
         children: [
-          Offstage(
-            offstage: !showToolbox,
+          Visibility(
+            visible: showToolbox,
+            maintainState: true,
             child: ToolboxShell(
               controller: controller,
               registry: registry,

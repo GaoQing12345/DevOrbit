@@ -692,6 +692,7 @@ class _ApiKeyDialogState extends State<_ApiKeyDialog> {
 
   @override
   Widget build(BuildContext context) {
+    _focusRestorer.active = Visibility.of(context);
     return AlertDialog(
       title: const Text('配置 DeepL API Free'),
       content: SizedBox(

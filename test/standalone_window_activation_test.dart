@@ -40,7 +40,9 @@ void main() {
       onActivated: () async => activationCount++,
     );
 
+    expect(activation.visible, isFalse);
     await activation.initialize();
+    expect(activation.visible, isFalse);
     expect(processWindowCalls.map((call) => call.method), [
       'markReadyForActivation',
     ]);
@@ -50,8 +52,10 @@ void main() {
     await Future<void>.delayed(Duration.zero);
 
     expect(activationCount, 1);
+    expect(activation.visible, isTrue);
     expect(windowCalls, isEmpty);
     activation.dispose();
+    expect(activation.visible, isFalse);
   });
 
   test('cold window is shown and focused before activation work', () async {
@@ -61,6 +65,7 @@ void main() {
       onActivated: () async => activationCount++,
     );
 
+    expect(activation.visible, isTrue);
     await activation.initialize();
 
     expect(processWindowCalls.map((call) => call.method), [
@@ -91,9 +96,11 @@ void main() {
     expect(activationCount, 1);
 
     activation.onWindowClose();
+    expect(activation.visible, isFalse);
     activation.onWindowFocus();
     await Future<void>.delayed(Duration.zero);
     expect(activationCount, 2);
+    expect(activation.visible, isTrue);
     activation.dispose();
   });
 }

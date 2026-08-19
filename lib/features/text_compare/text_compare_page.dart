@@ -18,7 +18,9 @@ class _TextCompareChunkAnalyzer implements CodeChunkAnalyzer {
     return [
       for (var index = 0; index < codeLines.length; index++)
         if (codeLines[index].chunkParent)
-          CodeChunk(index, index + codeLines[index].chunks.length + 1),
+          // A collapsed line is already a valid folded chunk. Reporting its
+          // hidden range again makes re_editor's async analyzer expand it.
+          CodeChunk(index, index + 1),
     ];
   }
 }

@@ -129,9 +129,12 @@ class _StandaloneTranslatorAppState extends State<_StandaloneTranslatorApp> {
         theme: AppTheme.light(),
         darkTheme: AppTheme.dark(),
         themeMode: widget.settings.value.themeMode,
-        home: StandaloneWindowShell(
-          title: '文本翻译 - DevOrbit',
-          child: Scaffold(body: TranslatorPage(controller: _controller)),
+        home: StandaloneWindowVisibility(
+          activation: _windowActivation,
+          child: StandaloneWindowShell(
+            title: '文本翻译 - DevOrbit',
+            child: Scaffold(body: TranslatorPage(controller: _controller)),
+          ),
         ),
       ),
     );

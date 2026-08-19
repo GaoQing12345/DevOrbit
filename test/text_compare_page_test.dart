@@ -141,6 +141,11 @@ void main() {
     expect(editors.first.controller!.text.split('\n'), hasLength(12));
     expect(find.text('已折叠 3 行'), findsOneWidget);
 
+    // re_editor validates chunks asynchronously. The fold must survive that
+    // validation instead of briefly collapsing and then expanding again.
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(editors.first.controller!.codeLines.length, lessThan(12));
+
     await tester.tap(find.text('折叠未更改行'));
     await tester.pump();
     await tester.pump();

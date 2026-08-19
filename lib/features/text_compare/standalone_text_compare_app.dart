@@ -108,9 +108,12 @@ class _StandaloneTextCompareAppState extends State<_StandaloneTextCompareApp> {
         theme: AppTheme.light(),
         darkTheme: AppTheme.dark(),
         themeMode: widget.settings.value.themeMode,
-        home: StandaloneWindowShell(
-          title: '文本比对 - DevOrbit',
-          child: Scaffold(body: TextComparePage(controller: _controller)),
+        home: StandaloneWindowVisibility(
+          activation: _windowActivation,
+          child: StandaloneWindowShell(
+            title: '文本比对 - DevOrbit',
+            child: Scaffold(body: TextComparePage(controller: _controller)),
+          ),
         ),
       ),
     );

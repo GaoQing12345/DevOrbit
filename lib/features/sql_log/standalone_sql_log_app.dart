@@ -121,9 +121,12 @@ class _StandaloneSqlLogAppState extends State<_StandaloneSqlLogApp> {
         theme: AppTheme.light(),
         darkTheme: AppTheme.dark(),
         themeMode: widget.settings.value.themeMode,
-        home: StandaloneWindowShell(
-          title: 'SQL 日志还原 - DevOrbit',
-          child: Scaffold(body: SqlLogPage(controller: _controller)),
+        home: StandaloneWindowVisibility(
+          activation: _windowActivation,
+          child: StandaloneWindowShell(
+            title: 'SQL 日志还原 - DevOrbit',
+            child: Scaffold(body: SqlLogPage(controller: _controller)),
+          ),
         ),
       ),
     );

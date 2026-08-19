@@ -120,6 +120,34 @@ void main() {
     debugDefaultTargetPlatformOverride = null;
   });
 
+  testWidgets('Ctrl+V pastes the focused target without window events', (
+    tester,
+  ) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    final fixture = await JsonFormatterFixture.create(text: 'abcdef');
+    mockClipboard(tester, initialText: 'direct-control-v');
+    final nativeClipboard = mockClipboardRevision(tester);
+    nativeClipboard.pasteCapturePrearmed = false;
+    await tester.pumpWidget(fixture.widget);
+
+    final editor = tester.widget<CodeEditor>(find.byType(CodeEditor));
+    editor.controller!.selection = const CodeLineSelection.collapsed(
+      index: 0,
+      offset: 3,
+    );
+    editor.focusNode!.requestFocus();
+    await tester.pump();
+
+    await pasteWithControl(tester);
+    await tester.pump();
+
+    expect(fixture.controller.text, 'abcdirect-control-vdef');
+    await tester.pump(const Duration(milliseconds: 350));
+    await disposeEditor(tester);
+    debugDefaultTargetPlatformOverride = null;
+  });
+
   testWidgets('find paste survives a delayed window focus event', (
     tester,
   ) async {

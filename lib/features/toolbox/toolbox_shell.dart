@@ -51,9 +51,28 @@ class ToolboxShell extends StatelessWidget {
             child: IndexedStack(
               index: selectedIndex,
               children: [
-                ToolboxHome(controller: controller, registry: registry),
-                SettingsPage(controller: controller, settings: settings),
-                for (final module in registry.modules) module.buildPage(),
+                Visibility(
+                  visible: selectedIndex == 0,
+                  maintainState: true,
+                  child: ToolboxHome(
+                    controller: controller,
+                    registry: registry,
+                  ),
+                ),
+                Visibility(
+                  visible: selectedIndex == 1,
+                  maintainState: true,
+                  child: SettingsPage(
+                    controller: controller,
+                    settings: settings,
+                  ),
+                ),
+                for (var index = 0; index < registry.modules.length; index++)
+                  Visibility(
+                    visible: selectedIndex == index + 2,
+                    maintainState: true,
+                    child: registry.modules[index].buildPage(),
+                  ),
               ],
             ),
           ),

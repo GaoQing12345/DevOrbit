@@ -105,9 +105,12 @@ class _StandaloneTimestampAppState extends State<_StandaloneTimestampApp> {
         theme: AppTheme.light(),
         darkTheme: AppTheme.dark(),
         themeMode: widget.settings.value.themeMode,
-        home: const StandaloneWindowShell(
-          title: '时间戳转换 - DevOrbit',
-          child: Scaffold(body: TimestampPage()),
+        home: StandaloneWindowVisibility(
+          activation: _windowActivation,
+          child: const StandaloneWindowShell(
+            title: '时间戳转换 - DevOrbit',
+            child: Scaffold(body: TimestampPage()),
+          ),
         ),
       ),
     );

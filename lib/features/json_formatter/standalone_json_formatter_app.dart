@@ -101,12 +101,15 @@ class _StandaloneJsonFormatterAppState
         theme: AppTheme.light(),
         darkTheme: AppTheme.dark(),
         themeMode: widget.settings.value.themeMode,
-        home: StandaloneWindowShell(
-          title: 'JSON 格式化 - DevOrbit',
-          child: Scaffold(
-            body: JsonFormatterPage(
-              controller: _controller,
-              settings: widget.settings,
+        home: StandaloneWindowVisibility(
+          activation: _windowActivation,
+          child: StandaloneWindowShell(
+            title: 'JSON 格式化 - DevOrbit',
+            child: Scaffold(
+              body: JsonFormatterPage(
+                controller: _controller,
+                settings: widget.settings,
+              ),
             ),
           ),
         ),

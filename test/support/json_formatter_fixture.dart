@@ -147,6 +147,7 @@ class ClipboardRevisionState {
   String? pendingPasteText;
   int? armedSessionId;
   bool observedChange = false;
+  bool pasteCapturePrearmed = true;
 
   Future<Object?> handleMethodCall(MethodCall call) async {
     if (call.method == 'getChangeCount') return revision;
@@ -155,7 +156,7 @@ class ClipboardRevisionState {
       armedSessionId = _sessionId(call);
       pendingPasteText = null;
       observedChange = false;
-      return null;
+      return pasteCapturePrearmed;
     }
     if (call.method == 'discardPendingPasteText') {
       if (_sessionId(call) == armedSessionId) {

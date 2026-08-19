@@ -1,16 +1,17 @@
 import 'dart:async';
 
+import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:window_manager/window_manager.dart';
 
 typedef StandaloneWindowActivated = Future<void> Function();
 
-class StandaloneWindowActivation with WindowListener {
+class StandaloneWindowActivation extends ChangeNotifier with WindowListener {
   StandaloneWindowActivation({
     required this.prewarmed,
     required this.onActivated,
     this.reactivateAfterClose = false,
-  }) {
+  }) : _visible = !prewarmed {
     if (_listensToWindow) windowManager.addListener(this);
   }
 
@@ -24,6 +25,9 @@ class StandaloneWindowActivation with WindowListener {
   bool _activating = false;
   bool _activated = false;
   bool _disposed = false;
+  bool _visible;
+
+  bool get visible => _visible;
 
   bool get _listensToWindow => prewarmed || reactivateAfterClose;
 
@@ -52,7 +56,10 @@ class StandaloneWindowActivation with WindowListener {
         await windowManager.show();
         await windowManager.focus();
       }
-      if (!_disposed) await onActivated();
+      if (!_disposed) {
+        _setVisible(true);
+        await onActivated();
+      }
       _activated = true;
     } finally {
       _activating = false;
@@ -62,6 +69,7 @@ class StandaloneWindowActivation with WindowListener {
   @override
   void onWindowFocus() {
     if (_listensToWindow) {
+      _setVisible(true);
       unawaited(_activateWindow(alreadyShownAndFocused: true));
     }
   }
@@ -69,10 +77,44 @@ class StandaloneWindowActivation with WindowListener {
   @override
   void onWindowClose() {
     if (reactivateAfterClose) _activated = false;
+    _setVisible(false);
   }
 
+  @override
   void dispose() {
+    _visible = false;
     _disposed = true;
     if (_listensToWindow) windowManager.removeListener(this);
+    super.dispose();
+  }
+
+  void _setVisible(bool value) {
+    if (_visible == value || _disposed) return;
+    _visible = value;
+    notifyListeners();
+  }
+}
+
+class StandaloneWindowVisibility extends StatelessWidget {
+  const StandaloneWindowVisibility({
+    super.key,
+    required this.activation,
+    required this.child,
+  });
+
+  final StandaloneWindowActivation activation;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: activation,
+      builder: (context, child) => Visibility(
+        visible: activation.visible,
+        maintainState: true,
+        child: child!,
+      ),
+      child: child,
+    );
   }
 }

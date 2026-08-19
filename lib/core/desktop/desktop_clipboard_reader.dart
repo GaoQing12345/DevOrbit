@@ -27,14 +27,14 @@ class DesktopClipboardReader {
   }
 
   Future<void> registerPasteTarget() {
-    if (defaultTargetPlatform != TargetPlatform.macOS) {
+    if (!_usesNativeCapture) {
       return Future<void>.value();
     }
     return _invokeVoid('registerPasteTarget');
   }
 
   Future<void> unregisterPasteTarget() {
-    if (defaultTargetPlatform != TargetPlatform.macOS) {
+    if (!_usesNativeCapture) {
       return Future<void>.value();
     }
     return _invokeVoid('unregisterPasteTarget');
@@ -54,11 +54,16 @@ class DesktopClipboardReader {
         'supported': supported,
       });
       if (!supported) return false;
-      await _channel.invokeMethod<void>('armPasteCapture', {
-        'sessionId': sessionId,
+      final prearmed =
+          await _channel.invokeMethod<bool>('armPasteCapture', {
+            'sessionId': sessionId,
+          }) ??
+          false;
+      DesktopClipboardDiagnostics.write('arm_success', {
+        'session': sessionId,
+        'prearmed': prearmed,
       });
-      DesktopClipboardDiagnostics.write('arm_success', {'session': sessionId});
-      return true;
+      return prearmed;
     } on MissingPluginException {
       DesktopClipboardDiagnostics.write('arm_error', {
         'session': sessionId,

@@ -146,7 +146,6 @@ class DesktopClipboardFocusRestorer with WindowListener {
     _pasteRequestSubscription = _clipboardReader.pasteRequests.listen(
       _handleNativePasteRequest,
     );
-    unawaited(_clipboardReader.registerPasteTarget());
   }
 
   static const _clipboardSessionLimit = Duration(seconds: 30);
@@ -182,7 +181,7 @@ class DesktopClipboardFocusRestorer with WindowListener {
   _DesktopFocusSnapshot? _snapshot;
   bool _pasteFallbackArmed = false;
   bool _disposed = false;
-  bool _active = true;
+  bool _active = false;
   Timer? _captureRetryTimer;
   Completer<void>? _captureRetryCompleter;
   Timer? _resumedCaptureTimer;
@@ -190,17 +189,32 @@ class DesktopClipboardFocusRestorer with WindowListener {
   DesktopClipboardTarget? _suppressedPasteTarget;
   DateTime? _suppressPasteUntil;
   DateTime? _skipPasteActionUntil;
+  bool _pasteTargetRegistered = false;
 
   set active(bool value) {
     if (_active == value) return;
     _active = value;
-    // Visibility can briefly become false while the desktop window is being
-    // replaced by the Windows clipboard panel or a radial overlay. Do not
-    // cancel the focus snapshot here: that snapshot is exactly what allows
-    // paste to return to the editor after the external UI closes.
+    unawaited(_setPasteTargetRegistration(value));
+    if (!value) {
+      // Hidden pages and prewarmed helper windows must not keep a native
+      // clipboard session alive or consume paste events for the visible page.
+      _lastTarget = null;
+      _cancelRestore();
+    }
+  }
+
+  Future<void> _setPasteTargetRegistration(bool value) async {
+    if (value == _pasteTargetRegistered) return;
+    _pasteTargetRegistered = value;
+    if (value) {
+      await _clipboardReader.registerPasteTarget();
+    } else {
+      await _clipboardReader.unregisterPasteTarget();
+    }
   }
 
   void _trackFocus() {
+    if (!_active) return;
     final target = _focusedTarget();
     if (target != null) _lastTarget = target;
   }
@@ -219,7 +233,10 @@ class DesktopClipboardFocusRestorer with WindowListener {
     return null;
   }
 
-  void _suspendFocus() => _captureFocusSnapshot();
+  void _suspendFocus() {
+    if (!_active) return;
+    _captureFocusSnapshot();
+  }
 
   void _captureFocusSnapshot({bool armNative = true}) {
     if (_snapshot != null) {
@@ -250,7 +267,7 @@ class DesktopClipboardFocusRestorer with WindowListener {
       selection: target.selection,
       suspendedAt: DateTime.now(),
       sessionId: sessionId,
-      nativeCaptureReady: armNative
+      nativeCapturePrearmed: armNative
           ? _clipboardReader.armPasteCapture(sessionId)
           : Future<bool>.value(false),
     );
@@ -267,6 +284,7 @@ class DesktopClipboardFocusRestorer with WindowListener {
   }
 
   void _restoreFocus() {
+    if (!_active) return;
     final snapshot = _snapshot;
     if (snapshot == null) {
       _pasteFallbackArmed = false;
@@ -295,6 +313,13 @@ class DesktopClipboardFocusRestorer with WindowListener {
   }
 
   void _handleNativePasteRequest(DesktopPasteRequest request) {
+    if (!_active) {
+      DesktopClipboardDiagnostics.write('request_drop', {
+        'reason': 'inactive_target',
+        'session': request.sessionId,
+      });
+      return;
+    }
     DesktopClipboardDiagnostics.write('request_handling', {
       'session': request.sessionId,
       'has_text': request.text != null,
@@ -397,7 +422,7 @@ class DesktopClipboardFocusRestorer with WindowListener {
   }
 
   bool _handleKeyEvent(KeyEvent event) {
-    if (event is! KeyDownEvent) return false;
+    if (!_active || event is! KeyDownEvent) return false;
     final keyboard = HardwareKeyboard.instance;
     final isMacOS = defaultTargetPlatform == TargetPlatform.macOS;
     final isV = event.logicalKey == LogicalKeyboardKey.keyV;
@@ -427,11 +452,25 @@ class DesktopClipboardFocusRestorer with WindowListener {
       return true;
     }
     final snapshot = _snapshot;
-    if (!_pasteFallbackArmed || snapshot == null) return false;
     if (_hasExternalEditableFocus()) {
-      _cancelRestore(expected: snapshot);
+      if (snapshot != null) _cancelRestore(expected: snapshot);
       return false;
     }
+    if (snapshot == null) {
+      // Some clipboard tools restore the target window without producing a
+      // blur/focus pair. Capture the current selection at the paste boundary
+      // so ordinary Ctrl/Command+V still uses the same guarded insertion path.
+      _captureFocusSnapshot(armNative: true);
+      final current = _snapshot;
+      if (current == null) return false;
+      _pasteFallbackArmed = false;
+      _restoreSelection(current);
+      _requestFocus(current.target);
+      _suppressMatchingPasteAction();
+      _startExplicitPaste(current, suppressFollowUpPaste: true);
+      return true;
+    }
+    if (!_pasteFallbackArmed) return false;
     _pasteFallbackArmed = false;
     _restoreSelection(snapshot);
     _requestFocus(snapshot.target);
@@ -441,6 +480,7 @@ class DesktopClipboardFocusRestorer with WindowListener {
   }
 
   void pasteFocusedTarget() {
+    if (!_active) return;
     DesktopClipboardDiagnostics.write('paste_action', {
       'session': _snapshot?.sessionId,
       'fallback_armed': _pasteFallbackArmed,
@@ -491,13 +531,13 @@ class DesktopClipboardFocusRestorer with WindowListener {
     _DesktopFocusSnapshot snapshot, {
     bool suppressFollowUpPaste = false,
   }) async {
-    final nativeCaptureReady = await snapshot.nativeCaptureReady;
+    final nativeCapturePrearmed = await snapshot.nativeCapturePrearmed;
     DesktopClipboardDiagnostics.write('paste_capture_ready', {
       'session': snapshot.sessionId,
-      'native_ready': nativeCaptureReady,
+      'native_prearmed': nativeCapturePrearmed,
     });
     if (!_canPaste(snapshot)) return;
-    var text = nativeCaptureReady
+    var text = nativeCapturePrearmed
         ? await _clipboardReader.readCapturedPasteText(snapshot.sessionId)
         : null;
     var observedChange = text != null;
@@ -512,7 +552,7 @@ class DesktopClipboardFocusRestorer with WindowListener {
       // otherwise the fallback can read the value that QuickClipboard has just
       // restored and insert the wrong item.
       if (!observedChange &&
-          nativeCaptureReady &&
+          nativeCapturePrearmed &&
           defaultTargetPlatform == TargetPlatform.windows) {
         for (final delay in _pasteCaptureObservationRetryDelays) {
           await _waitForCaptureRetry(delay);
@@ -551,7 +591,10 @@ class DesktopClipboardFocusRestorer with WindowListener {
       'available': text != null,
       'length': text?.length,
     });
-    if (!_canPaste(snapshot) || text == null || text.isEmpty) return;
+    if (!_canPaste(snapshot) || text == null || text.isEmpty) {
+      _cancelRestore(expected: snapshot);
+      return;
+    }
     _pasteText(snapshot, text, suppressFollowUpPaste: suppressFollowUpPaste);
   }
 
@@ -711,7 +754,10 @@ class DesktopClipboardFocusRestorer with WindowListener {
     _disposed = true;
     _cancelRestore();
     _pasteRequestSubscription.cancel();
-    unawaited(_clipboardReader.unregisterPasteTarget());
+    if (_pasteTargetRegistered) {
+      _pasteTargetRegistered = false;
+      unawaited(_clipboardReader.unregisterPasteTarget());
+    }
     HardwareKeyboard.instance.removeHandler(_handleKeyEvent);
     windowManager.removeListener(this);
     for (final target in _targets) {
@@ -729,7 +775,7 @@ class _DesktopFocusSnapshot {
     required this.selection,
     required this.suspendedAt,
     required this.sessionId,
-    required this.nativeCaptureReady,
+    required this.nativeCapturePrearmed,
   });
 
   final DesktopClipboardTarget target;
@@ -737,5 +783,5 @@ class _DesktopFocusSnapshot {
   final Object selection;
   final DateTime suspendedAt;
   final int sessionId;
-  final Future<bool> nativeCaptureReady;
+  final Future<bool> nativeCapturePrearmed;
 }
