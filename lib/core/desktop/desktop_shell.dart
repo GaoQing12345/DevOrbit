@@ -55,8 +55,12 @@ class NativeDesktopShell
   NativeDesktopShell({
     DesktopWindowEffects? windowEffects,
     DesktopCursorLocator? cursorLocator,
+    bool? isWindows,
+    bool? isMacOS,
   }) : _windowEffects = windowEffects ?? NativeDesktopWindowEffects(),
-       _cursorLocator = cursorLocator ?? NativeDesktopCursorLocator();
+       _cursorLocator = cursorLocator ?? NativeDesktopCursorLocator(),
+       _isWindows = isWindows ?? Platform.isWindows,
+       _isMacOS = isMacOS ?? Platform.isMacOS;
 
   static const radialSize = Size.square(360);
   static const toolSize = Size(960, 700);
@@ -69,10 +73,13 @@ class NativeDesktopShell
   final LaunchAtStartupService _launchAtStartup = LaunchAtStartupService();
   final DesktopWindowEffects _windowEffects;
   final DesktopCursorLocator _cursorLocator;
+  final bool _isWindows;
+  final bool _isMacOS;
   final WindowBlurGuard _windowBlurGuard = WindowBlurGuard(
     isFocused: windowManager.isFocused,
   );
   Rect _lastToolBounds = const Rect.fromLTWH(120, 100, 960, 700);
+  bool _radialWindowStyleActive = false;
 
   @override
   Future<String?> initialize(
@@ -100,11 +107,8 @@ class NativeDesktopShell
   }
 
   Future<void> _setupTray() async {
-    final icon = trayIconAsset(
-      isMacOS: Platform.isMacOS,
-      isWindows: Platform.isWindows,
-    );
-    await trayManager.setIcon(icon, isTemplate: Platform.isMacOS);
+    final icon = trayIconAsset(isMacOS: _isMacOS, isWindows: _isWindows);
+    await trayManager.setIcon(icon, isTemplate: _isMacOS);
     await trayManager.setToolTip('DevOrbit');
     await trayManager.setContextMenu(
       Menu(
@@ -131,12 +135,13 @@ class NativeDesktopShell
       windowSize: radialSize,
       workArea: workArea,
     );
+    _radialWindowStyleActive = true;
     await windowManager.setMinimumSize(const Size(1, 1));
     await windowManager.setMaximumSize(_maximumSize);
     await windowManager.setResizable(false);
     await windowManager.setAlwaysOnTop(true);
     await windowManager.setSkipTaskbar(true);
-    if (Platform.isWindows) {
+    if (_isWindows) {
       await windowManager.setAsFrameless();
     } else {
       await windowManager.setTitleBarStyle(
@@ -176,18 +181,7 @@ class NativeDesktopShell
 
   @override
   Future<void> showToolWindow({bool focus = true}) async {
-    await windowManager.setMaximumSize(_maximumSize);
-    await windowManager.setMinimumSize(toolMinimumSize);
-    await windowManager.setResizable(true);
-    await windowManager.setAlwaysOnTop(false);
-    await windowManager.setSkipTaskbar(false);
-    final useCustomWindowsTitleBar = Platform.isWindows;
-    await windowManager.setTitleBarStyle(
-      useCustomWindowsTitleBar ? TitleBarStyle.hidden : TitleBarStyle.normal,
-      windowButtonVisibility: !useCustomWindowsTitleBar,
-    );
-    await _windowEffects.setRadialMode(false);
-    await windowManager.setHasShadow(true);
+    await _ensureToolWindowStyle();
     await windowManager.setBounds(_lastToolBounds);
     await windowManager.show(inactive: !focus);
     if (focus) await windowManager.focus();
@@ -200,8 +194,33 @@ class NativeDesktopShell
   }
 
   @override
-  Future<void> hideRadial() {
-    return windowManager.hide();
+  Future<void> hideRadial() async {
+    await windowManager.hide();
+    await _ensureToolWindowStyle();
+  }
+
+  Future<void> _ensureToolWindowStyle() async {
+    if (!_radialWindowStyleActive) return;
+
+    // AppController starts standalone activation without awaiting this reset,
+    // so the hidden main window is normalized without delaying tool display.
+    await _restoreToolWindowStyle();
+    _radialWindowStyleActive = false;
+  }
+
+  Future<void> _restoreToolWindowStyle() async {
+    await windowManager.setMaximumSize(_maximumSize);
+    await windowManager.setMinimumSize(toolMinimumSize);
+    await windowManager.setResizable(true);
+    await windowManager.setAlwaysOnTop(false);
+    await windowManager.setSkipTaskbar(false);
+    final useCustomWindowsTitleBar = _isWindows;
+    await windowManager.setTitleBarStyle(
+      useCustomWindowsTitleBar ? TitleBarStyle.hidden : TitleBarStyle.normal,
+      windowButtonVisibility: !useCustomWindowsTitleBar,
+    );
+    await _windowEffects.setRadialMode(false);
+    await windowManager.setHasShadow(true);
   }
 
   @override

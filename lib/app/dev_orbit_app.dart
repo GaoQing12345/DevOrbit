@@ -81,7 +81,9 @@ class _AppViewport extends StatelessWidget {
         controller.mode == AppViewMode.toolbox ||
         controller.mode == AppViewMode.tool;
     return Material(
-      type: MaterialType.transparency,
+      color: showRadial
+          ? Colors.transparent
+          : Theme.of(context).colorScheme.surface,
       child: Stack(
         fit: StackFit.expand,
         children: [

@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:dev_orbit/app/app_controller.dart';
+import 'package:dev_orbit/app/dev_orbit_app.dart';
 import 'package:dev_orbit/core/desktop/desktop_shell.dart';
 import 'package:dev_orbit/core/desktop/standalone_tool_window_launcher.dart';
 import 'package:dev_orbit/core/modules/tool_module.dart';
@@ -12,6 +13,34 @@ import 'package:hotkey_manager/hotkey_manager.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
+  testWidgets('hidden main viewport is opaque outside radial mode', (
+    tester,
+  ) async {
+    final fixture = await _ControllerFixture.create();
+    await tester.pumpWidget(
+      DevOrbitApp(
+        controller: fixture.controller,
+        registry: fixture.controller.registry,
+        settings: fixture.controller.settings,
+        startHidden: true,
+      ),
+    );
+    await tester.pump();
+
+    Material viewport() => tester.widget<Material>(
+      find.byWidgetPredicate(
+        (widget) => widget is Material && widget.child is Stack,
+      ),
+    );
+
+    expect(viewport().color, isNot(Colors.transparent));
+
+    await fixture.controller.toggleRadial();
+    await tester.pump();
+
+    expect(viewport().color, Colors.transparent);
+  });
+
   test('keeps the initial hotkey registration error', () async {
     SharedPreferences.setMockInitialValues({});
     final settings = await SettingsStore.load();
