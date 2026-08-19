@@ -20,6 +20,7 @@ namespace {
 constexpr wchar_t kToolWindowReadyProperty[] =
     L"DevOrbitToolWindowReady";
 constexpr UINT kActivateToolWindowMessage = WM_APP + 0x30B;
+constexpr UINT kInjectedPasteKeyMessage = WM_APP + 0x30C;
 constexpr UINT_PTR kPasteCaptureRetryTimer = 0xD30B;
 constexpr UINT kPasteCaptureRetryDelayMs = 10;
 // Clipboard providers such as QuickClipboard clear the clipboard and then
@@ -29,10 +30,8 @@ constexpr UINT kPasteCaptureRetryDelayMs = 10;
 constexpr int kPasteCaptureMaxRetries = 250;
 bool g_clipboard_trace_enabled = true;
 
-void ClipboardTrace(const std::string& event,
-                    const std::string& details = std::string()) noexcept {
+void AppendClipboardTraceLine(const std::string& line) noexcept {
   try {
-    if (!g_clipboard_trace_enabled) return;
     char* disabled = nullptr;
     size_t disabled_size = 0;
     if (_dupenv_s(&disabled, &disabled_size, "DEV_ORBIT_CLIPBOARD_TRACE") ==
@@ -42,11 +41,46 @@ void ClipboardTrace(const std::string& event,
       std::free(disabled);
       if (trace_disabled) return;
     }
+
+    HANDLE mutex = CreateMutexW(nullptr, FALSE, L"Local\\DevOrbitClipboardTrace");
+    if (mutex == nullptr) return;
+    const DWORD wait = WaitForSingleObject(mutex, 1000);
+    const bool locked = wait == WAIT_OBJECT_0 || wait == WAIT_ABANDONED;
+    if (!locked) {
+      CloseHandle(mutex);
+      return;
+    }
+
     wchar_t temp_path[MAX_PATH] = {};
     const DWORD length = GetTempPathW(MAX_PATH, temp_path);
-    if (length == 0 || length >= MAX_PATH) return;
+    if (length == 0 || length >= MAX_PATH) {
+      ReleaseMutex(mutex);
+      CloseHandle(mutex);
+      return;
+    }
     std::wstring path(temp_path, length);
     path += L"dev_orbit_clipboard_trace.log";
+
+    HANDLE file = CreateFileW(path.c_str(), FILE_APPEND_DATA,
+                              FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
+                              OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file != INVALID_HANDLE_VALUE) {
+      DWORD written = 0;
+      WriteFile(file, line.data(), static_cast<DWORD>(line.size()), &written,
+                nullptr);
+      CloseHandle(file);
+    }
+    ReleaseMutex(mutex);
+    CloseHandle(mutex);
+  } catch (...) {
+    // Diagnostics must never affect clipboard behavior.
+  }
+}
+
+void ClipboardTrace(const std::string& event,
+                    const std::string& details = std::string()) noexcept {
+  try {
+    if (!g_clipboard_trace_enabled) return;
 
     SYSTEMTIME now = {};
     GetLocalTime(&now);
@@ -60,14 +94,7 @@ void ClipboardTrace(const std::string& event,
     std::string line = std::string(prefix) + "event=" + event;
     if (!details.empty()) line += " " + details;
     line += "\r\n";
-    HANDLE file = CreateFileW(path.c_str(), FILE_APPEND_DATA,
-                              FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
-                              OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (file == INVALID_HANDLE_VALUE) return;
-    DWORD written = 0;
-    WriteFile(file, line.data(), static_cast<DWORD>(line.size()), &written,
-              nullptr);
-    CloseHandle(file);
+    AppendClipboardTraceLine(line);
   } catch (...) {
     // Diagnostics must never affect clipboard behavior.
   }
@@ -231,6 +258,8 @@ std::optional<int64_t> ClipboardSessionId(
 
 }  // namespace
 
+FlutterWindow* FlutterWindow::paste_keyboard_hook_owner_ = nullptr;
+
 FlutterWindow::FlutterWindow(const flutter::DartProject& project)
     : project_(project) {}
 
@@ -269,6 +298,22 @@ void FlutterWindow::RegisterClipboardChannel() {
           &flutter::StandardMethodCodec::GetInstance());
   clipboard_channel_->SetMethodCallHandler(
       [this](const auto& call, auto result) {
+        if (call.method_name() == "writeDiagnosticLine") {
+          if (call.arguments() &&
+              std::holds_alternative<flutter::EncodableMap>(*call.arguments())) {
+            const auto& args = std::get<flutter::EncodableMap>(*call.arguments());
+            const auto line_it = args.find(flutter::EncodableValue("line"));
+            if (line_it != args.end() &&
+                std::holds_alternative<std::string>(line_it->second)) {
+              if (g_clipboard_trace_enabled) {
+                AppendClipboardTraceLine(
+                    std::get<std::string>(line_it->second));
+              }
+            }
+          }
+          result->Success();
+          return;
+        }
         ClipboardTrace("channel_call", "method=" + call.method_name());
         if (call.method_name() == "setDiagnosticsEnabled") {
           if (call.arguments() &&
@@ -540,6 +585,7 @@ void FlutterWindow::BeginPasteCapture(std::optional<int64_t> session_id) {
   paste_capture_armed_ = true;
   paste_capture_session_id_ = session_id;
   paste_capture_baseline_sequence_ = GetClipboardSequenceNumber();
+  EnsurePasteKeyboardHook();
   ClipboardTrace(
       "capture_begin",
       "session=" +
@@ -557,6 +603,99 @@ void FlutterWindow::EnsureClipboardListener() {
   clipboard_listener_registered_ = registered == TRUE;
 }
 
+LRESULT CALLBACK FlutterWindow::PasteKeyboardHook(int code, WPARAM wparam,
+                                                   LPARAM lparam) {
+  FlutterWindow* owner = paste_keyboard_hook_owner_;
+  if (code == HC_ACTION && owner != nullptr) {
+    const auto* event = reinterpret_cast<const KBDLLHOOKSTRUCT*>(lparam);
+    const bool key_down = wparam == WM_KEYDOWN || wparam == WM_SYSKEYDOWN;
+    const bool key_up = wparam == WM_KEYUP || wparam == WM_SYSKEYUP;
+    const DWORD key = event->vkCode;
+
+    if (key == VK_CONTROL || key == VK_LCONTROL || key == VK_RCONTROL) {
+      if (key_down) owner->paste_hook_control_pressed_ = true;
+      if (key_up) owner->paste_hook_control_pressed_ = false;
+    }
+    if (key == VK_SHIFT || key == VK_LSHIFT || key == VK_RSHIFT) {
+      if (key_down) owner->paste_hook_shift_pressed_ = true;
+      if (key_up) owner->paste_hook_shift_pressed_ = false;
+    }
+
+    const bool injected = (event->flags & LLKHF_INJECTED) != 0;
+    const bool control_pressed =
+        owner->paste_hook_control_pressed_ ||
+        (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0;
+    const bool shift_pressed =
+        owner->paste_hook_shift_pressed_ ||
+        (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
+    const bool is_injected_paste_key =
+        key_down && injected &&
+        ((key == 'V' && control_pressed) ||
+         (key == VK_INSERT && shift_pressed));
+    if (is_injected_paste_key) {
+      const HWND foreground = GetForegroundWindow();
+      const HWND foreground_root =
+          foreground ? GetAncestor(foreground, GA_ROOT) : nullptr;
+      const bool targets_owner = foreground_root == owner->GetHandle();
+      PostMessageW(owner->GetHandle(), kInjectedPasteKeyMessage, key,
+                   targets_owner ? 1 : 0);
+    }
+  }
+  return CallNextHookEx(owner ? owner->paste_keyboard_hook_ : nullptr, code,
+                        wparam, lparam);
+}
+
+void FlutterWindow::EnsurePasteKeyboardHook() {
+  if (paste_keyboard_hook_) return;
+  paste_keyboard_hook_owner_ = this;
+  paste_keyboard_hook_ = SetWindowsHookExW(
+      WH_KEYBOARD_LL, PasteKeyboardHook, GetModuleHandleW(nullptr), 0);
+  const DWORD error = paste_keyboard_hook_ ? ERROR_SUCCESS : GetLastError();
+  ClipboardTrace("paste_keyboard_hook",
+                 std::string("installed=") +
+                     (paste_keyboard_hook_ ? "true" : "false") +
+                     " error=" + std::to_string(error));
+  if (!paste_keyboard_hook_ && paste_keyboard_hook_owner_ == this) {
+    paste_keyboard_hook_owner_ = nullptr;
+  }
+}
+
+void FlutterWindow::RemovePasteKeyboardHook() {
+  if (paste_keyboard_hook_) {
+    UnhookWindowsHookEx(paste_keyboard_hook_);
+    paste_keyboard_hook_ = nullptr;
+    ClipboardTrace("paste_keyboard_hook", "installed=false error=0");
+  }
+  if (paste_keyboard_hook_owner_ == this) {
+    paste_keyboard_hook_owner_ = nullptr;
+  }
+  paste_hook_control_pressed_ = false;
+  paste_hook_shift_pressed_ = false;
+}
+
+void FlutterWindow::HandleInjectedPasteKey(DWORD key, bool targets_owner) {
+  ClipboardTrace(
+      "injected_paste_key",
+      "key=" + std::to_string(key) +
+          " target_match=" + (targets_owner ? "true" : "false") +
+          " targets=" + std::to_string(paste_target_client_count_) +
+          " armed=" + (paste_capture_armed_ ? "true" : "false") +
+          " session=" +
+          (paste_capture_session_id_
+               ? std::to_string(*paste_capture_session_id_)
+               : std::string("none")) +
+          " pending=" + (pending_paste_text_ ? "true" : "false"));
+  if (!targets_owner || paste_target_client_count_ <= 0 ||
+      !paste_capture_armed_) {
+    return;
+  }
+  paste_key_pressed_ = true;
+  if (!pending_paste_text_) {
+    HandleClipboardUpdate();
+  }
+  NotifyPasteRequested();
+}
+
 bool FlutterWindow::ArmPasteCapture(std::optional<int64_t> session_id) {
   ClipboardTrace(
       "capture_arm",
@@ -572,6 +711,9 @@ bool FlutterWindow::ArmPasteCapture(std::optional<int64_t> session_id) {
       paste_capture_session_id_ = *session_id;
       if (!pending_paste_text_) {
         HandleClipboardUpdate();
+      }
+      if (paste_key_pressed_) {
+        NotifyPasteRequested();
       }
       ClipboardTrace("capture_arm_reuse", "session=" +
                                              std::to_string(*session_id));
@@ -803,6 +945,7 @@ void FlutterWindow::ResetPasteCapture() {
     RemoveClipboardFormatListener(GetHandle());
     clipboard_listener_registered_ = false;
   }
+  RemovePasteKeyboardHook();
 }
 
 void FlutterWindow::SetRadialMode(bool enabled) {
@@ -896,6 +1039,10 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
     // AllowSetForegroundWindow grants the target process permission to take
     // focus, so perform the final activation on the target UI thread.
     ShowAndFocusProcessWindow(hwnd);
+    return 0;
+  }
+  if (message == kInjectedPasteKeyMessage) {
+    HandleInjectedPasteKey(static_cast<DWORD>(wparam), lparam != 0);
     return 0;
   }
 

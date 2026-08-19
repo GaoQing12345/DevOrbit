@@ -42,6 +42,12 @@ class DesktopClipboardDiagnostics {
         'event=$event${details.isEmpty ? '' : ' $details'}\n';
     _pendingWrite = _pendingWrite.then((_) async {
       try {
+        if (defaultTargetPlatform == TargetPlatform.windows) {
+          await _channel.invokeMethod<void>('writeDiagnosticLine', {
+            'line': line,
+          });
+          return;
+        }
         await File(
           path,
         ).writeAsString(line, mode: FileMode.append, flush: true);

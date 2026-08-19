@@ -175,6 +175,36 @@ void main() {
   );
 
   testWidgets(
+    'QuickClipboard capture survives more than thirty seconds of selection',
+    (tester) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+      final fixture = await JsonFormatterFixture.create(text: 'abcdef');
+      mockClipboard(tester, initialText: 'restored clipboard');
+      final nativeClipboard = mockClipboardRevision(tester);
+      await tester.pumpWidget(fixture.widget);
+      final editor = tester.widget<CodeEditor>(find.byType(CodeEditor));
+      editor.controller!.selection = const CodeLineSelection.collapsed(
+        index: 0,
+        offset: 3,
+      );
+
+      await _blurEditor(tester, editor.focusNode!);
+      final sessionId = nativeClipboard.armedSessionId!;
+      await tester.pump(const Duration(seconds: 35));
+      nativeClipboard.pendingPasteText = 'slow QuickClipboard item';
+      nativeClipboard.observedChange = true;
+      await _sendNativePasteRequested(sessionId: sessionId);
+      await tester.pump();
+
+      expect(fixture.controller.text, 'abcslow QuickClipboard itemdef');
+      await tester.pump(const Duration(milliseconds: 350));
+      await disposeEditor(tester);
+      debugDefaultTargetPlatformOverride = null;
+    },
+  );
+
+  testWidgets(
     'QuickClipboard paste waits when the key arrives before clipboard text',
     (tester) async {
       debugDefaultTargetPlatformOverride = TargetPlatform.windows;
