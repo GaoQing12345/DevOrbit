@@ -41,13 +41,16 @@ class FlutterWindow : public Win32Window {
   void EnsurePasteKeyboardHook();
   void RemovePasteKeyboardHook();
   void HandleInjectedPasteKey(DWORD key, bool targets_owner);
+  void HandlePasteCaptureActivation(HWND activated_window, bool active);
+  void CaptureReturnPasteCandidate();
   void EnsureClipboardListener();
   void BeginPasteCapture(std::optional<int64_t> session_id);
   bool ArmPasteCapture(std::optional<int64_t> session_id);
   bool DidPasteCaptureObserveChange(int64_t session_id);
   void DiscardPendingPasteText(int64_t session_id);
   std::optional<std::string> TakePendingPasteText(int64_t session_id);
-  void HandleClipboardUpdate(bool capture_text = false);
+  void HandleClipboardUpdate(bool capture_text = false,
+                             bool capture_return_candidate = true);
   void RetryPendingPasteCapture();
   bool CaptureObservedPasteText();
   void NotifyPasteRequested();
@@ -73,9 +76,13 @@ class FlutterWindow : public Win32Window {
   static FlutterWindow* paste_keyboard_hook_owner_;
   HHOOK paste_keyboard_hook_ = nullptr;
   std::optional<std::string> pending_paste_text_;
+  std::optional<std::string> return_paste_candidate_text_;
   std::optional<int64_t> paste_capture_session_id_;
   DWORD paste_capture_baseline_sequence_ = 0;
   DWORD paste_capture_observed_sequence_ = 0;
+  ULONGLONG paste_capture_last_update_tick_ = 0;
+  ULONGLONG return_paste_candidate_update_tick_ = 0;
+  int return_paste_candidate_retry_count_ = 0;
   int paste_capture_retry_count_ = 0;
   bool paste_capture_armed_ = false;
   bool paste_capture_invalidated_ = false;
@@ -84,6 +91,7 @@ class FlutterWindow : public Win32Window {
   bool clipboard_listener_registered_ = false;
   bool paste_hook_control_pressed_ = false;
   bool paste_hook_shift_pressed_ = false;
+  bool paste_capture_left_for_transient_window_ = false;
   int paste_target_client_count_ = 0;
   bool show_on_first_frame_ = true;
   bool tool_window_activation_pending_ = false;

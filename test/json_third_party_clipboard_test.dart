@@ -143,6 +143,37 @@ void main() {
   });
 
   testWidgets(
+    'QuickClipboard selection notification pastes the selected item',
+    (tester) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+      final fixture = await JsonFormatterFixture.create(text: 'abcdef');
+      mockClipboard(tester, initialText: 'restored previous value');
+      final nativeClipboard = mockClipboardRevision(tester);
+      await tester.pumpWidget(fixture.widget);
+      final editor = tester.widget<CodeEditor>(find.byType(CodeEditor));
+      editor.controller!.selection = const CodeLineSelection.collapsed(
+        index: 0,
+        offset: 3,
+      );
+
+      await _blurEditor(tester, editor.focusNode!);
+      final sessionId = nativeClipboard.armedSessionId!;
+      nativeClipboard.pendingPasteText = 'selection without key';
+      nativeClipboard.observedChange = true;
+      nativeClipboard.revision++;
+      await _focusWindow(tester);
+      await _sendNativePasteRequested(sessionId: sessionId);
+      await tester.pump();
+
+      expect(fixture.controller.text, 'abcselection without keydef');
+      await tester.pump(const Duration(milliseconds: 350));
+      await disposeEditor(tester);
+      debugDefaultTargetPlatformOverride = null;
+    },
+  );
+
+  testWidgets(
     'QuickClipboard paste survives its delayed hide animation and native event',
     (tester) async {
       debugDefaultTargetPlatformOverride = TargetPlatform.windows;
