@@ -158,6 +158,11 @@ class _TextComparePageState extends State<TextComparePage> {
     if (_rightEditor.text != widget.controller.rightText) {
       _rightEditor.text = widget.controller.rightText;
     }
+    // Diff spans are derived from the controller result rather than the
+    // editor text. Refresh the existing renderers in place so highlights
+    // update without remounting CodeEditor and losing its caret/input state.
+    _leftEditor.forceRepaint();
+    _rightEditor.forceRepaint();
     if (mounted) {
       setState(() {});
       _scheduleFoldingUpdate();
@@ -377,7 +382,7 @@ class _TextComparePageState extends State<TextComparePage> {
       child: Focus(
         autofocus: true,
         child: Material(
-          color: Theme.of(context).colorScheme.surfaceContainerLowest,
+          color: Theme.of(context).colorScheme.surface,
           child: Column(
             children: [
               _CompareToolbar(
@@ -391,7 +396,7 @@ class _TextComparePageState extends State<TextComparePage> {
               ),
               Expanded(
                 child: Padding(
-                  padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
+                  padding: const EdgeInsets.fromLTRB(18, 16, 18, 14),
                   child: Row(
                     children: [
                       Expanded(
@@ -407,7 +412,7 @@ class _TextComparePageState extends State<TextComparePage> {
                               widget.controller.updateLeft(_leftEditor.text),
                         ),
                       ),
-                      const SizedBox(width: 12),
+                      const SizedBox(width: 14),
                       Expanded(
                         child: _TextPane(
                           side: TextCompareSide.right,
@@ -459,15 +464,29 @@ class _CompareToolbar extends StatelessWidget {
     return DecoratedBox(
       decoration: BoxDecoration(
         color: scheme.surfaceContainerLow,
+        boxShadow: [
+          BoxShadow(
+            color: scheme.primary.withAlpha(10),
+            blurRadius: 14,
+            offset: const Offset(0, 4),
+          ),
+        ],
         border: Border(bottom: BorderSide(color: scheme.outlineVariant)),
       ),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
         child: Wrap(
           spacing: 8,
           runSpacing: 8,
           crossAxisAlignment: WrapCrossAlignment.center,
           children: [
+            Text(
+              '文本比对',
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                color: scheme.onSurface,
+              ),
+            ),
+            const SizedBox(width: 4),
             _FileButton(label: '左侧文件', onPressed: onOpenLeft),
             _FileButton(label: '右侧文件', onPressed: onOpenRight),
             _OptionToggle(
@@ -680,14 +699,14 @@ class _TextPane extends StatelessWidget {
           color: emphasized ? scheme.primary : scheme.outlineVariant,
           width: emphasized ? 1.5 : 1,
         ),
-        borderRadius: BorderRadius.circular(7),
+        borderRadius: BorderRadius.circular(12),
       ),
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(6),
+        borderRadius: BorderRadius.circular(11),
         child: Column(
           children: [
             Container(
-              height: 48,
+              height: 52,
               padding: const EdgeInsets.symmetric(horizontal: 13),
               decoration: BoxDecoration(
                 color: scheme.surfaceContainerLow,
@@ -724,7 +743,10 @@ class _TextPane extends StatelessWidget {
             ),
             Expanded(
               child: CodeEditor(
-                key: ValueKey('${side.name}-${controller.highlightRevision}'),
+                // Keep the editor state mounted while diff metadata changes.
+                // Re-mounting CodeEditor resets its internal input connection
+                // and can make the caret/focus look out of sync with the pane
+                // that will receive the next paste.
                 controller: editor,
                 scrollController: scrollController,
                 focusNode: focusNode,
@@ -743,11 +765,12 @@ class _TextPane extends StatelessWidget {
                 padding: const EdgeInsets.fromLTRB(14, 12, 14, 18),
                 style: CodeEditorStyle(
                   fontSize: 14,
-                  fontHeight: 1.55,
+                  fontHeight: 1.6,
                   fontFamily: 'Menlo',
                   fontFamilyFallback: const ['Consolas', 'monospace'],
                   backgroundColor: scheme.surfaceContainerLowest,
-                  cursorLineColor: scheme.primary.withAlpha(20),
+                  cursorColor: scheme.primary,
+                  cursorLineColor: scheme.primary.withAlpha(24),
                 ),
                 indicatorBuilder:
                     (context, editingController, chunkController, notifier) {
@@ -764,7 +787,7 @@ class _TextPane extends StatelessWidget {
               ),
             ),
             Container(
-              height: 34,
+              height: 36,
               alignment: Alignment.centerRight,
               padding: const EdgeInsets.symmetric(horizontal: 12),
               decoration: BoxDecoration(

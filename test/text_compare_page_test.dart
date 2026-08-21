@@ -106,6 +106,58 @@ void main() {
     debugDefaultTargetPlatformOverride = null;
   });
 
+  testWidgets('moving to the other pane retargets the restored paste', (
+    tester,
+  ) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    final controller = TextCompareController(service: _ImmediateService());
+    addTearDown(controller.dispose);
+    controller.updateLeft('left text');
+    controller.updateRight('right text');
+    mockClipboard(tester, initialText: 'paste into left');
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(body: TextComparePage(controller: controller)),
+      ),
+    );
+    await controller.compare();
+    await tester.pump();
+    final editors = tester
+        .widgetList<CodeEditor>(find.byType(CodeEditor))
+        .toList(growable: false);
+    final left = editors.first;
+    final right = editors.last;
+    left.controller!.selection = const CodeLineSelection.collapsed(
+      index: 0,
+      offset: 0,
+    );
+    right.controller!.selection = const CodeLineSelection.collapsed(
+      index: 0,
+      offset: 0,
+    );
+    right.focusNode!.requestFocus();
+    await tester.pump();
+
+    await _sendWindowEvent('blur');
+    right.focusNode!.unfocus();
+    await tester.pump();
+    await _sendWindowEvent('focus');
+    await tester.pump();
+
+    // The user moves to the left pane while the short restore grace period is
+    // still active. A subsequent paste must follow the visible focus.
+    left.focusNode!.requestFocus();
+    await tester.pump();
+    await _sendNativePasteRequested(text: 'paste into left');
+    await tester.pump();
+
+    expect(left.controller!.text, 'paste into leftleft text');
+    expect(right.controller!.text, 'right text');
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   testWidgets('folds unchanged runs and restores every line when disabled', (
     tester,
   ) async {
@@ -198,6 +250,17 @@ Future<void> _sendWindowEvent(String eventName) async {
   );
   await TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
       .handlePlatformMessage('window_manager', message, (_) {});
+}
+
+Future<void> _sendNativePasteRequested({int? sessionId, String? text}) async {
+  final arguments = <String, Object>{};
+  if (sessionId != null) arguments['sessionId'] = sessionId;
+  if (text != null) arguments['text'] = text;
+  final message = const StandardMethodCodec().encodeMethodCall(
+    MethodCall('pasteRequested', arguments),
+  );
+  await TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+      .handlePlatformMessage('dev_orbit/clipboard', message, (_) {});
 }
 
 class _ImmediateService implements TextCompareService {

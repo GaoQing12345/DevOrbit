@@ -225,7 +225,24 @@ class DesktopClipboardFocusRestorer with WindowListener {
   void _trackFocus() {
     if (!_active) return;
     final target = _focusedTarget();
-    if (target != null) _lastTarget = target;
+    if (target == null) return;
+
+    // A restored clipboard session starts from the editor that was focused
+    // before the window was blurred. If the user explicitly moves focus to a
+    // different editor while that session is still alive, carry the same
+    // native clipboard session over to the newly visible target. Keeping the
+    // old target here makes a paste look like it targets the visible editor
+    // while it is actually inserted into the previous one.
+    final snapshot = _snapshot;
+    if (snapshot != null && !identical(snapshot.target, target)) {
+      _snapshot = snapshot.forTarget(target);
+      DesktopClipboardDiagnostics.write('snapshot_retargeted', {
+        'session': snapshot.sessionId,
+        'from_target': _targetIndex(snapshot.target),
+        'to_target': _targetIndex(target),
+      });
+    }
+    _lastTarget = target;
   }
 
   void _trackContentChange() {
@@ -236,6 +253,16 @@ class DesktopClipboardFocusRestorer with WindowListener {
   }
 
   DesktopClipboardTarget? _focusedTarget() {
+    final primaryFocus = FocusManager.instance.primaryFocus;
+    if (primaryFocus != null) {
+      for (final target in _targets) {
+        if (target.isAvailable &&
+            (identical(primaryFocus, target.focusNode) ||
+                primaryFocus.ancestors.contains(target.focusNode))) {
+          return target;
+        }
+      }
+    }
     for (final target in _targets) {
       if (target.isAvailable && target.focusNode.hasFocus) return target;
     }
@@ -337,8 +364,10 @@ class DesktopClipboardFocusRestorer with WindowListener {
       'length': request.text?.length,
       'active_session': _snapshot?.sessionId,
     });
+    var capturedForRequest = false;
     if (_snapshot == null && request.text != null) {
       _captureFocusSnapshot(armNative: false);
+      capturedForRequest = _snapshot != null;
     }
     final snapshot = _snapshot;
     if (snapshot == null) {
@@ -348,7 +377,9 @@ class DesktopClipboardFocusRestorer with WindowListener {
       return;
     }
     final sessionId = request.sessionId;
-    if (sessionId != null && snapshot.sessionId != sessionId) {
+    if (sessionId != null &&
+        snapshot.sessionId != sessionId &&
+        !capturedForRequest) {
       DesktopClipboardDiagnostics.write('request_drop', {
         'reason': 'session_mismatch',
         'session': sessionId,
@@ -803,4 +834,15 @@ class _DesktopFocusSnapshot {
   final DateTime suspendedAt;
   final int sessionId;
   final Future<DesktopPasteCaptureState> nativeCaptureState;
+
+  _DesktopFocusSnapshot forTarget(DesktopClipboardTarget nextTarget) {
+    return _DesktopFocusSnapshot(
+      target: nextTarget,
+      content: nextTarget.text,
+      selection: nextTarget.selection,
+      suspendedAt: suspendedAt,
+      sessionId: sessionId,
+      nativeCaptureState: nativeCaptureState,
+    );
+  }
 }

@@ -21,13 +21,15 @@ final jsonAtomOneLightTheme = <String, TextStyle>{
 CodeEditorStyle buildJsonEditorStyle({
   required bool isDark,
   required Color cursorLineColor,
+  Color? backgroundColor,
 }) {
   return CodeEditorStyle(
     fontSize: 14,
     fontHeight: 1.55,
     fontFamily: 'Menlo',
     fontFamilyFallback: const ['Consolas', 'monospace'],
-    backgroundColor: isDark ? const Color(0xFF111715) : const Color(0xFFFBFCFC),
+    backgroundColor: backgroundColor ??
+        (isDark ? const Color(0xFF111715) : const Color(0xFFFBFCFC)),
     cursorLineColor: cursorLineColor,
     codeTheme: CodeHighlightTheme(
       languages: {'json': CodeHighlightThemeMode(mode: langJson)},

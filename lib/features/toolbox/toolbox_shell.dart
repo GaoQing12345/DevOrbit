@@ -110,16 +110,16 @@ class _Sidebar extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return SizedBox(
-      width: 216,
+      width: 232,
       child: ColoredBox(
         color: scheme.surfaceContainerLow,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(12, 16, 12, 12),
+          padding: const EdgeInsets.fromLTRB(14, 18, 14, 14),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const Padding(
-                padding: EdgeInsets.fromLTRB(10, 4, 10, 20),
+              Padding(
+                padding: EdgeInsets.fromLTRB(10, 4, 10, 24),
                 child: Row(
                   children: [
                     _OrbitMark(),
@@ -130,7 +130,7 @@ class _Sidebar extends StatelessWidget {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
-                          fontSize: 18,
+                          fontSize: 19,
                           fontWeight: FontWeight.w700,
                         ),
                       ),
@@ -144,7 +144,7 @@ class _Sidebar extends StatelessWidget {
                 selected: selectedIndex == 0,
                 onTap: controller.showToolbox,
               ),
-              const SizedBox(height: 4),
+              const SizedBox(height: 6),
               for (var index = 0; index < registry.modules.length; index++) ...[
                 _NavItem(
                   icon: registry.modules[index].descriptor.icon,
@@ -154,7 +154,7 @@ class _Sidebar extends StatelessWidget {
                     registry.modules[index].descriptor.id,
                   ),
                 ),
-                const SizedBox(height: 4),
+                const SizedBox(height: 6),
               ],
               const Spacer(),
               _NavItem(
@@ -189,17 +189,17 @@ class _NavItem extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     return Material(
       color: selected ? scheme.primaryContainer : Colors.transparent,
-      borderRadius: BorderRadius.circular(5),
+      borderRadius: BorderRadius.circular(10),
       child: InkWell(
-        borderRadius: BorderRadius.circular(5),
+        borderRadius: BorderRadius.circular(10),
         onTap: onTap,
         child: SizedBox(
-          height: 44,
+          height: 46,
           child: Row(
             children: [
-              const SizedBox(width: 12),
-              Icon(icon, size: 20),
-              const SizedBox(width: 12),
+              const SizedBox(width: 13),
+              Icon(icon, size: 19),
+              const SizedBox(width: 13),
               Expanded(
                 child: Text(
                   label,
@@ -221,6 +221,7 @@ class _OrbitMark extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final accent = Theme.of(context).colorScheme.primary;
     return SizedBox.square(
       dimension: 28,
       child: Stack(
@@ -230,13 +231,13 @@ class _OrbitMark extends StatelessWidget {
             width: 24,
             height: 12,
             decoration: BoxDecoration(
-              border: Border.all(color: const Color(0xFF22C7A9), width: 2),
+              border: Border.all(color: accent, width: 2),
               borderRadius: BorderRadius.circular(12),
             ),
           ),
-          const DecoratedBox(
+          DecoratedBox(
             decoration: BoxDecoration(
-              color: Color(0xFF22C7A9),
+              color: accent,
               shape: BoxShape.circle,
             ),
             child: SizedBox.square(dimension: 7),

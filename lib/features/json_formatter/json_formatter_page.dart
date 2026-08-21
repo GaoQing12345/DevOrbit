@@ -294,6 +294,7 @@ class _JsonFormatterPageState extends State<JsonFormatterPage> {
       style: buildJsonEditorStyle(
         isDark: isDark,
         cursorLineColor: theme.colorScheme.primary.withAlpha(20),
+        backgroundColor: theme.colorScheme.surfaceContainerLowest,
       ),
       indicatorBuilder: (context, editing, chunk, notifier) {
         _foldController.attach(editing, chunk);

@@ -448,9 +448,7 @@ class _TranslationPane extends StatelessWidget {
             Divider(height: 1, color: scheme.outlineVariant),
             Expanded(
               child: ColoredBox(
-                color: scheme.brightness == Brightness.dark
-                    ? scheme.surfaceContainerLowest
-                    : const Color(0xFFFBFCFC),
+                color: scheme.surfaceContainerLowest,
                 child: child,
               ),
             ),

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../app/app_controller.dart';
+import '../../app/app_theme.dart';
 import '../../core/modules/tool_module.dart';
 import '../../core/modules/tool_registry.dart';
 import 'orbit_ring_controls.dart';
@@ -139,7 +140,7 @@ class _OrbitSurface extends StatelessWidget {
         ? null
         : registry.atSlot(hoveredIndex!);
     final hoveredColor =
-        hoveredModule?.descriptor.accentColor ?? const Color(0xFF22C7A9);
+        hoveredModule?.descriptor.accentColor ?? AppTheme.accent;
 
     return Material(
       type: MaterialType.transparency,
