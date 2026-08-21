@@ -138,8 +138,14 @@ class DesktopClipboardFocusRestorer with WindowListener {
       target.contentListenable.addListener(_trackContentChange);
     }
     _lifecycle = AppLifecycleListener(
-      onInactive: _suspendFocus,
-      onResume: _restoreFocus,
+      onInactive: () {
+        _windowActive = false;
+        _suspendFocus();
+      },
+      onResume: () {
+        _windowActive = true;
+        _restoreFocus();
+      },
     );
     windowManager.addListener(this);
     HardwareKeyboard.instance.addHandler(_handleKeyEvent);
@@ -191,6 +197,7 @@ class DesktopClipboardFocusRestorer with WindowListener {
   bool _pasteFallbackArmed = false;
   bool _disposed = false;
   bool _active = false;
+  bool _windowActive = true;
   Timer? _captureRetryTimer;
   Completer<void>? _captureRetryCompleter;
   Timer? _resumedCaptureTimer;
@@ -223,7 +230,7 @@ class DesktopClipboardFocusRestorer with WindowListener {
   }
 
   void _trackFocus() {
-    if (!_active) return;
+    if (!_active || !_windowActive) return;
     final target = _focusedTarget();
     if (target == null) return;
 
@@ -795,10 +802,16 @@ class DesktopClipboardFocusRestorer with WindowListener {
   }
 
   @override
-  void onWindowBlur() => _suspendFocus();
+  void onWindowBlur() {
+    _windowActive = false;
+    _suspendFocus();
+  }
 
   @override
-  void onWindowFocus() => _restoreFocus();
+  void onWindowFocus() {
+    _windowActive = true;
+    _restoreFocus();
+  }
 
   void dispose() {
     _disposed = true;

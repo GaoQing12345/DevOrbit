@@ -158,11 +158,10 @@ class _TextComparePageState extends State<TextComparePage> {
     if (_rightEditor.text != widget.controller.rightText) {
       _rightEditor.text = widget.controller.rightText;
     }
-    // Diff spans are derived from the controller result rather than the
-    // editor text. Refresh the existing renderers in place so highlights
-    // update without remounting CodeEditor and losing its caret/input state.
-    _leftEditor.forceRepaint();
-    _rightEditor.forceRepaint();
+    // Diff spans are derived from the controller result rather than editor
+    // text. `setState` below lets the existing editors rebuild their spans;
+    // calling re_editor's forceRepaint here is unsafe because this listener
+    // can run during a scroll/layout update triggered by a paste.
     if (mounted) {
       setState(() {});
       _scheduleFoldingUpdate();
@@ -482,9 +481,9 @@ class _CompareToolbar extends StatelessWidget {
           children: [
             Text(
               '文本比对',
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                color: scheme.onSurface,
-              ),
+              style: Theme.of(
+                context,
+              ).textTheme.titleMedium?.copyWith(color: scheme.onSurface),
             ),
             const SizedBox(width: 4),
             _FileButton(label: '左侧文件', onPressed: onOpenLeft),

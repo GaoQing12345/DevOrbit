@@ -155,7 +155,11 @@ void main() {
 
     expect(left.controller!.text, 'paste into leftleft text');
     expect(right.controller!.text, 'right text');
+    FocusManager.instance.primaryFocus?.unfocus();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 120));
     await tester.pumpWidget(const SizedBox.shrink());
+    debugDefaultTargetPlatformOverride = null;
   });
 
   testWidgets('folds unchanged runs and restores every line when disabled', (
