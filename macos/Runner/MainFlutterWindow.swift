@@ -317,13 +317,6 @@ class MainFlutterWindow: NSWindow {
     pasteRequestNotificationSent = false
   }
 
-  deinit {
-    pasteFallbackTimer?.invalidate()
-    if let observer = workspaceActivationObserver {
-      NSWorkspace.shared.notificationCenter.removeObserver(observer)
-    }
-  }
-
   private func registerCredentialsChannel(_ controller: FlutterViewController) {
     let channel = FlutterMethodChannel(
       name: "dev_orbit/credentials",
@@ -461,6 +454,10 @@ class MainFlutterWindow: NSWindow {
   }
 
   deinit {
+    pasteFallbackTimer?.invalidate()
+    if let observer = workspaceActivationObserver {
+      NSWorkspace.shared.notificationCenter.removeObserver(observer)
+    }
     if let monitor = pasteKeyMonitor {
       NSEvent.removeMonitor(monitor)
     }
