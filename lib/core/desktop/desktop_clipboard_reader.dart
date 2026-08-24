@@ -219,6 +219,7 @@ class DesktopClipboardReader {
       }
       final sessionId = arguments['sessionId'];
       final text = arguments['text'];
+      final source = arguments['source'];
       if (sessionId is! int && text is! String) {
         DesktopClipboardDiagnostics.write('native_request_invalid_fields');
         return;
@@ -227,6 +228,7 @@ class DesktopClipboardReader {
         'session': sessionId,
         'has_text': text is String,
         'length': text is String ? text.length : null,
+        'source': source is String ? source : null,
       });
       _pasteRequests.add(
         DesktopPasteRequest(

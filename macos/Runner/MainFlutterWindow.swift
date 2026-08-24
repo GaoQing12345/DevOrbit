@@ -17,6 +17,13 @@ class MainFlutterWindow: NSWindow {
   private var pasteRequestPending = false
   private var pasteRequestNotificationSent = false
   private var pasteTargetClientCount = 0
+  private var pasteFallbackTimer: Timer?
+  private var lastExternalApplicationBundleIdentifier: String?
+  private var workspaceActivationObserver: NSObjectProtocol?
+
+  private static let clipboardManagerBundleIdentifiers: Set<String> = [
+    "cn.better365.iCopy",
+  ]
 
   override func awakeFromNib() {
     let flutterViewController = FlutterViewController()
@@ -35,7 +42,27 @@ class MainFlutterWindow: NSWindow {
     registerProcessWindowChannel(flutterViewController)
     registerAppLifecycleChannel(flutterViewController)
 
+    workspaceActivationObserver = NSWorkspace.shared.notificationCenter.addObserver(
+      forName: NSWorkspace.didActivateApplicationNotification,
+      object: nil,
+      queue: .main
+    ) { [weak self] notification in
+      guard let self,
+            let application = notification.userInfo?[NSWorkspace.applicationUserInfoKey]
+              as? NSRunningApplication,
+            application.processIdentifier != ProcessInfo.processInfo.processIdentifier,
+            application.bundleIdentifier != Bundle.main.bundleIdentifier else {
+        return
+      }
+      self.lastExternalApplicationBundleIdentifier = application.bundleIdentifier
+    }
+
     super.awakeFromNib()
+  }
+
+  override func becomeKey() {
+    super.becomeKey()
+    scheduleClipboardManagerPasteFallback()
   }
 
   override func resignKey() {
@@ -135,7 +162,7 @@ class MainFlutterWindow: NSWindow {
       // managers may restore the previous pasteboard value immediately after.
       self.pasteRequestPending = true
       self.capturePasteRequestText()
-      return self.notifyPasteRequestedIfReady() ? nil : event
+      return self.notifyPasteRequestedIfReady(source: "key_event") ? nil : event
     }
   }
 
@@ -153,6 +180,45 @@ class MainFlutterWindow: NSWindow {
     pasteCaptureArmed = true
     pasteCaptureSessionId = sessionId
     pasteCaptureBaselineChangeCount = pasteboard.changeCount
+  }
+
+  private func scheduleClipboardManagerPasteFallback() {
+    pasteFallbackTimer?.invalidate()
+    pasteFallbackTimer = nil
+    guard pasteTargetClientCount > 0,
+          pasteCaptureArmed,
+          let bundleIdentifier = lastExternalApplicationBundleIdentifier,
+          Self.clipboardManagerBundleIdentifiers.contains(bundleIdentifier) else {
+      return
+    }
+
+    // iCopy normally sends a synthetic Command+V after it activates the
+    // previous app. Occasionally that key event is lost while the Flutter
+    // window is becoming key. Give the normal monitor a short head start, then
+    // use the changed pasteboard value as a narrowly-scoped fallback.
+    pasteFallbackTimer = Timer.scheduledTimer(
+      withTimeInterval: 0.12,
+      repeats: false
+    ) { [weak self] _ in
+      self?.deliverClipboardManagerPasteFallback()
+    }
+  }
+
+  private func deliverClipboardManagerPasteFallback() {
+    pasteFallbackTimer = nil
+    guard pasteTargetClientCount > 0,
+          pasteCaptureArmed,
+          let bundleIdentifier = lastExternalApplicationBundleIdentifier,
+          Self.clipboardManagerBundleIdentifiers.contains(bundleIdentifier) else {
+      return
+    }
+    pasteRequestPending = true
+    capturePasteRequestText()
+    if !notifyPasteRequestedIfReady(source: "focus_fallback") {
+      // Do not leave a stale pending request armed if iCopy only opened and
+      // closed without changing the clipboard.
+      pasteRequestPending = false
+    }
   }
 
   private func armPasteCapture(sessionId: Int64) -> Bool {
@@ -200,7 +266,7 @@ class MainFlutterWindow: NSWindow {
   }
 
   @discardableResult
-  private func notifyPasteRequestedIfReady() -> Bool {
+  private func notifyPasteRequestedIfReady(source: String) -> Bool {
     guard pasteRequestPending, !pasteRequestNotificationSent,
           let text = pendingPasteText,
           !text.isEmpty,
@@ -208,7 +274,7 @@ class MainFlutterWindow: NSWindow {
       return false
     }
     pasteRequestNotificationSent = true
-    var arguments: [String: Any] = ["text": text]
+    var arguments: [String: Any] = ["text": text, "source": source]
     if let sessionId = pasteCaptureSessionId {
       arguments["sessionId"] = sessionId
     }
@@ -241,12 +307,21 @@ class MainFlutterWindow: NSWindow {
   }
 
   private func resetPasteCapture() {
+    pasteFallbackTimer?.invalidate()
+    pasteFallbackTimer = nil
     pendingPasteText = nil
     pasteCaptureSessionId = nil
     pasteCaptureObservedChangeCount = nil
     pasteCaptureArmed = false
     pasteRequestPending = false
     pasteRequestNotificationSent = false
+  }
+
+  deinit {
+    pasteFallbackTimer?.invalidate()
+    if let observer = workspaceActivationObserver {
+      NSWorkspace.shared.notificationCenter.removeObserver(observer)
+    }
   }
 
   private func registerCredentialsChannel(_ controller: FlutterViewController) {
