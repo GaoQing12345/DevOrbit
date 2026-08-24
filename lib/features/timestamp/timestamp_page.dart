@@ -21,8 +21,6 @@ class _TimestampPageState extends State<TimestampPage> {
   final _timestampFocusNode = FocusNode();
   final _dateTimeFocusNode = FocusNode();
   late final DesktopClipboardFocusRestorer _focusRestorer;
-  late DateTime _now;
-  Timer? _clockTimer;
   TimestampConversion? _timestampConversion;
   DateTimeTimestampConversion? _dateTimeConversion;
   String? _timestampError;
@@ -33,7 +31,6 @@ class _TimestampPageState extends State<TimestampPage> {
   @override
   void initState() {
     super.initState();
-    _now = _readNow();
     _focusRestorer = DesktopClipboardFocusRestorer(
       targets: [
         TextEditingClipboardTarget(
@@ -48,14 +45,10 @@ class _TimestampPageState extends State<TimestampPage> {
         ),
       ],
     );
-    _clockTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (mounted) setState(() => _now = _readNow());
-    });
   }
 
   @override
   void dispose() {
-    _clockTimer?.cancel();
     _focusRestorer.dispose();
     _timestampController.dispose();
     _dateTimeController.dispose();
@@ -129,7 +122,6 @@ class _TimestampPageState extends State<TimestampPage> {
   @override
   Widget build(BuildContext context) {
     _focusRestorer.active = Visibility.of(context);
-    final current = TimestampConverter.convertDateTime(_now);
     return DesktopClipboardPasteRegion(
       onPaste: _focusRestorer.pasteFocusedTarget,
       child: Material(
@@ -138,12 +130,7 @@ class _TimestampPageState extends State<TimestampPage> {
           padding: const EdgeInsets.fromLTRB(18, 18, 18, 16),
           child: Column(
             children: [
-              _CurrentTimeSection(
-                dateTime: TimestampConverter.formatDateTime(_now),
-                seconds: current.seconds.toString(),
-                milliseconds: current.milliseconds.toString(),
-                onCopy: _copyValue,
-              ),
+              _CurrentTimeSection(now: _readNow, onCopy: _copyValue),
               const SizedBox(height: 14),
               Expanded(
                 child: LayoutBuilder(
@@ -197,23 +184,43 @@ class _TimestampPageState extends State<TimestampPage> {
 
 typedef _CopyCallback = Future<void> Function(String value, String label);
 
-class _CurrentTimeSection extends StatelessWidget {
-  const _CurrentTimeSection({
-    required this.dateTime,
-    required this.seconds,
-    required this.milliseconds,
-    required this.onCopy,
-  });
+class _CurrentTimeSection extends StatefulWidget {
+  const _CurrentTimeSection({required this.now, required this.onCopy});
 
-  final String dateTime;
-  final String seconds;
-  final String milliseconds;
+  final DateTime Function() now;
   final _CopyCallback onCopy;
+
+  @override
+  State<_CurrentTimeSection> createState() => _CurrentTimeSectionState();
+}
+
+class _CurrentTimeSectionState extends State<_CurrentTimeSection> {
+  late DateTime _now;
+  Timer? _clockTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    _now = widget.now();
+    _clockTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) setState(() => _now = widget.now());
+    });
+  }
+
+  @override
+  void dispose() {
+    _clockTimer?.cancel();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
+    final current = TimestampConverter.convertDateTime(_now);
+    final dateTime = TimestampConverter.formatDateTime(_now);
+    final seconds = current.seconds.toString();
+    final milliseconds = current.milliseconds.toString();
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.fromLTRB(18, 15, 12, 14),
@@ -245,7 +252,7 @@ class _CurrentTimeSection extends StatelessWidget {
               ),
               IconButton(
                 tooltip: '复制本地时间',
-                onPressed: () => onCopy(dateTime, '本地时间'),
+                onPressed: () => widget.onCopy(dateTime, '本地时间'),
                 icon: const Icon(Icons.copy_rounded),
               ),
             ],
@@ -258,12 +265,12 @@ class _CurrentTimeSection extends StatelessWidget {
               _InlineValue(
                 label: '秒',
                 value: seconds,
-                onCopy: () => onCopy(seconds, '秒级时间戳'),
+                onCopy: () => widget.onCopy(seconds, '秒级时间戳'),
               ),
               _InlineValue(
                 label: '毫秒',
                 value: milliseconds,
-                onCopy: () => onCopy(milliseconds, '毫秒级时间戳'),
+                onCopy: () => widget.onCopy(milliseconds, '毫秒级时间戳'),
               ),
             ],
           ),

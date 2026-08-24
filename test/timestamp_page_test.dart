@@ -66,6 +66,48 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
+  testWidgets('clock ticks do not recheck the clipboard in text inputs', (
+    tester,
+  ) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    var clipboardChecks = 0;
+    var now = DateTime(2026, 8, 24, 10, 26, 8);
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      (call) async {
+        if (call.method == 'Clipboard.hasStrings') {
+          clipboardChecks++;
+          return {'value': true};
+        }
+        if (call.method == 'Clipboard.getData') {
+          clipboardChecks++;
+          return {'text': 'clipboard'};
+        }
+        return null;
+      },
+    );
+    addTearDown(
+      () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        null,
+      ),
+    );
+
+    await tester.pumpWidget(MaterialApp(home: TimestampPage(now: () => now)));
+    await tester.pump();
+    final checksAfterInitialBuild = clipboardChecks;
+
+    now = now.add(const Duration(seconds: 1));
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pump();
+
+    expect(find.text('2026-08-24 10:26:09.000'), findsOneWidget);
+    expect(clipboardChecks, checksAfterInitialBuild);
+    await tester.pumpWidget(const SizedBox.shrink());
+    debugDefaultTargetPlatformOverride = null;
+  });
+
   testWidgets('QuickClipboard inserts at the previous timestamp cursor', (
     tester,
   ) async {
