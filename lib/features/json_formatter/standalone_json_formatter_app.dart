@@ -6,14 +6,31 @@ import 'package:flutter/services.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../../app/app_theme.dart';
+import '../../core/desktop/process_window_activator.dart';
 import '../../core/desktop/desktop_window_shell.dart';
+import '../../core/desktop/single_instance_registry.dart';
 import '../../core/desktop/standalone_window_activation.dart';
 import '../../core/settings/settings_store.dart';
 import 'json_document_controller.dart';
 import 'json_formatter_page.dart';
 import 'json_initial_clipboard_import.dart';
+import 'standalone_json_formatter_constants.dart';
 
 Future<void> runStandaloneJsonFormatter({bool prewarmed = false}) async {
+  final instanceRegistry = FileSingleInstanceRegistry(
+    jsonFormatterInstanceName,
+  );
+  final lease = await instanceRegistry.tryAcquire(pid);
+  if (lease == null) {
+    try {
+      final processId = await instanceRegistry.findProcessId();
+      if (processId != null) {
+        await NativeProcessWindowActivator().activate(processId);
+      }
+    } finally {
+      exit(0);
+    }
+  }
   final settingsFuture = SettingsStore.load();
   await windowManager.ensureInitialized();
   final useCustomWindowsTitleBar = Platform.isWindows;
@@ -38,16 +55,24 @@ Future<void> runStandaloneJsonFormatter({bool prewarmed = false}) async {
     ),
   );
   final settings = await settingsFuture;
-  runApp(_StandaloneJsonFormatterApp(settings: settings, prewarmed: prewarmed));
+  runApp(
+    _StandaloneJsonFormatterApp(
+      settings: settings,
+      instanceLease: lease,
+      prewarmed: prewarmed,
+    ),
+  );
 }
 
 class _StandaloneJsonFormatterApp extends StatefulWidget {
   const _StandaloneJsonFormatterApp({
     required this.settings,
+    required this.instanceLease,
     required this.prewarmed,
   });
 
   final SettingsStore settings;
+  final SingleInstanceLease instanceLease;
   final bool prewarmed;
 
   @override
@@ -87,6 +112,7 @@ class _StandaloneJsonFormatterAppState
   @override
   void dispose() {
     _windowActivation.dispose();
+    unawaited(widget.instanceLease.release());
     _controller.dispose();
     super.dispose();
   }

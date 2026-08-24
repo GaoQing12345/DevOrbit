@@ -185,7 +185,17 @@ class MainFlutterWindow: NSWindow {
 
   private func capturePasteRequestText() {
     let pasteboard = NSPasteboard.general
-    pasteCaptureObservedChangeCount = pasteboard.changeCount
+    let changeCount = pasteboard.changeCount
+    // A normal Command+V may arrive while the captured clipboard value is
+    // still current. Avoid synchronously asking the pasteboard daemon for the
+    // full string in that case; Flutter can handle the unchanged clipboard
+    // through its regular paste path. iCopy selections change the count before
+    // sending their synthetic Command+V and still take the fast capture path.
+    guard changeCount != pasteCaptureBaselineChangeCount else {
+      pasteCaptureObservedChangeCount = nil
+      return
+    }
+    pasteCaptureObservedChangeCount = changeCount
     pendingPasteText = pasteboard.string(forType: .string)
   }
 

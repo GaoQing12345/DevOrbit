@@ -63,6 +63,28 @@ void main() {
     },
   );
 
+  test(
+    'macOS system clipboard read does not use Windows retry backoff',
+    () async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+      var reads = 0;
+      final messenger =
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      messenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
+        if (call.method != 'Clipboard.getData') return null;
+        reads++;
+        return reads == 1 ? null : {'text': 'late text'};
+      });
+      addTearDown(
+        () => messenger.setMockMethodCallHandler(SystemChannels.platform, null),
+      );
+
+      expect(await const DesktopClipboardReader().readSystemText(), isNull);
+      expect(reads, 1);
+    },
+  );
+
   test('an old discard cannot clear a newer capture session', () async {
     debugDefaultTargetPlatformOverride = TargetPlatform.windows;
     addTearDown(() => debugDefaultTargetPlatformOverride = null);

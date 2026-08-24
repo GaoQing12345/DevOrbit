@@ -159,15 +159,23 @@ class DesktopClipboardReader {
     // synthetic paste). A single Clipboard.getData call is therefore not
     // reliable enough for desktop tools. Retry both null results and transient
     // platform failures, but keep the first successful value unchanged.
-    for (final delay in const [
-      Duration.zero,
-      Duration(milliseconds: 8),
-      Duration(milliseconds: 16),
-      Duration(milliseconds: 32),
-      Duration(milliseconds: 64),
-      Duration(milliseconds: 128),
-      Duration(milliseconds: 256),
-    ]) {
+    // On macOS the native paste monitor already captures iCopy's synthetic
+    // Command+V synchronously. Retrying a normal system read here only keeps
+    // the paste operation alive for roughly half a second and makes a small
+    // pasteboard race visible as UI lag. The retry sequence is needed for
+    // Windows clipboard providers, which publish the selected item in stages.
+    final retryDelays = defaultTargetPlatform == TargetPlatform.windows
+        ? const [
+            Duration.zero,
+            Duration(milliseconds: 8),
+            Duration(milliseconds: 16),
+            Duration(milliseconds: 32),
+            Duration(milliseconds: 64),
+            Duration(milliseconds: 128),
+            Duration(milliseconds: 256),
+          ]
+        : const [Duration.zero];
+    for (final delay in retryDelays) {
       if (delay > Duration.zero) {
         await Future<void>.delayed(delay);
       }

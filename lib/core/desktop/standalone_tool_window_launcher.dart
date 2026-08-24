@@ -4,14 +4,14 @@ import 'dart:io';
 import 'package:flutter/services.dart';
 
 import '../../features/sql_log/standalone_sql_log_constants.dart';
+import '../../features/json_formatter/standalone_json_formatter_constants.dart';
 import '../../features/translator/standalone_translator_constants.dart';
 import '../../features/text_compare/standalone_text_compare_constants.dart';
 import '../../features/timestamp/standalone_timestamp_constants.dart';
 import 'process_window_activator.dart';
 import 'single_instance_registry.dart';
 
-const standaloneJsonFormatterFlag = '--json-formatter-window';
-const standaloneJsonFormatterPrewarmFlag = '--json-formatter-prewarm';
+export '../../features/json_formatter/standalone_json_formatter_constants.dart';
 
 typedef DetachedProcessStarter =
     Future<int> Function(String executable, List<String> arguments);
@@ -33,6 +33,7 @@ class NativeStandaloneToolWindowLauncher
     SingleInstanceRegistry? textCompareInstanceRegistry,
     SingleInstanceRegistry? timestampInstanceRegistry,
     SingleInstanceRegistry? sqlLogInstanceRegistry,
+    SingleInstanceRegistry? jsonFormatterInstanceRegistry,
     String? executable,
     bool? enableToolPrewarming,
   }) : _processStarter = processStarter ?? _startDetached,
@@ -50,6 +51,9 @@ class NativeStandaloneToolWindowLauncher
        _sqlLogInstanceRegistry =
            sqlLogInstanceRegistry ??
            FileSingleInstanceRegistry(sqlLogInstanceName),
+       _jsonFormatterInstanceRegistry =
+           jsonFormatterInstanceRegistry ??
+           FileSingleInstanceRegistry(jsonFormatterInstanceName),
        _executable = executable ?? Platform.resolvedExecutable,
        _enableToolPrewarming = enableToolPrewarming ?? Platform.isWindows;
 
@@ -66,6 +70,7 @@ class NativeStandaloneToolWindowLauncher
   final SingleInstanceRegistry _textCompareInstanceRegistry;
   final SingleInstanceRegistry _timestampInstanceRegistry;
   final SingleInstanceRegistry _sqlLogInstanceRegistry;
+  final SingleInstanceRegistry _jsonFormatterInstanceRegistry;
   final String _executable;
   final bool _enableToolPrewarming;
   final Map<String, int> _singletonProcessIds = {};
@@ -84,6 +89,7 @@ class NativeStandaloneToolWindowLauncher
         toolId: jsonFormatterId,
         flag: standaloneJsonFormatterFlag,
         prewarmFlag: standaloneJsonFormatterPrewarmFlag,
+        registry: _jsonFormatterInstanceRegistry,
       ),
       _warmUpToolAfterDelay(
         delay: const Duration(milliseconds: 80),
@@ -233,36 +239,12 @@ class NativeStandaloneToolWindowLauncher
   }
 
   Future<bool> _openJsonFormatter() async {
-    if (!_enableToolPrewarming) {
-      await _startProcess(const [standaloneJsonFormatterFlag]);
-      return true;
-    }
-    await _warmUpTool(
+    return _openSingleton(
       toolId: jsonFormatterId,
       flag: standaloneJsonFormatterFlag,
       prewarmFlag: standaloneJsonFormatterPrewarmFlag,
+      registry: _jsonFormatterInstanceRegistry,
     );
-    final processId = _prewarmedProcessIds.remove(jsonFormatterId);
-    if (processId != null && await _activateWithRetry(processId)) {
-      unawaited(
-        _warmUpTool(
-          toolId: jsonFormatterId,
-          flag: standaloneJsonFormatterFlag,
-          prewarmFlag: standaloneJsonFormatterPrewarmFlag,
-        ),
-      );
-      return true;
-    }
-    if (processId != null) _terminateTrackedProcess(processId);
-    await _startProcess(const [standaloneJsonFormatterFlag]);
-    unawaited(
-      _warmUpAfterColdStart(
-        toolId: jsonFormatterId,
-        flag: standaloneJsonFormatterFlag,
-        prewarmFlag: standaloneJsonFormatterPrewarmFlag,
-      ),
-    );
-    return true;
   }
 
   Future<bool> _activateWithRetry(int processId) async {
@@ -273,15 +255,6 @@ class NativeStandaloneToolWindowLauncher
       if (attempt + 1 < attempts) await Future<void>.delayed(retryDelay);
     }
     return false;
-  }
-
-  Future<void> _warmUpAfterColdStart({
-    required String toolId,
-    required String flag,
-    required String prewarmFlag,
-  }) async {
-    await Future<void>.delayed(const Duration(seconds: 1));
-    await _warmUpTool(toolId: toolId, flag: flag, prewarmFlag: prewarmFlag);
   }
 
   Future<bool> _openSingleton({
@@ -385,6 +358,7 @@ class NativeStandaloneToolWindowLauncher
     await _trackRegisteredProcess(_textCompareInstanceRegistry);
     await _trackRegisteredProcess(_timestampInstanceRegistry);
     await _trackRegisteredProcess(_sqlLogInstanceRegistry);
+    await _trackRegisteredProcess(_jsonFormatterInstanceRegistry);
     final processIds = _processIds.toList();
     _processIds.clear();
     _singletonProcessIds.clear();

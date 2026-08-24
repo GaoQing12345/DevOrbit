@@ -10,7 +10,7 @@ import 'package:dev_orbit/features/translator/standalone_translator_constants.da
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  test('starts a new process for every JSON window request', () async {
+  test('reuses the existing standalone JSON formatter window', () async {
     final calls = <(String, List<String>)>[];
     var nextProcessId = 100;
     final launcher = NativeStandaloneToolWindowLauncher(
@@ -20,18 +20,17 @@ void main() {
         calls.add((executable, arguments));
         return nextProcessId++;
       },
-      windowActivator: _FakeWindowActivator(),
+      windowActivator: _FakeWindowActivator(activeProcessIds: {100}),
       translatorInstanceRegistry: _FakeSingleInstanceRegistry(),
+      jsonFormatterInstanceRegistry: _FakeSingleInstanceRegistry(),
     );
 
     expect(await launcher.openTool('json-formatter'), isTrue);
     expect(await launcher.openTool('json-formatter'), isTrue);
     expect(await launcher.openTool('unknown'), isFalse);
-    expect(calls, hasLength(2));
-    for (final call in calls) {
-      expect(call.$1, '/Applications/DevOrbit');
-      expect(call.$2, [standaloneJsonFormatterFlag]);
-    }
+    expect(calls, hasLength(1));
+    expect(calls.single.$1, '/Applications/DevOrbit');
+    expect(calls.single.$2, [standaloneJsonFormatterFlag]);
   });
 
   test('prewarms and activates every Windows tool', () async {
@@ -49,6 +48,7 @@ void main() {
       },
       processTerminator: (_) => true,
       windowActivator: activator,
+      jsonFormatterInstanceRegistry: _FakeSingleInstanceRegistry(),
       translatorInstanceRegistry: _FakeSingleInstanceRegistry(),
       textCompareInstanceRegistry: _FakeSingleInstanceRegistry(),
       timestampInstanceRegistry: _FakeSingleInstanceRegistry(),
@@ -71,11 +71,7 @@ void main() {
     expect(await launcher.openTool('timestamp-converter'), isTrue);
     expect(await launcher.openTool('sql-log-converter'), isTrue);
 
-    expect(calls, hasLength(6));
-    expect(calls[5].$2, [
-      standaloneJsonFormatterFlag,
-      standaloneJsonFormatterPrewarmFlag,
-    ]);
+    expect(calls, hasLength(5));
     expect(activator.processIds, [901, 902, 903, 904, 905]);
   });
 
@@ -398,6 +394,7 @@ void main() {
           return true;
         },
         windowActivator: _FakeWindowActivator(),
+        jsonFormatterInstanceRegistry: _FakeSingleInstanceRegistry(),
         translatorInstanceRegistry: _FakeSingleInstanceRegistry(),
         textCompareInstanceRegistry: _FakeSingleInstanceRegistry(),
         timestampInstanceRegistry: _FakeSingleInstanceRegistry(),

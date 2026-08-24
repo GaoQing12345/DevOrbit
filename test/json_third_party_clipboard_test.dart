@@ -62,6 +62,47 @@ void main() {
   });
 
   testWidgets(
+    'iCopy restore ignores a transient focus target in the activation frame',
+    (tester) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+      final fixture = await JsonFormatterFixture.create(text: 'abcdef');
+      mockClipboard(tester, initialText: 'restored clipboard');
+      final nativeClipboard = mockClipboardRevision(tester);
+      await tester.pumpWidget(fixture.widget);
+      await tester.tap(find.byTooltip('查找'));
+      await tester.pump();
+      final findField = tester.widget<TextField>(
+        find.descendant(
+          of: find.byKey(const ValueKey('json-find-input')),
+          matching: find.byType(TextField),
+        ),
+      );
+      final editor = tester.widget<CodeEditor>(find.byType(CodeEditor));
+      editor.focusNode!.requestFocus();
+      editor.controller!.selection = const CodeLineSelection.collapsed(
+        index: 0,
+        offset: 3,
+      );
+      await tester.pump();
+
+      await _blurEditor(tester, editor.focusNode!);
+      final sessionId = nativeClipboard.armedSessionId!;
+      await _sendWindowEvent('focus');
+      findField.focusNode!.requestFocus();
+      await tester.pump();
+      await _sendNativePasteRequested(sessionId: sessionId, text: 'iCopy');
+      await tester.pump();
+
+      expect(fixture.controller.text, 'abciCopydef');
+      expect(findField.controller!.text, isEmpty);
+      await tester.pump(const Duration(milliseconds: 350));
+      await disposeEditor(tester);
+      debugDefaultTargetPlatformOverride = null;
+    },
+  );
+
+  testWidgets(
     'QuickClipboard paste uses text captured before clipboard restoration',
     (tester) async {
       debugDefaultTargetPlatformOverride = TargetPlatform.windows;

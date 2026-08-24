@@ -202,6 +202,7 @@ class DesktopClipboardFocusRestorer with WindowListener {
   Completer<void>? _captureRetryCompleter;
   Timer? _resumedCaptureTimer;
   bool _pasteOperationInFlight = false;
+  bool _focusRestoreInProgress = false;
   DesktopClipboardTarget? _suppressedPasteTarget;
   DateTime? _suppressPasteUntil;
   DateTime? _skipPasteActionUntil;
@@ -241,7 +242,9 @@ class DesktopClipboardFocusRestorer with WindowListener {
     // old target here makes a paste look like it targets the visible editor
     // while it is actually inserted into the previous one.
     final snapshot = _snapshot;
-    if (snapshot != null && !identical(snapshot.target, target)) {
+    if (snapshot != null &&
+        !identical(snapshot.target, target) &&
+        !_focusRestoreInProgress) {
       _snapshot = snapshot.forTarget(target);
       DesktopClipboardDiagnostics.write('snapshot_retargeted', {
         'session': snapshot.sessionId,
@@ -338,8 +341,16 @@ class DesktopClipboardFocusRestorer with WindowListener {
       });
       return;
     }
+    // Focus notifications can arrive in a different order from the native
+    // window-focus callback. Keep the saved target authoritative for the
+    // current frame; otherwise a transient focus on another field can rewrite
+    // the snapshot selection before the paste is handled.
+    _focusRestoreInProgress = true;
     _restoreSelection(snapshot);
     _requestFocus(snapshot.target);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (identical(_snapshot, snapshot)) _focusRestoreInProgress = false;
+    });
     _resumedCaptureTimer?.cancel();
     _resumedCaptureTimer = Timer(
       _resumedCaptureLimit,
@@ -792,6 +803,7 @@ class DesktopClipboardFocusRestorer with WindowListener {
       });
     }
     _snapshot = null;
+    _focusRestoreInProgress = false;
     _pasteFallbackArmed = false;
     _cancelCaptureRetry();
     _resumedCaptureTimer?.cancel();
