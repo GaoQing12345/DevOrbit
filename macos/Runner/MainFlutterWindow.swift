@@ -18,7 +18,9 @@ class MainFlutterWindow: NSWindow {
   private var pasteRequestNotificationSent = false
   private var pasteTargetClientCount = 0
   private var pasteFallbackTimer: Timer?
+  private var pasteFallbackProbeTimer: Timer?
   private var lastExternalApplicationBundleIdentifier: String?
+  private var pasteFallbackEligible = false
   private var workspaceActivationObserver: NSObjectProtocol?
 
   private static let clipboardManagerBundleIdentifiers: Set<String> = [
@@ -55,6 +57,12 @@ class MainFlutterWindow: NSWindow {
         return
       }
       self.lastExternalApplicationBundleIdentifier = application.bundleIdentifier
+      if let bundleIdentifier = application.bundleIdentifier {
+        self.pasteFallbackEligible = self.pasteCaptureArmed &&
+          Self.clipboardManagerBundleIdentifiers.contains(bundleIdentifier)
+      } else {
+        self.pasteFallbackEligible = false
+      }
     }
 
     super.awakeFromNib()
@@ -71,6 +79,14 @@ class MainFlutterWindow: NSWindow {
       beginPasteCapture(sessionId: nil)
     }
     super.resignKey()
+    captureClipboardManagerPasteSource()
+    pasteFallbackProbeTimer?.invalidate()
+    pasteFallbackProbeTimer = Timer.scheduledTimer(
+      withTimeInterval: 0.08,
+      repeats: false
+    ) { [weak self] _ in
+      self?.captureClipboardManagerPasteSource()
+    }
   }
 
   private func registerCursorChannel(_ controller: FlutterViewController) {
@@ -187,6 +203,7 @@ class MainFlutterWindow: NSWindow {
     pasteFallbackTimer = nil
     guard pasteTargetClientCount > 0,
           pasteCaptureArmed,
+          pasteFallbackEligible,
           let bundleIdentifier = lastExternalApplicationBundleIdentifier,
           Self.clipboardManagerBundleIdentifiers.contains(bundleIdentifier) else {
       return
@@ -204,10 +221,52 @@ class MainFlutterWindow: NSWindow {
     }
   }
 
+  private func captureClipboardManagerPasteSource() {
+    guard pasteTargetClientCount > 0, pasteCaptureArmed else { return }
+
+    // iCopy is a UIElement application, so opening its panel does not always
+    // emit NSWorkspace.didActivateApplicationNotification. Check both the
+    // frontmost app and the running app's active state while our window is
+    // resigning key; the latter is the signal available during that popup.
+    if let bundleIdentifier = activeClipboardManagerBundleIdentifier() {
+      lastExternalApplicationBundleIdentifier = bundleIdentifier
+      pasteFallbackEligible = true
+      return
+    }
+
+    if let application = NSWorkspace.shared.frontmostApplication,
+       application.processIdentifier != ProcessInfo.processInfo.processIdentifier,
+       let bundleIdentifier = application.bundleIdentifier {
+      lastExternalApplicationBundleIdentifier = bundleIdentifier
+      pasteFallbackEligible = Self.clipboardManagerBundleIdentifiers.contains(
+        bundleIdentifier
+      )
+    } else {
+      pasteFallbackEligible = false
+    }
+  }
+
+  private func activeClipboardManagerBundleIdentifier() -> String? {
+    if let frontmostBundleIdentifier = NSWorkspace.shared.frontmostApplication?
+      .bundleIdentifier,
+       Self.clipboardManagerBundleIdentifiers.contains(frontmostBundleIdentifier) {
+      return frontmostBundleIdentifier
+    }
+    for bundleIdentifier in Self.clipboardManagerBundleIdentifiers {
+      if NSRunningApplication.runningApplications(
+        withBundleIdentifier: bundleIdentifier
+      ).contains(where: { $0.isActive }) {
+        return bundleIdentifier
+      }
+    }
+    return nil
+  }
+
   private func deliverClipboardManagerPasteFallback() {
     pasteFallbackTimer = nil
     guard pasteTargetClientCount > 0,
           pasteCaptureArmed,
+          pasteFallbackEligible,
           let bundleIdentifier = lastExternalApplicationBundleIdentifier,
           Self.clipboardManagerBundleIdentifiers.contains(bundleIdentifier) else {
       return
@@ -309,6 +368,9 @@ class MainFlutterWindow: NSWindow {
   private func resetPasteCapture() {
     pasteFallbackTimer?.invalidate()
     pasteFallbackTimer = nil
+    pasteFallbackProbeTimer?.invalidate()
+    pasteFallbackProbeTimer = nil
+    pasteFallbackEligible = false
     pendingPasteText = nil
     pasteCaptureSessionId = nil
     pasteCaptureObservedChangeCount = nil
@@ -455,6 +517,7 @@ class MainFlutterWindow: NSWindow {
 
   deinit {
     pasteFallbackTimer?.invalidate()
+    pasteFallbackProbeTimer?.invalidate()
     if let observer = workspaceActivationObserver {
       NSWorkspace.shared.notificationCenter.removeObserver(observer)
     }

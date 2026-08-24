@@ -154,10 +154,10 @@ class DesktopClipboardFocusRestorer with WindowListener {
     );
   }
 
-  // Clipboard history tools can remain open while the user searches through a
-  // long list. Keep the captured editor selection long enough for that workflow
-  // while still bounding genuinely abandoned sessions.
-  static const _clipboardSessionLimit = Duration(minutes: 5);
+  // Clipboard history tools can stay open while the user searches or previews
+  // older entries. Keep the captured editor selection long enough for that
+  // workflow while still bounding genuinely abandoned sessions.
+  static const _clipboardSessionLimit = Duration(minutes: 30);
   static const _resumedCaptureLimit = Duration(seconds: 3);
   static const _pasteCaptureObservationRetryDelays = <Duration>[
     Duration(milliseconds: 4),
