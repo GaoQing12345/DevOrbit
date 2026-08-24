@@ -1,3 +1,5 @@
+import 'dart:ui' as ui;
+
 import 'package:dev_orbit/features/text_compare/text_compare_controller.dart';
 import 'package:dev_orbit/features/text_compare/text_compare_engine.dart';
 import 'package:dev_orbit/features/text_compare/text_compare_models.dart';
@@ -5,6 +7,7 @@ import 'package:dev_orbit/features/text_compare/text_compare_page.dart';
 import 'package:dev_orbit/features/text_compare/text_compare_service.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:re_editor/re_editor.dart';
@@ -61,6 +64,40 @@ void main() {
     expect(find.text('新增 1 行 · 删除 0 行 · 修改 1 行'), findsOneWidget);
     expect(find.byType(CodeEditor), findsNWidgets(2));
     expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('paints diff colors without focusing either editor', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1100, 720);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPhysicalSize);
+    final controller = TextCompareController(service: _ImmediateService());
+    addTearDown(controller.dispose);
+    controller.updateLeft('alpha\nold value');
+    controller.updateRight('alpha\nnew value');
+    const boundaryKey = ValueKey('compare-repaint-boundary');
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: RepaintBoundary(
+          key: boundaryKey,
+          child: TextComparePage(controller: controller),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    await controller.compare();
+    await tester.pump();
+    await tester.pump();
+
+    expect(
+      await _pixelCount(tester, boundaryKey, const Color(0xFFFFEBC7)),
+      greaterThan(0),
+    );
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
@@ -280,4 +317,37 @@ class _ImmediateService implements TextCompareService {
       options: options,
     );
   }
+}
+
+Future<int> _pixelCount(
+  WidgetTester tester,
+  Key boundaryKey,
+  Color color,
+) async {
+  final boundary = tester.renderObject<RenderRepaintBoundary>(
+    find.byKey(boundaryKey),
+  );
+  final image = await tester.runAsync(() => boundary.toImage(pixelRatio: 1));
+  if (image == null) return 0;
+  final data = await tester.runAsync(
+    () => image.toByteData(format: ui.ImageByteFormat.rawRgba),
+  );
+  image.dispose();
+  if (data == null) return 0;
+  final pixels = data.buffer.asUint8List();
+  final argb = color.toARGB32();
+  final red = (argb >> 16) & 0xff;
+  final green = (argb >> 8) & 0xff;
+  final blue = argb & 0xff;
+  final alpha = (argb >> 24) & 0xff;
+  var count = 0;
+  for (var offset = 0; offset < pixels.length; offset += 4) {
+    if (pixels[offset] == red &&
+        pixels[offset + 1] == green &&
+        pixels[offset + 2] == blue &&
+        pixels[offset + 3] == alpha) {
+      count++;
+    }
+  }
+  return count;
 }
