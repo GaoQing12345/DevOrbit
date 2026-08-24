@@ -19,6 +19,7 @@ class JsonEditorToolbar extends StatelessWidget {
     required this.onFind,
     required this.onCollapseAll,
     required this.onExpandAll,
+    this.showFoldControls = true,
   });
 
   final JsonDocumentController controller;
@@ -30,6 +31,7 @@ class JsonEditorToolbar extends StatelessWidget {
   final VoidCallback onFind;
   final VoidCallback onCollapseAll;
   final VoidCallback onExpandAll;
+  final bool showFoldControls;
 
   @override
   Widget build(BuildContext context) {
@@ -127,21 +129,23 @@ class JsonEditorToolbar extends StatelessWidget {
                   ),
                 ],
               ),
-              const SizedBox(width: 6),
-              _ToolbarGroup(
-                children: [
-                  _ToolbarButton(
-                    tooltip: '折叠全部',
-                    icon: Icons.unfold_less_rounded,
-                    onPressed: onCollapseAll,
-                  ),
-                  _ToolbarButton(
-                    tooltip: '展开全部',
-                    icon: Icons.unfold_more_rounded,
-                    onPressed: onExpandAll,
-                  ),
-                ],
-              ),
+              if (showFoldControls) ...[
+                const SizedBox(width: 6),
+                _ToolbarGroup(
+                  children: [
+                    _ToolbarButton(
+                      tooltip: '折叠全部',
+                      icon: Icons.unfold_less_rounded,
+                      onPressed: onCollapseAll,
+                    ),
+                    _ToolbarButton(
+                      tooltip: '展开全部',
+                      icon: Icons.unfold_more_rounded,
+                      onPressed: onExpandAll,
+                    ),
+                  ],
+                ),
+              ],
               const SizedBox(width: 6),
               _ToolbarGroup(
                 children: [

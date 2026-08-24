@@ -38,6 +38,7 @@ class MainFlutterWindow: NSWindow {
     self.setFrame(windowFrame, display: true)
 
     RegisterGeneratedPlugins(registry: flutterViewController)
+    registerNativeTextEditor(flutterViewController)
     registerCursorChannel(flutterViewController)
     registerClipboardChannel(flutterViewController)
     registerCredentialsChannel(flutterViewController)
@@ -66,6 +67,14 @@ class MainFlutterWindow: NSWindow {
     }
 
     super.awakeFromNib()
+  }
+
+  private func registerNativeTextEditor(_ controller: FlutterViewController) {
+    let registrar = controller.registrar(forPlugin: "DevOrbitNativeTextEditor")
+    registrar.register(
+      NativeTextEditorFactory(messenger: registrar.messenger),
+      withId: "dev_orbit/native_text_editor"
+    )
   }
 
   override func becomeKey() {
@@ -524,5 +533,203 @@ class MainFlutterWindow: NSWindow {
     if let monitor = pasteKeyMonitor {
       NSEvent.removeMonitor(monitor)
     }
+  }
+}
+
+private final class NativeTextEditorFactory: NSObject, FlutterPlatformViewFactory {
+  private let messenger: FlutterBinaryMessenger
+
+  init(messenger: FlutterBinaryMessenger) {
+    self.messenger = messenger
+    super.init()
+  }
+
+  func create(
+    withViewIdentifier viewId: Int64,
+    arguments args: Any?
+  ) -> NSView {
+    NativeTextEditorView(
+      viewId: viewId,
+      arguments: args,
+      messenger: messenger
+    )
+  }
+
+  func createArgsCodec() -> FlutterMessageCodec & NSObjectProtocol {
+    FlutterStandardMessageCodec.sharedInstance()
+  }
+}
+
+private final class NativeTextEditorView: NSView, NSTextViewDelegate {
+  private let textView: NSTextView
+  private let scrollView: NSScrollView
+  private let channel: FlutterMethodChannel
+  private var suppressCallbacks = false
+
+  init(viewId: Int64, arguments: Any?, messenger: FlutterBinaryMessenger) {
+    let parameters = arguments as? [String: Any]
+    let initialText = parameters?["text"] as? String ?? ""
+    let editable = (parameters?["editable"] as? NSNumber)?.boolValue ?? true
+    let fontSize = (parameters?["fontSize"] as? NSNumber)?.doubleValue ?? 13
+    let backgroundColor = Self.color(
+      from: parameters?["backgroundColor"],
+      fallback: .textBackgroundColor
+    )
+    let textColor = Self.color(from: parameters?["textColor"], fallback: .textColor)
+
+    let textView = NSTextView(frame: .zero)
+    textView.string = initialText
+    textView.isEditable = editable
+    textView.isSelectable = true
+    textView.isRichText = false
+    textView.importsGraphics = false
+    textView.allowsUndo = true
+    textView.usesFindPanel = true
+    textView.automaticQuoteSubstitutionEnabled = false
+    textView.automaticDashSubstitutionEnabled = false
+    textView.font = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
+    textView.textColor = textColor
+    textView.insertionPointColor = textColor
+    textView.backgroundColor = backgroundColor
+    textView.drawsBackground = true
+    textView.textContainerInset = NSSize(width: 12, height: 10)
+    textView.isVerticallyResizable = true
+    textView.isHorizontallyResizable = false
+    textView.autoresizingMask = [.width]
+    textView.textContainer?.widthTracksTextView = true
+    textView.textContainer?.containerSize = NSSize(
+      width: CGFloat.greatestFiniteMagnitude,
+      height: CGFloat.greatestFiniteMagnitude
+    )
+
+    let scrollView = NSScrollView(frame: .zero)
+    scrollView.drawsBackground = true
+    scrollView.backgroundColor = backgroundColor
+    scrollView.hasVerticalScroller = true
+    scrollView.hasHorizontalScroller = false
+    scrollView.borderType = .noBorder
+    scrollView.documentView = textView
+
+    self.textView = textView
+    self.scrollView = scrollView
+    self.channel = FlutterMethodChannel(
+      name: "dev_orbit/native_text_editor/\(viewId)",
+      binaryMessenger: messenger
+    )
+    super.init(frame: .zero)
+
+    wantsLayer = true
+    layer?.backgroundColor = backgroundColor.cgColor
+    textView.delegate = self
+    addSubview(scrollView)
+    channel.setMethodCallHandler { [weak self] call, result in
+      self?.handle(call, result: result)
+    }
+  }
+
+  required init?(coder: NSCoder) {
+    fatalError("NativeTextEditorView does not support NSCoder initialization")
+  }
+
+  override var acceptsFirstResponder: Bool { true }
+
+  override func becomeFirstResponder() -> Bool {
+    window?.makeFirstResponder(textView) ?? false
+  }
+
+  override func layout() {
+    super.layout()
+    scrollView.frame = bounds
+  }
+
+  private func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
+    switch call.method {
+    case "setText":
+      guard let text = call.arguments as? String else {
+        result(FlutterError(code: "invalid_arguments", message: "Expected text", details: nil))
+        return
+      }
+      setText(text)
+      result(nil)
+    case "setSelection":
+      guard let arguments = call.arguments as? [String: Any],
+            let baseOffset = (arguments["baseOffset"] as? NSNumber)?.intValue,
+            let extentOffset = (arguments["extentOffset"] as? NSNumber)?.intValue else {
+        result(FlutterError(code: "invalid_arguments", message: "Expected selection", details: nil))
+        return
+      }
+      setSelection(baseOffset: baseOffset, extentOffset: extentOffset)
+      result(nil)
+    case "setEditable":
+      if let editable = (call.arguments as? NSNumber)?.boolValue {
+        textView.isEditable = editable
+      }
+      result(nil)
+    case "focus":
+      DispatchQueue.main.async { [weak self] in
+        guard let self, let window = self.window else { return }
+        window.makeFirstResponder(self.textView)
+      }
+      result(nil)
+    default:
+      result(FlutterMethodNotImplemented)
+    }
+  }
+
+  private func setText(_ text: String) {
+    guard textView.string != text else { return }
+    suppressCallbacks = true
+    let selectedRange = textView.selectedRange()
+    textView.string = text
+    let maxOffset = (text as NSString).length
+    let offset = min(selectedRange.location, maxOffset)
+    textView.setSelectedRange(NSRange(location: offset, length: 0))
+    suppressCallbacks = false
+  }
+
+  private func setSelection(baseOffset: Int, extentOffset: Int) {
+    let maxOffset = (textView.string as NSString).length
+    let base = min(max(baseOffset, 0), maxOffset)
+    let extent = min(max(extentOffset, 0), maxOffset)
+    let location = min(base, extent)
+    let length = abs(extent - base)
+    suppressCallbacks = true
+    textView.setSelectedRange(NSRange(location: location, length: length))
+    suppressCallbacks = false
+  }
+
+  func textDidChange(_ notification: Notification) {
+    guard !suppressCallbacks else { return }
+    channel.invokeMethod("textChanged", arguments: [
+      "text": textView.string,
+      "selection": selectionPayload(),
+    ])
+  }
+
+  func textViewDidChangeSelection(_ notification: Notification) {
+    guard !suppressCallbacks else { return }
+    channel.invokeMethod("selectionChanged", arguments: selectionPayload())
+  }
+
+  private func selectionPayload() -> [String: Int] {
+    let range = textView.selectedRange()
+    return [
+      "baseOffset": range.location,
+      "extentOffset": range.location + range.length,
+    ]
+  }
+
+  private static func color(from value: Any?, fallback: NSColor) -> NSColor {
+    guard let raw = (value as? NSNumber)?.uint32Value else { return fallback }
+    let alpha = CGFloat((raw >> 24) & 0xff) / 255
+    let red = CGFloat((raw >> 16) & 0xff) / 255
+    let green = CGFloat((raw >> 8) & 0xff) / 255
+    let blue = CGFloat(raw & 0xff) / 255
+    return NSColor(
+      calibratedRed: red,
+      green: green,
+      blue: blue,
+      alpha: alpha
+    )
   }
 }

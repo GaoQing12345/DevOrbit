@@ -16,7 +16,7 @@ class JsonFindPanel extends StatelessWidget implements PreferredSizeWidget {
 
   final CodeFindController controller;
   final bool readOnly;
-  final VoidCallback onPaste;
+  final VoidCallback? onPaste;
 
   @override
   Size get preferredSize {
@@ -74,7 +74,7 @@ class _FindRow extends StatelessWidget {
 
   final CodeFindController controller;
   final CodeFindValue value;
-  final VoidCallback onPaste;
+  final VoidCallback? onPaste;
 
   @override
   Widget build(BuildContext context) {
@@ -141,7 +141,7 @@ class _ReplaceRow extends StatelessWidget {
 
   final CodeFindController controller;
   final bool readOnly;
-  final VoidCallback onPaste;
+  final VoidCallback? onPaste;
 
   @override
   Widget build(BuildContext context) {
@@ -192,33 +192,33 @@ class _PanelTextField extends StatelessWidget {
   final FocusNode focusNode;
   final String hintText;
   final ValueChanged<String> onSubmitted;
-  final VoidCallback onPaste;
+  final VoidCallback? onPaste;
 
   @override
   Widget build(BuildContext context) {
+    final field = TextField(
+      controller: controller,
+      focusNode: focusNode,
+      maxLines: 1,
+      onSubmitted: onSubmitted,
+      style: Theme.of(context).textTheme.bodyMedium,
+      decoration: InputDecoration(
+        hintText: hintText,
+        isDense: true,
+        filled: true,
+        fillColor: Theme.of(context).colorScheme.surfaceContainer,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 11, vertical: 9),
+      ),
+    );
+    final onPaste = this.onPaste;
+    if (onPaste == null) return field;
     return CallbackShortcuts(
       bindings: {
         const SingleActivator(LogicalKeyboardKey.keyV, control: true): onPaste,
         if (defaultTargetPlatform == TargetPlatform.macOS)
           const SingleActivator(LogicalKeyboardKey.keyV, meta: true): onPaste,
       },
-      child: TextField(
-        controller: controller,
-        focusNode: focusNode,
-        maxLines: 1,
-        onSubmitted: onSubmitted,
-        style: Theme.of(context).textTheme.bodyMedium,
-        decoration: InputDecoration(
-          hintText: hintText,
-          isDense: true,
-          filled: true,
-          fillColor: Theme.of(context).colorScheme.surfaceContainer,
-          contentPadding: const EdgeInsets.symmetric(
-            horizontal: 11,
-            vertical: 9,
-          ),
-        ),
-      ),
+      child: field,
     );
   }
 }

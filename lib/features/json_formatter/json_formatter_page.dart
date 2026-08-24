@@ -1,13 +1,16 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:desktop_drop/desktop_drop.dart';
 import 'package:file_selector/file_selector.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:path/path.dart' as path;
 import 'package:re_editor/re_editor.dart';
 
 import '../../core/settings/settings_store.dart';
+import '../../core/desktop/native_macos_text_editor.dart';
 import 'json_code_indicator.dart';
 import 'json_document_controller.dart';
 import 'json_editor_chrome.dart';
@@ -38,6 +41,11 @@ class _JsonFormatterPageState extends State<JsonFormatterPage> {
   late final JsonFocusRestorer _focusRestorer;
   final _foldController = JsonFoldController();
   bool _syncing = false, _dragging = false;
+
+  bool get _usesNativeMacEditor =>
+      Platform.isMacOS &&
+      !kIsWeb &&
+      Platform.environment['FLUTTER_TEST'] != 'true';
   @override
   void initState() {
     super.initState();
@@ -69,8 +77,75 @@ class _JsonFormatterPageState extends State<JsonFormatterPage> {
     if (mounted) setState(() {});
   }
 
-  void _onEditorChanged() =>
-      _syncing ? null : widget.controller.userEdit(_editor.text);
+  void _onEditorChanged() {
+    if (!_syncing) widget.controller.userEdit(_editor.text);
+  }
+
+  void _onNativeEditorChanged(String text) {
+    _syncing = true;
+    _editor.text = text;
+    _syncing = false;
+    widget.controller.userEdit(text);
+    if (mounted) setState(() {});
+  }
+
+  void _onNativeSelectionChanged(NativeTextSelection selection) {
+    final next = _selectionFromOffset(
+      selection.baseOffset,
+      selection.extentOffset,
+    );
+    if (_editor.selection == next) return;
+    _editor.selection = next;
+    if (mounted) setState(() {});
+  }
+
+  NativeTextSelection _nativeSelection() {
+    final selection = _editor.selection;
+    return NativeTextSelection(
+      baseOffset: _offsetFromPosition(
+        selection.baseIndex,
+        selection.baseOffset,
+      ),
+      extentOffset: _offsetFromPosition(
+        selection.extentIndex,
+        selection.extentOffset,
+      ),
+    );
+  }
+
+  int _offsetFromPosition(int lineIndex, int lineOffset) {
+    final lines = _editor.codeLines;
+    var offset = 0;
+    final safeIndex = lineIndex.clamp(0, lines.length - 1);
+    for (var index = 0; index < safeIndex; index++) {
+      offset += lines[index].text.length + 1;
+    }
+    return offset + lineOffset.clamp(0, lines[safeIndex].text.length);
+  }
+
+  CodeLineSelection _selectionFromOffset(int baseOffset, int extentOffset) {
+    return CodeLineSelection(
+      baseIndex: _lineIndexFromOffset(baseOffset),
+      baseOffset: _lineOffsetFromOffset(baseOffset),
+      extentIndex: _lineIndexFromOffset(extentOffset),
+      extentOffset: _lineOffsetFromOffset(extentOffset),
+    );
+  }
+
+  int _lineIndexFromOffset(int offset) {
+    final safeOffset = offset.clamp(0, _editor.text.length);
+    var lineIndex = 0;
+    for (var index = 0; index < safeOffset; index++) {
+      if (_editor.text.codeUnitAt(index) == 10) lineIndex++;
+    }
+    return lineIndex;
+  }
+
+  int _lineOffsetFromOffset(int offset) {
+    final safeOffset = offset.clamp(0, _editor.text.length);
+    final lineStart = _editor.text.lastIndexOf('\n', safeOffset - 1);
+    return safeOffset - lineStart - 1;
+  }
 
   void _onFindChanged() {
     if (mounted) setState(() {});
@@ -188,7 +263,7 @@ class _JsonFormatterPageState extends State<JsonFormatterPage> {
 
   @override
   Widget build(BuildContext context) {
-    _focusRestorer.active = Visibility.of(context);
+    _focusRestorer.active = !_usesNativeMacEditor && Visibility.of(context);
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     final shortcuts = buildJsonFormatterShortcuts(
@@ -245,6 +320,7 @@ class _JsonFormatterPageState extends State<JsonFormatterPage> {
       onFind: _findController.findMode,
       onCollapseAll: _foldController.collapseAll,
       onExpandAll: _foldController.expandAll,
+      showFoldControls: !_usesNativeMacEditor,
     );
   }
 
@@ -274,6 +350,31 @@ class _JsonFormatterPageState extends State<JsonFormatterPage> {
   }
 
   Widget _buildCodeEditor(ThemeData theme, bool isDark) {
+    if (_usesNativeMacEditor) {
+      return Stack(
+        fit: StackFit.expand,
+        children: [
+          MacNativeTextEditor(
+            text: _editor.text,
+            selection: _nativeSelection(),
+            onChanged: _onNativeEditorChanged,
+            onSelectionChanged: _onNativeSelectionChanged,
+            backgroundColor: theme.colorScheme.surfaceContainerLowest,
+            textColor: theme.colorScheme.onSurface,
+          ),
+          if (_findController.value != null)
+            Positioned(
+              top: 0,
+              right: 0,
+              child: JsonFindPanel(
+                controller: _findController,
+                readOnly: false,
+                onPaste: null,
+              ),
+            ),
+        ],
+      );
+    }
     return CodeEditor(
       controller: _editor,
       findController: _findController,
