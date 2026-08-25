@@ -564,7 +564,12 @@ private final class NativeTextEditorView: NSView, NSTextViewDelegate {
   private let textView: NSTextView
   private let scrollView: NSScrollView
   private let channel: FlutterMethodChannel
+  private var windowObservers: [NSObjectProtocol] = []
   private var suppressCallbacks = false
+  private var restoreFocusOnWindowActivation = false
+  private var isDark = false
+  private var backgroundColor = NSColor.textBackgroundColor
+  private var textColor = NSColor.textColor
 
   init(viewId: Int64, arguments: Any?, messenger: FlutterBinaryMessenger) {
     let parameters = arguments as? [String: Any]
@@ -576,6 +581,7 @@ private final class NativeTextEditorView: NSView, NSTextViewDelegate {
       fallback: .textBackgroundColor
     )
     let textColor = Self.color(from: parameters?["textColor"], fallback: .textColor)
+    let isDark = (parameters?["isDark"] as? NSNumber)?.boolValue ?? false
 
     let textView = NSTextView(frame: .zero)
     textView.string = initialText
@@ -616,12 +622,32 @@ private final class NativeTextEditorView: NSView, NSTextViewDelegate {
       name: "dev_orbit/native_text_editor/\(viewId)",
       binaryMessenger: messenger
     )
+    self.backgroundColor = backgroundColor
+    self.textColor = textColor
+    self.isDark = isDark
     super.init(frame: .zero)
 
     wantsLayer = true
     layer?.backgroundColor = backgroundColor.cgColor
     textView.delegate = self
+    applySyntaxHighlighting()
     addSubview(scrollView)
+    windowObservers = [
+      NotificationCenter.default.addObserver(
+        forName: NSWindow.didResignKeyNotification,
+        object: nil,
+        queue: .main
+      ) { [weak self] notification in
+        self?.windowDidResignKey(notification)
+      },
+      NotificationCenter.default.addObserver(
+        forName: NSWindow.didBecomeKeyNotification,
+        object: nil,
+        queue: .main
+      ) { [weak self] notification in
+        self?.windowDidBecomeKey(notification)
+      },
+    ]
     channel.setMethodCallHandler { [weak self] call, result in
       self?.handle(call, result: result)
     }
@@ -665,11 +691,27 @@ private final class NativeTextEditorView: NSView, NSTextViewDelegate {
         textView.isEditable = editable
       }
       result(nil)
-    case "focus":
-      DispatchQueue.main.async { [weak self] in
-        guard let self, let window = self.window else { return }
-        window.makeFirstResponder(self.textView)
+    case "setTheme":
+      guard let arguments = call.arguments as? [String: Any] else {
+        result(FlutterError(code: "invalid_arguments", message: "Expected theme", details: nil))
+        return
       }
+      let nextBackgroundColor = Self.color(
+        from: arguments["backgroundColor"],
+        fallback: backgroundColor
+      )
+      let nextTextColor = Self.color(from: arguments["textColor"], fallback: textColor)
+      isDark = (arguments["isDark"] as? NSNumber)?.boolValue ?? isDark
+      backgroundColor = nextBackgroundColor
+      textColor = nextTextColor
+      textView.backgroundColor = nextBackgroundColor
+      textView.insertionPointColor = nextTextColor
+      scrollView.backgroundColor = nextBackgroundColor
+      layer?.backgroundColor = nextBackgroundColor.cgColor
+      applySyntaxHighlighting()
+      result(nil)
+    case "focus":
+      restoreNativeFocus()
       result(nil)
     default:
       result(FlutterMethodNotImplemented)
@@ -684,6 +726,7 @@ private final class NativeTextEditorView: NSView, NSTextViewDelegate {
     let maxOffset = (text as NSString).length
     let offset = min(selectedRange.location, maxOffset)
     textView.setSelectedRange(NSRange(location: offset, length: 0))
+    applySyntaxHighlighting()
     suppressCallbacks = false
   }
 
@@ -700,6 +743,7 @@ private final class NativeTextEditorView: NSView, NSTextViewDelegate {
 
   func textDidChange(_ notification: Notification) {
     guard !suppressCallbacks else { return }
+    applySyntaxHighlighting()
     channel.invokeMethod("textChanged", arguments: [
       "text": textView.string,
       "selection": selectionPayload(),
@@ -719,6 +763,124 @@ private final class NativeTextEditorView: NSView, NSTextViewDelegate {
     ]
   }
 
+  private func applySyntaxHighlighting() {
+    let string = textView.string
+    let attributed = NSMutableAttributedString(
+      string: string,
+      attributes: [
+        .font: textView.font ?? NSFont.monospacedSystemFont(ofSize: 13, weight: .regular),
+        .foregroundColor: textColor,
+      ]
+    )
+    let fullRange = NSRange(location: 0, length: (string as NSString).length)
+    guard fullRange.length > 0 else {
+      textView.typingAttributes = [
+        .font: textView.font ?? NSFont.monospacedSystemFont(ofSize: 13, weight: .regular),
+        .foregroundColor: textColor,
+      ]
+      textView.textStorage?.setAttributedString(attributed)
+      return
+    }
+
+    let stringPattern = #"\"(?:\\.|[^\"\\])*\""#
+    let numberPattern = #"-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?"#
+    let literalPattern = #"\b(?:true|false|null)\b"#
+    applyMatches(
+      pattern: stringPattern,
+      in: string,
+      to: attributed,
+      color: isDark ? Self.color(red: 0.60, green: 0.76, blue: 0.47) : Self.color(red: 0.31, green: 0.63, blue: 0.31),
+      keyColor: isDark ? Self.color(red: 0.90, green: 0.65, blue: 0.34) : Self.color(red: 0.60, green: 0.41, blue: 0.00)
+    )
+    applyMatches(
+      pattern: numberPattern,
+      in: string,
+      to: attributed,
+      color: isDark ? Self.color(red: 0.82, green: 0.64, blue: 0.40) : Self.color(red: 0.60, green: 0.41, blue: 0.00)
+    )
+    applyMatches(
+      pattern: literalPattern,
+      in: string,
+      to: attributed,
+      color: isDark ? Self.color(red: 0.34, green: 0.71, blue: 0.76) : Self.color(red: 0.00, green: 0.52, blue: 0.73),
+      nullColor: isDark ? Self.color(red: 0.78, green: 0.47, blue: 0.86) : Self.color(red: 0.65, green: 0.15, blue: 0.64)
+    )
+    textView.typingAttributes = [
+      .font: textView.font ?? NSFont.monospacedSystemFont(ofSize: 13, weight: .regular),
+      .foregroundColor: textColor,
+    ]
+    textView.textStorage?.setAttributedString(attributed)
+  }
+
+  private func applyMatches(
+    pattern: String,
+    in string: String,
+    to attributed: NSMutableAttributedString,
+    color: NSColor,
+    keyColor: NSColor? = nil,
+    nullColor: NSColor? = nil
+  ) {
+    guard let expression = try? NSRegularExpression(pattern: pattern) else { return }
+    let range = NSRange(location: 0, length: (string as NSString).length)
+    expression.enumerateMatches(in: string, range: range) { match, _, _ in
+      guard let match else { return }
+      let token = (string as NSString).substring(with: match.range)
+      var tokenColor = color
+      if token == "null", let nullColor {
+        tokenColor = nullColor
+      } else if keyColor != nil && Self.isObjectKey(token, in: string, range: match.range) {
+        tokenColor = keyColor!
+      }
+      attributed.addAttribute(.foregroundColor, value: tokenColor, range: match.range)
+    }
+  }
+
+  private static func isObjectKey(_ token: String, in string: String, range: NSRange) -> Bool {
+    let nsString = string as NSString
+    let end = range.location + range.length
+    var index = end
+    while index < nsString.length {
+      let character = nsString.character(at: index)
+      if character == 32 || character == 9 || character == 10 || character == 13 {
+        index += 1
+        continue
+      }
+      return character == 58
+    }
+    return false
+  }
+
+  private static func color(red: CGFloat, green: CGFloat, blue: CGFloat) -> NSColor {
+    NSColor(calibratedRed: red, green: green, blue: blue, alpha: 1)
+  }
+
+  private func windowDidResignKey(_ notification: Notification) {
+    guard let window = notification.object as? NSWindow, window === self.window else { return }
+    restoreFocusOnWindowActivation = window.firstResponder === textView
+  }
+
+  private func windowDidBecomeKey(_ notification: Notification) {
+    guard restoreFocusOnWindowActivation,
+          let window = notification.object as? NSWindow,
+          window === self.window else { return }
+    restoreFocusOnWindowActivation = false
+    restoreNativeFocus()
+  }
+
+  private func restoreNativeFocus(attempt: Int = 0) {
+    DispatchQueue.main.async { [weak self] in
+      guard let self, let window = self.window, window.isKeyWindow else { return }
+      if window.makeFirstResponder(self.textView) {
+        window.invalidateCursorRects(for: self.textView)
+        return
+      }
+      guard attempt < 4 else { return }
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+        self?.restoreNativeFocus(attempt: attempt + 1)
+      }
+    }
+  }
+
   private static func color(from value: Any?, fallback: NSColor) -> NSColor {
     guard let raw = (value as? NSNumber)?.uint32Value else { return fallback }
     let alpha = CGFloat((raw >> 24) & 0xff) / 255
@@ -731,5 +893,11 @@ private final class NativeTextEditorView: NSView, NSTextViewDelegate {
       blue: blue,
       alpha: alpha
     )
+  }
+
+  deinit {
+    for observer in windowObservers {
+      NotificationCenter.default.removeObserver(observer)
+    }
   }
 }

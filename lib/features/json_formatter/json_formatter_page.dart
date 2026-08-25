@@ -361,6 +361,7 @@ class _JsonFormatterPageState extends State<JsonFormatterPage> {
             onSelectionChanged: _onNativeSelectionChanged,
             backgroundColor: theme.colorScheme.surfaceContainerLowest,
             textColor: theme.colorScheme.onSurface,
+            isDark: isDark,
           ),
           if (_findController.value != null)
             Positioned(

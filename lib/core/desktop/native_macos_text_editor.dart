@@ -48,6 +48,7 @@ class MacNativeTextEditor extends StatefulWidget {
     this.readOnly = false,
     this.backgroundColor,
     this.textColor,
+    this.isDark = false,
     this.fontSize = 13,
   });
 
@@ -58,6 +59,7 @@ class MacNativeTextEditor extends StatefulWidget {
   final bool readOnly;
   final Color? backgroundColor;
   final Color? textColor;
+  final bool isDark;
   final double fontSize;
 
   @override
@@ -83,6 +85,12 @@ class _MacNativeTextEditorState extends State<MacNativeTextEditor> {
     if (_channel != null && oldWidget.readOnly != widget.readOnly) {
       _invoke('setEditable', !widget.readOnly);
     }
+    if (_channel != null &&
+        (oldWidget.isDark != widget.isDark ||
+            oldWidget.backgroundColor != widget.backgroundColor ||
+            oldWidget.textColor != widget.textColor)) {
+      _invoke('setTheme', _themeArguments(context));
+    }
   }
 
   void _onPlatformViewCreated(int viewId) {
@@ -96,7 +104,19 @@ class _MacNativeTextEditorState extends State<MacNativeTextEditor> {
     _invoke('setEditable', !widget.readOnly);
     _invoke('setText', widget.text);
     _invoke('setSelection', _selectionArguments(widget.selection));
+    _invoke('setTheme', _themeArguments(context));
     _invoke('focus', null);
+  }
+
+  Map<String, Object?> _themeArguments(BuildContext context) {
+    final theme = Theme.of(context);
+    return <String, Object?>{
+      'isDark': widget.isDark,
+      'backgroundColor':
+          (widget.backgroundColor ?? theme.colorScheme.surfaceContainerLowest)
+              .toARGB32(),
+      'textColor': (widget.textColor ?? theme.colorScheme.onSurface).toARGB32(),
+    };
   }
 
   Future<Object?> _handleNativeCall(MethodCall call) async {
@@ -168,6 +188,7 @@ class _MacNativeTextEditorState extends State<MacNativeTextEditor> {
                 .toARGB32(),
         'textColor': (widget.textColor ?? theme.colorScheme.onSurface)
             .toARGB32(),
+        'isDark': widget.isDark,
       },
       creationParamsCodec: const StandardMessageCodec(),
     );
