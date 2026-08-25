@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
+import 'package:window_manager/window_manager.dart';
 
 import 'desktop_text_selection.dart';
 
@@ -70,10 +71,21 @@ class DesktopTextHighlight {
   final Color? textColor;
 }
 
-class _DesktopWebTextEditorState extends State<DesktopWebTextEditor> {
+class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
+    with WindowListener {
+  static _DesktopWebTextEditorState? _activeEditor;
+
   InAppWebViewController? _controller;
   bool _loaded = false;
   bool _disposed = false;
+  bool _restoreFocusOnWindowFocus = false;
+  final _webFocusNode = FocusNode(debugLabel: 'desktop web editor');
+
+  @override
+  void initState() {
+    super.initState();
+    windowManager.addListener(this);
+  }
 
   bool get _supported =>
       !kIsWeb &&
@@ -137,6 +149,15 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor> {
         return null;
       },
     );
+    controller.addJavaScriptHandler(
+      handlerName: 'editorFocusChanged',
+      callback: (args) {
+        if (args.isNotEmpty && args.first == true) {
+          _activeEditor = this;
+        }
+        return null;
+      },
+    );
   }
 
   int _asInt(Object? value) => value is num ? value.toInt() : 0;
@@ -145,12 +166,48 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor> {
     _loaded = true;
     _syncState();
     if (widget.autofocus) {
+      _webFocusNode.requestFocus();
       Future<void>.delayed(const Duration(milliseconds: 60), () {
         if (!_disposed) {
           controller.evaluateJavascript(source: 'window.devOrbitFocus();');
         }
       });
     }
+  }
+
+  void _restoreWebFocus({int attempt = 0}) {
+    final controller = _controller;
+    if (_disposed || !_loaded || controller == null) return;
+    if (!_webFocusNode.hasFocus) _webFocusNode.requestFocus();
+    controller.evaluateJavascript(source: 'window.devOrbitRestoreFocus();');
+    if (attempt >= 5) {
+      _restoreFocusOnWindowFocus = false;
+      return;
+    }
+    Future<void>.delayed(Duration(milliseconds: 40 + attempt * 40), () {
+      if (!_disposed && _restoreFocusOnWindowFocus) {
+        _restoreWebFocus(attempt: attempt + 1);
+      }
+    });
+  }
+
+  @override
+  void onWindowBlur() {
+    final primaryFocus = FocusManager.instance.primaryFocus;
+    final flutterEditableFocused = primaryFocus
+        ?.context
+        ?.findAncestorStateOfType<EditableTextState>() !=
+        null;
+    _restoreFocusOnWindowFocus =
+        identical(_activeEditor, this) && !flutterEditableFocused;
+  }
+
+  @override
+  void onWindowFocus() {
+    if (!_restoreFocusOnWindowFocus) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _restoreWebFocus();
+    });
   }
 
   void _syncState() {
@@ -203,6 +260,9 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor> {
   @override
   void dispose() {
     _disposed = true;
+    if (identical(_activeEditor, this)) _activeEditor = null;
+    windowManager.removeListener(this);
+    _webFocusNode.dispose();
     _controller = null;
     super.dispose();
   }
@@ -210,21 +270,34 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor> {
   @override
   Widget build(BuildContext context) {
     if (!_supported) return const SizedBox.shrink();
-    return InAppWebView(
-      initialData: InAppWebViewInitialData(
-        data: _editorHtml,
-        baseUrl: WebUri('https://dev-orbit.local/'),
+    return Focus(
+      focusNode: _webFocusNode,
+      canRequestFocus: true,
+      onFocusChange: (focused) {
+        if (focused && _loaded) {
+          _controller?.evaluateJavascript(
+            source: 'window.devOrbitRestoreFocus();',
+          );
+        }
+      },
+      child: InAppWebView(
+        initialData: InAppWebViewInitialData(
+          data: _editorHtml,
+          baseUrl: WebUri('https://dev-orbit.local/'),
+        ),
+        initialSettings: InAppWebViewSettings(
+          javaScriptEnabled: true,
+          disableContextMenu: false,
+          transparentBackground: true,
+          supportZoom: false,
+          allowsBackForwardNavigationGestures: false,
+        ),
+        onWebViewCreated: _onWebViewCreated,
+        onLoadStop: _onLoadStop,
+        onWindowBlur: (_) => onWindowBlur(),
+        onWindowFocus: (_) => onWindowFocus(),
+        gestureRecognizers: const {},
       ),
-      initialSettings: InAppWebViewSettings(
-        javaScriptEnabled: true,
-        disableContextMenu: false,
-        transparentBackground: true,
-        supportZoom: false,
-        allowsBackForwardNavigationGestures: false,
-      ),
-      onWebViewCreated: _onWebViewCreated,
-      onLoadStop: _onLoadStop,
-      gestureRecognizers: const {},
     );
   }
 }
@@ -322,6 +395,7 @@ function restoreSelection(base, extent) {
   const range = document.createRange();
   range.setStart(start.node, start.offset); range.setEnd(end.node, end.offset);
   selection.removeAllRanges(); selection.addRange(range);
+  lastSelection = [base, extent];
 }
 function readText() { return editor.innerText.replace(/\r/g, ''); }
 function highlightedRanges(text) {
@@ -375,15 +449,35 @@ window.devOrbitSetState = next => {
   editor.style.padding = `${padding.top ?? 12}px ${padding.right ?? 12}px ${padding.bottom ?? 12}px ${padding.left ?? 12}px`;
   document.documentElement.style.colorScheme = next.isDark ? 'dark' : 'light';
   editor.contentEditable = next.readOnly ? 'false' : 'true';
-  if (changedText || changedSyntax) render(next.text, next.baseOffset, next.extentOffset, false);
-  else restoreSelection(next.baseOffset, next.extentOffset);
+  if (changedText || changedSyntax) {
+    render(next.text, next.baseOffset, next.extentOffset, false);
+  } else if (document.activeElement !== editor) {
+    // Flutter rebuilds can arrive while a clipboard picker owns the native
+    // focus. Do not move the DOM caret to a stale Flutter selection while the
+    // editor is temporarily inactive; the window-focus callback restores the
+    // saved browser selection after activation.
+    lastSelection = [next.baseOffset, next.extentOffset];
+  } else {
+    restoreSelection(next.baseOffset, next.extentOffset);
+  }
 };
-window.devOrbitFocus = () => editor.focus();
+let lastSelection = [0, 0];
+window.devOrbitRestoreFocus = () => {
+  editor.focus();
+  restoreSelection(lastSelection[0], lastSelection[1]);
+};
+window.devOrbitFocus = () => {
+  editor.focus();
+  restoreSelection(lastSelection[0], lastSelection[1]);
+};
+editor.addEventListener('focus', () => bridge('editorFocusChanged', [true]));
+editor.addEventListener('blur', () => bridge('editorFocusChanged', [false]));
 editor.addEventListener('compositionstart', () => composing = true);
 editor.addEventListener('compositionend', () => { composing = false; editor.dispatchEvent(new Event('input')); });
 editor.addEventListener('input', () => {
   if (composing) return;
   const text = readText(), selection = currentSelection();
+  lastSelection = selection;
   render(text, selection[0], selection[1], false);
   // Publish the caret before the text callback. Flutter may rebuild the
   // surrounding page from onChanged; having the latest selection already in
@@ -393,7 +487,9 @@ editor.addEventListener('input', () => {
 });
 document.addEventListener('selectionchange', () => {
   if (document.activeElement !== editor) return;
-  const selection = currentSelection(); bridge('selectionChanged', selection);
+  const selection = currentSelection();
+  lastSelection = selection;
+  bridge('selectionChanged', selection);
 });
 editor.addEventListener('keydown', event => {
   if (state.findEnabled && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'f') {
