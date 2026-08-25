@@ -1,11 +1,15 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:file_selector/file_selector.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:re_editor/re_editor.dart';
 
 import '../../core/desktop/desktop_clipboard_focus_restorer.dart';
+import '../../core/desktop/desktop_text_selection.dart';
+import '../../core/desktop/web_text_editor.dart';
 import 'text_compare_controller.dart';
 import 'text_compare_indicator.dart';
 import 'text_compare_models.dart';
@@ -37,6 +41,8 @@ class TextComparePage extends StatefulWidget {
 class _TextComparePageState extends State<TextComparePage> {
   late final CodeLineEditingController _leftEditor;
   late final CodeLineEditingController _rightEditor;
+  late final TextEditingController _leftWebController;
+  late final TextEditingController _rightWebController;
   late final CodeScrollController _leftScrollController;
   late final CodeScrollController _rightScrollController;
   final _leftFocusNode = FocusNode();
@@ -47,11 +53,18 @@ class _TextComparePageState extends State<TextComparePage> {
   bool _syncingScroll = false;
   bool _highlightRepaintScheduled = false;
 
+  bool get _usesWebEditor =>
+      !kIsWeb &&
+      (Platform.isMacOS || Platform.isWindows) &&
+      Platform.environment['FLUTTER_TEST'] != 'true';
+
   @override
   void initState() {
     super.initState();
     _leftEditor = _createEditor(TextCompareSide.left);
     _rightEditor = _createEditor(TextCompareSide.right);
+    _leftWebController = TextEditingController(text: widget.controller.leftText);
+    _rightWebController = TextEditingController(text: widget.controller.rightText);
     _leftScrollController = CodeScrollController();
     _rightScrollController = CodeScrollController();
     _leftScrollController.verticalScroller.addListener(_syncLeftScroll);
@@ -115,6 +128,8 @@ class _TextComparePageState extends State<TextComparePage> {
     _rightFocusNode.removeListener(_handleFocusChange);
     _leftEditor.dispose();
     _rightEditor.dispose();
+    _leftWebController.dispose();
+    _rightWebController.dispose();
     _leftFocusNode.dispose();
     _rightFocusNode.dispose();
     super.dispose();
@@ -159,6 +174,18 @@ class _TextComparePageState extends State<TextComparePage> {
     if (_rightEditor.text != widget.controller.rightText) {
       _rightEditor.text = widget.controller.rightText;
     }
+    if (_leftWebController.text != widget.controller.leftText) {
+      _leftWebController.value = TextEditingValue(
+        text: widget.controller.leftText,
+        selection: TextSelection.collapsed(offset: widget.controller.leftText.length),
+      );
+    }
+    if (_rightWebController.text != widget.controller.rightText) {
+      _rightWebController.value = TextEditingValue(
+        text: widget.controller.rightText,
+        selection: TextSelection.collapsed(offset: widget.controller.rightText.length),
+      );
+    }
     // Diff spans are derived from the controller result rather than editor
     // text. `setState` below lets the existing editors rebuild their spans;
     // calling re_editor's forceRepaint here is unsafe because this listener
@@ -168,6 +195,114 @@ class _TextComparePageState extends State<TextComparePage> {
       _scheduleHighlightRepaint();
       _scheduleFoldingUpdate();
     }
+  }
+
+  NativeTextSelection _webSelection(TextEditingController controller) {
+    final selection = controller.selection;
+    return NativeTextSelection(
+      baseOffset: selection.baseOffset.clamp(0, controller.text.length),
+      extentOffset: selection.extentOffset.clamp(0, controller.text.length),
+    );
+  }
+
+  void _webSelectionChanged(
+    TextEditingController controller,
+    NativeTextSelection selection,
+  ) {
+    final length = controller.text.length;
+    controller.selection = TextSelection(
+      baseOffset: selection.baseOffset.clamp(0, length),
+      extentOffset: selection.extentOffset.clamp(0, length),
+    );
+  }
+
+  void _webChanged(TextCompareSide side, String text) {
+    final controller = side == TextCompareSide.left
+        ? _leftWebController
+        : _rightWebController;
+    final selection = controller.selection;
+    controller.value = TextEditingValue(
+      text: text,
+      selection: selection.copyWith(
+        baseOffset: selection.baseOffset.clamp(0, text.length),
+        extentOffset: selection.extentOffset.clamp(0, text.length),
+      ),
+    );
+    if (side == TextCompareSide.left) {
+      widget.controller.updateLeft(text);
+    } else {
+      widget.controller.updateRight(text);
+    }
+  }
+
+  Future<void> _pasteWeb(TextCompareSide side) async {
+    final controller = side == TextCompareSide.left
+        ? _leftWebController
+        : _rightWebController;
+    final data = await Clipboard.getData(Clipboard.kTextPlain);
+    final pasted = data?.text;
+    if (pasted == null) return;
+    final current = controller.text;
+    final selection = controller.selection;
+    final start = selection.start.clamp(0, current.length);
+    final end = selection.end.clamp(start, current.length);
+    final next = current.replaceRange(start, end, pasted);
+    controller.value = TextEditingValue(
+      text: next,
+      selection: TextSelection.collapsed(offset: start + pasted.length),
+    );
+    if (side == TextCompareSide.left) {
+      widget.controller.updateLeft(next);
+    } else {
+      widget.controller.updateRight(next);
+    }
+  }
+
+  List<DesktopTextHighlight> _webHighlights(
+    BuildContext context,
+    TextCompareSide side,
+  ) {
+    final result = widget.controller.result;
+    if (result == null) return const [];
+    final lines = side == TextCompareSide.left ? result.leftLines : result.rightLines;
+    final text = side == TextCompareSide.left
+        ? widget.controller.leftText
+        : widget.controller.rightText;
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    final highlights = <DesktopTextHighlight>[];
+    var offset = 0;
+    for (final line in lines) {
+      final lineEnd = offset + _lineLengthAt(text, offset);
+      if (line.status != TextDiffLineStatus.unchanged && lineEnd > offset) {
+        final color = switch (line.status) {
+          TextDiffLineStatus.added => dark
+              ? const Color(0xFF183B2C)
+              : const Color(0xFFE0F2E7),
+          TextDiffLineStatus.removed => dark
+              ? const Color(0xFF432220)
+              : const Color(0xFFFBE3E0),
+          TextDiffLineStatus.modified => dark
+              ? const Color(0xFF493514)
+              : const Color(0xFFFFEBC7),
+          TextDiffLineStatus.unchanged => Colors.transparent,
+        };
+        highlights.add(
+          DesktopTextHighlight(
+            start: offset,
+            end: lineEnd,
+            backgroundColor: color,
+          ),
+        );
+      }
+      offset = lineEnd;
+      if (offset < text.length && text.codeUnitAt(offset) == 10) offset++;
+    }
+    return highlights;
+  }
+
+  int _lineLengthAt(String text, int offset) {
+    final end = text.indexOf('\n', offset);
+    return (end < 0 ? text.length : end) - offset;
   }
 
   void _scheduleHighlightRepaint() {
@@ -387,7 +522,7 @@ class _TextComparePageState extends State<TextComparePage> {
 
   @override
   Widget build(BuildContext context) {
-    _focusRestorer.active = Visibility.of(context);
+    _focusRestorer.active = Visibility.of(context) && !_usesWebEditor;
     return CallbackShortcuts(
       bindings: {
         const SingleActivator(LogicalKeyboardKey.enter, meta: true):
@@ -405,6 +540,7 @@ class _TextComparePageState extends State<TextComparePage> {
                 controller: widget.controller,
                 foldUnchanged: _foldUnchanged,
                 foldedLineCount: _foldedLineCount,
+                showFoldUnchanged: !_usesWebEditor,
                 onFoldUnchangedChanged: _setFoldUnchanged,
                 onOpenLeft: () => _openFile(TextCompareSide.left),
                 onOpenRight: () => _openFile(TextCompareSide.right),
@@ -423,7 +559,20 @@ class _TextComparePageState extends State<TextComparePage> {
                           scrollController: _leftScrollController,
                           focusNode: _leftFocusNode,
                           emphasized: _leftFocusNode.hasFocus,
-                          onPaste: _focusRestorer.pasteFocusedTarget,
+                          onPaste: () => _usesWebEditor
+                              ? _pasteWeb(TextCompareSide.left)
+                              : _focusRestorer.pasteFocusedTarget(),
+                          useWebEditor: _usesWebEditor,
+                          webController: _leftWebController,
+                          webSelection: _webSelection(_leftWebController),
+                          webHighlights: _webHighlights(
+                            context,
+                            TextCompareSide.left,
+                          ),
+                          onWebSelectionChanged: (value) =>
+                              _webSelectionChanged(_leftWebController, value),
+                          onWebChanged: (value) =>
+                              _webChanged(TextCompareSide.left, value),
                           onChanged: (_) =>
                               widget.controller.updateLeft(_leftEditor.text),
                         ),
@@ -437,7 +586,20 @@ class _TextComparePageState extends State<TextComparePage> {
                           scrollController: _rightScrollController,
                           focusNode: _rightFocusNode,
                           emphasized: _rightFocusNode.hasFocus,
-                          onPaste: _focusRestorer.pasteFocusedTarget,
+                          onPaste: () => _usesWebEditor
+                              ? _pasteWeb(TextCompareSide.right)
+                              : _focusRestorer.pasteFocusedTarget(),
+                          useWebEditor: _usesWebEditor,
+                          webController: _rightWebController,
+                          webSelection: _webSelection(_rightWebController),
+                          webHighlights: _webHighlights(
+                            context,
+                            TextCompareSide.right,
+                          ),
+                          onWebSelectionChanged: (value) =>
+                              _webSelectionChanged(_rightWebController, value),
+                          onWebChanged: (value) =>
+                              _webChanged(TextCompareSide.right, value),
                           onChanged: (_) =>
                               widget.controller.updateRight(_rightEditor.text),
                         ),
@@ -460,6 +622,7 @@ class _CompareToolbar extends StatelessWidget {
     required this.controller,
     required this.foldUnchanged,
     required this.foldedLineCount,
+    required this.showFoldUnchanged,
     required this.onFoldUnchangedChanged,
     required this.onOpenLeft,
     required this.onOpenRight,
@@ -469,6 +632,7 @@ class _CompareToolbar extends StatelessWidget {
   final TextCompareController controller;
   final bool foldUnchanged;
   final int foldedLineCount;
+  final bool showFoldUnchanged;
   final ValueChanged<bool> onFoldUnchangedChanged;
   final VoidCallback onOpenLeft;
   final VoidCallback onOpenRight;
@@ -515,12 +679,13 @@ class _CompareToolbar extends StatelessWidget {
               value: controller.options.ignoreTrailingWhitespace,
               onChanged: controller.updateIgnoreTrailingWhitespace,
             ),
-            _OptionToggle(
-              label: '折叠未更改行',
-              value: foldUnchanged,
-              onChanged: onFoldUnchangedChanged,
-            ),
-            if (foldUnchanged)
+            if (showFoldUnchanged)
+              _OptionToggle(
+                label: '折叠未更改行',
+                value: foldUnchanged,
+                onChanged: onFoldUnchangedChanged,
+              ),
+            if (showFoldUnchanged && foldUnchanged)
               Text(
                 foldedLineCount > 0 ? '已折叠 $foldedLineCount 行' : '无可折叠行',
                 style: Theme.of(context).textTheme.labelSmall?.copyWith(
@@ -685,6 +850,12 @@ class _TextPane extends StatelessWidget {
     required this.emphasized,
     required this.onPaste,
     required this.onChanged,
+    required this.useWebEditor,
+    required this.webController,
+    required this.webSelection,
+    required this.webHighlights,
+    required this.onWebSelectionChanged,
+    required this.onWebChanged,
   });
 
   final TextCompareSide side;
@@ -695,6 +866,12 @@ class _TextPane extends StatelessWidget {
   final bool emphasized;
   final VoidCallback onPaste;
   final ValueChanged<CodeLineEditingValue> onChanged;
+  final bool useWebEditor;
+  final TextEditingController webController;
+  final NativeTextSelection webSelection;
+  final List<DesktopTextHighlight> webHighlights;
+  final ValueChanged<NativeTextSelection> onWebSelectionChanged;
+  final ValueChanged<String> onWebChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -758,7 +935,21 @@ class _TextPane extends StatelessWidget {
               ),
             ),
             Expanded(
-              child: CodeEditor(
+              child: useWebEditor
+                  ? DesktopWebTextEditor(
+                      text: webController.text,
+                      selection: webSelection,
+                      onChanged: onWebChanged,
+                      onSelectionChanged: onWebSelectionChanged,
+                      highlights: webHighlights,
+                      backgroundColor: scheme.surfaceContainerLowest,
+                      textColor: scheme.onSurface,
+                      isDark: scheme.brightness == Brightness.dark,
+                      placeholder: isLeft ? '输入或粘贴旧文本' : '输入或粘贴新文本',
+                      autofocus: isLeft,
+                      padding: const EdgeInsets.fromLTRB(14, 12, 14, 18),
+                  )
+                  : CodeEditor(
                 // Keep the editor state mounted while diff metadata changes.
                 // Re-mounting CodeEditor resets its internal input connection
                 // and can make the caret/focus look out of sync with the pane

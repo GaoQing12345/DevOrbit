@@ -5,7 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 
-import 'native_macos_text_editor.dart';
+import 'desktop_text_selection.dart';
 
 /// A single browser-backed editing surface shared by macOS and Windows.
 ///
@@ -16,33 +16,59 @@ class DesktopWebTextEditor extends StatefulWidget {
   const DesktopWebTextEditor({
     super.key,
     required this.text,
-    required this.selection,
+    this.selection,
     required this.onChanged,
-    required this.onSelectionChanged,
-    required this.onFind,
+    this.onSelectionChanged,
+    this.onFind,
     this.backgroundColor,
     this.textColor,
     this.isDark = false,
     this.syntax = WebEditorSyntax.plain,
     this.readOnly = false,
+    this.singleLine = false,
+    this.placeholder,
+    this.fontSize = 14,
+    this.padding = const EdgeInsets.all(12),
+    this.autofocus = true,
+    this.highlights = const [],
   });
 
   final String text;
-  final NativeTextSelection selection;
+  final NativeTextSelection? selection;
   final ValueChanged<String> onChanged;
-  final ValueChanged<NativeTextSelection> onSelectionChanged;
-  final VoidCallback onFind;
+  final ValueChanged<NativeTextSelection>? onSelectionChanged;
+  final VoidCallback? onFind;
   final Color? backgroundColor;
   final Color? textColor;
   final bool isDark;
   final WebEditorSyntax syntax;
   final bool readOnly;
+  final bool singleLine;
+  final String? placeholder;
+  final double fontSize;
+  final EdgeInsets padding;
+  final bool autofocus;
+  final List<DesktopTextHighlight> highlights;
 
   @override
   State<DesktopWebTextEditor> createState() => _DesktopWebTextEditorState();
 }
 
 enum WebEditorSyntax { plain, json }
+
+class DesktopTextHighlight {
+  const DesktopTextHighlight({
+    required this.start,
+    required this.end,
+    required this.backgroundColor,
+    this.textColor,
+  });
+
+  final int start;
+  final int end;
+  final Color backgroundColor;
+  final Color? textColor;
+}
 
 class _DesktopWebTextEditorState extends State<DesktopWebTextEditor> {
   InAppWebViewController? _controller;
@@ -61,6 +87,12 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor> {
     if (oldWidget.text != widget.text ||
         oldWidget.selection != widget.selection ||
         oldWidget.readOnly != widget.readOnly ||
+        oldWidget.singleLine != widget.singleLine ||
+        oldWidget.placeholder != widget.placeholder ||
+        oldWidget.fontSize != widget.fontSize ||
+        oldWidget.padding != widget.padding ||
+        oldWidget.autofocus != widget.autofocus ||
+        oldWidget.highlights != widget.highlights ||
         oldWidget.isDark != widget.isDark ||
         oldWidget.backgroundColor != widget.backgroundColor ||
         oldWidget.textColor != widget.textColor ||
@@ -76,7 +108,7 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor> {
       callback: (args) {
         if (args.length < 3 || args[0] is! String) return null;
         widget.onChanged(args[0] as String);
-        widget.onSelectionChanged(
+        widget.onSelectionChanged?.call(
           NativeTextSelection(
             baseOffset: _asInt(args[1]),
             extentOffset: _asInt(args[2]),
@@ -89,7 +121,7 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor> {
       handlerName: 'selectionChanged',
       callback: (args) {
         if (args.length < 2) return null;
-        widget.onSelectionChanged(
+        widget.onSelectionChanged?.call(
           NativeTextSelection(
             baseOffset: _asInt(args[0]),
             extentOffset: _asInt(args[1]),
@@ -101,7 +133,7 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor> {
     controller.addJavaScriptHandler(
       handlerName: 'findRequested',
       callback: (_) {
-        widget.onFind();
+        widget.onFind?.call();
         return null;
       },
     );
@@ -112,7 +144,13 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor> {
   void _onLoadStop(InAppWebViewController controller, WebUri? url) {
     _loaded = true;
     _syncState();
-    controller.evaluateJavascript(source: 'window.devOrbitFocus();');
+    if (widget.autofocus) {
+      Future<void>.delayed(const Duration(milliseconds: 60), () {
+        if (!_disposed) {
+          controller.evaluateJavascript(source: 'window.devOrbitFocus();');
+        }
+      });
+    }
   }
 
   void _syncState() {
@@ -120,10 +158,31 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor> {
     if (_disposed || !_loaded || controller == null) return;
     final payload = jsonEncode({
       'text': widget.text,
-      'baseOffset': widget.selection.baseOffset,
-      'extentOffset': widget.selection.extentOffset,
+      'baseOffset': widget.selection?.baseOffset ?? widget.text.length,
+      'extentOffset': widget.selection?.extentOffset ?? widget.text.length,
       'readOnly': widget.readOnly,
+      'findEnabled': widget.onFind != null,
       'syntax': widget.syntax.name,
+      'singleLine': widget.singleLine,
+      'placeholder': widget.placeholder,
+      'fontSize': widget.fontSize,
+      'padding': {
+        'left': widget.padding.left,
+        'top': widget.padding.top,
+        'right': widget.padding.right,
+        'bottom': widget.padding.bottom,
+      },
+      'autofocus': widget.autofocus,
+      'highlights': [
+        for (final highlight in widget.highlights)
+          {
+            'start': highlight.start,
+            'end': highlight.end,
+            'backgroundColor': _cssColor(highlight.backgroundColor),
+            if (highlight.textColor != null)
+              'textColor': _cssColor(highlight.textColor!),
+          },
+      ],
       'isDark': widget.isDark,
       'backgroundColor': _cssColor(
         widget.backgroundColor ??
@@ -186,7 +245,8 @@ const _editorHtml = r'''<!doctype html>
     tab-size: 2; font: 14px/1.55 Menlo, Consolas, monospace;
     caret-color: currentColor; user-select: text;
   }
-  #editor:empty::before { content: ''; }
+  #editor.single-line { white-space: pre; overflow-x: auto; overflow-y: hidden; }
+  #editor:empty::before { color: rgba(127, 127, 127, .72); content: attr(data-placeholder); pointer-events: none; }
   .json-key { color: #986801; }
   .json-string { color: #318f4f; }
   .json-number { color: #986801; }
@@ -197,7 +257,7 @@ const _editorHtml = r'''<!doctype html>
 <body><div id="editor" contenteditable="true" spellcheck="false"></div>
 <script>
 const editor = document.getElementById('editor');
-let state = { text: '', baseOffset: 0, extentOffset: 0, syntax: 'plain', readOnly: false };
+let state = { text: '', baseOffset: 0, extentOffset: 0, syntax: 'plain', readOnly: false, findEnabled: false, highlights: [] };
 let composing = false;
 const bridge = (name, args) => {
   if (window.flutter_inappwebview) window.flutter_inappwebview.callHandler(name, ...args);
@@ -215,7 +275,16 @@ function selectionOffset(root, target, localOffset) {
   let total = 0, found = false;
   const walk = node => {
     if (found) return;
-    if (node === target) { total += localOffset; found = true; return; }
+    if (node === target) {
+      if (node.nodeType === Node.TEXT_NODE) {
+        total += Math.min(localOffset, node.nodeValue.length);
+      } else {
+        for (let index = 0; index < Math.min(localOffset, node.childNodes.length); index++) {
+          total += textLength(node.childNodes[index]);
+        }
+      }
+      found = true; return;
+    }
     if (node.nodeType === Node.TEXT_NODE) { total += node.nodeValue.length; return; }
     node.childNodes.forEach(walk);
   };
@@ -255,8 +324,24 @@ function restoreSelection(base, extent) {
   selection.removeAllRanges(); selection.addRange(range);
 }
 function readText() { return editor.innerText.replace(/\r/g, ''); }
+function highlightedRanges(text) {
+  const ranges = Array.isArray(state.highlights) ? state.highlights : [];
+  if (!ranges.length) return escapeHtml(text);
+  let html = '', cursor = 0;
+  for (const range of ranges.slice().sort((a, b) => a.start - b.start)) {
+    const start = Math.max(cursor, Math.min(text.length, Number(range.start) || 0));
+    const end = Math.max(start, Math.min(text.length, Number(range.end) || 0));
+    if (end <= start) continue;
+    html += escapeHtml(text.slice(cursor, start));
+    const background = escapeHtml(String(range.backgroundColor || 'transparent'));
+    const color = range.textColor ? `color:${escapeHtml(String(range.textColor))};` : '';
+    html += `<span style="background:${background};${color}">${escapeHtml(text.slice(start, end))}</span>`;
+    cursor = end;
+  }
+  return html + escapeHtml(text.slice(cursor));
+}
 function highlighted(text) {
-  if (state.syntax !== 'json') return escapeHtml(text);
+  if (state.syntax !== 'json') return highlightedRanges(text);
   const token = /("(?:\\.|[^"\\])*")|(-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?)|\b(true|false|null)\b/g;
   let html = '', last = 0, match;
   while ((match = token.exec(text))) {
@@ -283,6 +368,11 @@ window.devOrbitSetState = next => {
   state = Object.assign(state, next);
   editor.style.background = next.backgroundColor || '#fbfcfc';
   editor.style.color = next.textColor || '#383a42';
+  editor.classList.toggle('single-line', !!next.singleLine);
+  editor.dataset.placeholder = next.placeholder || '';
+  editor.style.fontSize = (next.fontSize || 14) + 'px';
+  const padding = next.padding || {};
+  editor.style.padding = `${padding.top ?? 12}px ${padding.right ?? 12}px ${padding.bottom ?? 12}px ${padding.left ?? 12}px`;
   document.documentElement.style.colorScheme = next.isDark ? 'dark' : 'light';
   editor.contentEditable = next.readOnly ? 'false' : 'true';
   if (changedText || changedSyntax) render(next.text, next.baseOffset, next.extentOffset, false);
@@ -295,6 +385,10 @@ editor.addEventListener('input', () => {
   if (composing) return;
   const text = readText(), selection = currentSelection();
   render(text, selection[0], selection[1], false);
+  // Publish the caret before the text callback. Flutter may rebuild the
+  // surrounding page from onChanged; having the latest selection already in
+  // the controller prevents that rebuild from restoring the previous caret.
+  bridge('selectionChanged', selection);
   bridge('editorChanged', [text, selection[0], selection[1]]);
 });
 document.addEventListener('selectionchange', () => {
@@ -302,11 +396,14 @@ document.addEventListener('selectionchange', () => {
   const selection = currentSelection(); bridge('selectionChanged', selection);
 });
 editor.addEventListener('keydown', event => {
-  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'f') {
+  if (state.findEnabled && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'f') {
     event.preventDefault(); bridge('findRequested', []); return;
   }
   if (event.key === 'Tab') {
     event.preventDefault(); document.execCommand('insertText', false, '  ');
+  }
+  if (state.singleLine && event.key === 'Enter') {
+    event.preventDefault();
   }
 });
 </script></body></html>''';

@@ -1,9 +1,13 @@
 import 'dart:async';
+import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../core/desktop/desktop_clipboard_focus_restorer.dart';
+import '../../core/desktop/desktop_text_selection.dart';
+import '../../core/desktop/web_text_editor.dart';
 import 'timestamp_converter.dart';
 
 class TimestampPage extends StatefulWidget {
@@ -25,6 +29,11 @@ class _TimestampPageState extends State<TimestampPage> {
   DateTimeTimestampConversion? _dateTimeConversion;
   String? _timestampError;
   String? _dateTimeError;
+
+  bool get _usesWebEditor =>
+      !kIsWeb &&
+      (Platform.isMacOS || Platform.isWindows) &&
+      Platform.environment['FLUTTER_TEST'] != 'true';
 
   DateTime _readNow() => (widget.now ?? DateTime.now)().toLocal();
 
@@ -103,6 +112,55 @@ class _TimestampPageState extends State<TimestampPage> {
     _dateTimeFocusNode.requestFocus();
   }
 
+  NativeTextSelection _selectionFor(TextEditingController controller) {
+    final selection = controller.selection;
+    return NativeTextSelection(
+      baseOffset: selection.baseOffset.clamp(0, controller.text.length),
+      extentOffset: selection.extentOffset.clamp(0, controller.text.length),
+    );
+  }
+
+  void _applySelection(
+    TextEditingController controller,
+    NativeTextSelection selection,
+  ) {
+    final length = controller.text.length;
+    controller.selection = TextSelection(
+      baseOffset: selection.baseOffset.clamp(0, length),
+      extentOffset: selection.extentOffset.clamp(0, length),
+    );
+  }
+
+  Future<void> _pasteInto(
+    TextEditingController controller,
+    FocusNode focusNode,
+  ) async {
+    if (!_usesWebEditor) {
+      _focusRestorer.pasteFocusedTarget();
+      return;
+    }
+    final data = await Clipboard.getData(Clipboard.kTextPlain);
+    final pasted = data?.text;
+    if (pasted == null) return;
+    final current = controller.text;
+    final selection = controller.selection;
+    final start = selection.start.clamp(0, current.length);
+    final end = selection.end.clamp(start, current.length);
+    final next = current.replaceRange(start, end, pasted);
+    controller.value = TextEditingValue(
+      text: next,
+      selection: TextSelection.collapsed(offset: start + pasted.length),
+    );
+    if (identical(controller, _timestampController)) {
+      _convertTimestamp(next);
+    } else {
+      _convertDateTime(next);
+    }
+    // The browser-backed editor owns focus on desktop. Requesting a Flutter
+    // FocusNode here would immediately steal the caret from the WebView.
+    if (!_usesWebEditor) focusNode.requestFocus();
+  }
+
   Future<void> _copyValue(String value, String label) async {
     try {
       await Clipboard.setData(ClipboardData(text: value));
@@ -121,9 +179,9 @@ class _TimestampPageState extends State<TimestampPage> {
 
   @override
   Widget build(BuildContext context) {
-    _focusRestorer.active = Visibility.of(context);
+    _focusRestorer.active = Visibility.of(context) && !_usesWebEditor;
     return DesktopClipboardPasteRegion(
-      onPaste: _focusRestorer.pasteFocusedTarget,
+      onPaste: () => _pasteInto(_timestampController, _timestampFocusNode),
       child: Material(
         color: Theme.of(context).colorScheme.surfaceContainerLowest,
         child: Padding(
@@ -141,7 +199,12 @@ class _TimestampPageState extends State<TimestampPage> {
                       conversion: _timestampConversion,
                       error: _timestampError,
                       onChanged: _convertTimestamp,
-                      onPaste: _focusRestorer.pasteFocusedTarget,
+                      onPaste: () =>
+                          _pasteInto(_timestampController, _timestampFocusNode),
+                      useWebEditor: _usesWebEditor,
+                      selection: _selectionFor(_timestampController),
+                      onSelectionChanged: (value) =>
+                          _applySelection(_timestampController, value),
                       onCopy: _copyValue,
                     );
                     final dateTimePanel = _DateTimeToTimestampPanel(
@@ -150,7 +213,12 @@ class _TimestampPageState extends State<TimestampPage> {
                       conversion: _dateTimeConversion,
                       error: _dateTimeError,
                       onChanged: _convertDateTime,
-                      onPaste: _focusRestorer.pasteFocusedTarget,
+                      onPaste: () =>
+                          _pasteInto(_dateTimeController, _dateTimeFocusNode),
+                      useWebEditor: _usesWebEditor,
+                      selection: _selectionFor(_dateTimeController),
+                      onSelectionChanged: (value) =>
+                          _applySelection(_dateTimeController, value),
                       onUseCurrentTime: _useCurrentTime,
                       onCopy: _copyValue,
                     );
@@ -328,6 +396,9 @@ class _TimestampToDateTimePanel extends StatelessWidget {
     required this.error,
     required this.onChanged,
     required this.onPaste,
+    required this.useWebEditor,
+    required this.selection,
+    required this.onSelectionChanged,
     required this.onCopy,
   });
 
@@ -337,6 +408,9 @@ class _TimestampToDateTimePanel extends StatelessWidget {
   final String? error;
   final ValueChanged<String> onChanged;
   final VoidCallback onPaste;
+  final bool useWebEditor;
+  final NativeTextSelection selection;
+  final ValueChanged<NativeTextSelection> onSelectionChanged;
   final _CopyCallback onCopy;
 
   @override
@@ -350,27 +424,65 @@ class _TimestampToDateTimePanel extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          TextField(
-            key: const ValueKey('timestamp-input'),
-            controller: controller,
-            focusNode: focusNode,
-            autofocus: true,
-            onChanged: onChanged,
-            contextMenuBuilder: (context, editableTextState) =>
-                AdaptiveTextSelectionToolbar.editableText(
-                  editableTextState: editableTextState,
+          Stack(
+            children: [
+              if (useWebEditor)
+                SizedBox(
+                  height: 58,
+                  child: DesktopWebTextEditor(
+                    key: const ValueKey('timestamp-input'),
+                    text: controller.text,
+                    selection: selection,
+                    onChanged: onChanged,
+                    onSelectionChanged: onSelectionChanged,
+                    singleLine: true,
+                    placeholder: '1710000000 或 1710000000000',
+                    backgroundColor: Theme.of(context).colorScheme.surfaceContainerLowest,
+                    textColor: Theme.of(context).colorScheme.onSurface,
+                    isDark: Theme.of(context).brightness == Brightness.dark,
+                    autofocus: true,
+                    padding: const EdgeInsets.fromLTRB(14, 18, 52, 10),
+                  ),
+                )
+              else
+                TextField(
+                  key: const ValueKey('timestamp-input'),
+                  controller: controller,
+                  focusNode: focusNode,
+                  autofocus: true,
+                  onChanged: onChanged,
+                  contextMenuBuilder: (context, editableTextState) =>
+                      AdaptiveTextSelectionToolbar.editableText(
+                        editableTextState: editableTextState,
+                      ),
+                  decoration: InputDecoration(
+                    labelText: '时间戳',
+                    hintText: '1710000000 或 1710000000000',
+                    errorText: error,
+                    suffixIcon: IconButton(
+                      tooltip: '粘贴',
+                      onPressed: onPaste,
+                      icon: const Icon(Icons.content_paste_rounded),
+                    ),
+                  ),
                 ),
-            decoration: InputDecoration(
-              labelText: '时间戳',
-              hintText: '1710000000 或 1710000000000',
-              errorText: error,
-              suffixIcon: IconButton(
-                tooltip: '粘贴',
-                onPressed: onPaste,
-                icon: const Icon(Icons.content_paste_rounded),
-              ),
-            ),
+              if (useWebEditor)
+                Positioned(
+                  right: 2,
+                  top: 2,
+                  child: IconButton(
+                    tooltip: '粘贴',
+                    onPressed: onPaste,
+                    icon: const Icon(Icons.content_paste_rounded),
+                  ),
+                ),
+            ],
           ),
+          if (error != null && useWebEditor)
+            Padding(
+              padding: const EdgeInsets.only(top: 4, left: 14),
+              child: Text(error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+            ),
           const SizedBox(height: 18),
           _ResultBlock(
             label: conversion == null
@@ -393,6 +505,9 @@ class _DateTimeToTimestampPanel extends StatelessWidget {
     required this.error,
     required this.onChanged,
     required this.onPaste,
+    required this.useWebEditor,
+    required this.selection,
+    required this.onSelectionChanged,
     required this.onUseCurrentTime,
     required this.onCopy,
   });
@@ -403,6 +518,9 @@ class _DateTimeToTimestampPanel extends StatelessWidget {
   final String? error;
   final ValueChanged<String> onChanged;
   final VoidCallback onPaste;
+  final bool useWebEditor;
+  final NativeTextSelection selection;
+  final ValueChanged<NativeTextSelection> onSelectionChanged;
   final VoidCallback onUseCurrentTime;
   final _CopyCallback onCopy;
 
@@ -421,26 +539,64 @@ class _DateTimeToTimestampPanel extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          TextField(
-            key: const ValueKey('datetime-input'),
-            controller: controller,
-            focusNode: focusNode,
-            onChanged: onChanged,
-            contextMenuBuilder: (context, editableTextState) =>
-                AdaptiveTextSelectionToolbar.editableText(
-                  editableTextState: editableTextState,
+          Stack(
+            children: [
+              if (useWebEditor)
+                SizedBox(
+                  height: 58,
+                  child: DesktopWebTextEditor(
+                    key: const ValueKey('datetime-input'),
+                    text: controller.text,
+                    selection: selection,
+                    onChanged: onChanged,
+                    onSelectionChanged: onSelectionChanged,
+                    singleLine: true,
+                    placeholder: '2026-08-17 14:30:00',
+                    backgroundColor: Theme.of(context).colorScheme.surfaceContainerLowest,
+                    textColor: Theme.of(context).colorScheme.onSurface,
+                    isDark: Theme.of(context).brightness == Brightness.dark,
+                    autofocus: false,
+                    padding: const EdgeInsets.fromLTRB(14, 18, 52, 10),
+                  ),
+                )
+              else
+                TextField(
+                  key: const ValueKey('datetime-input'),
+                  controller: controller,
+                  focusNode: focusNode,
+                  onChanged: onChanged,
+                  contextMenuBuilder: (context, editableTextState) =>
+                      AdaptiveTextSelectionToolbar.editableText(
+                        editableTextState: editableTextState,
+                      ),
+                  decoration: InputDecoration(
+                    labelText: '本地日期时间',
+                    hintText: '2026-08-17 14:30:00',
+                    errorText: error,
+                    suffixIcon: IconButton(
+                      tooltip: '粘贴',
+                      onPressed: onPaste,
+                      icon: const Icon(Icons.content_paste_rounded),
+                    ),
+                  ),
                 ),
-            decoration: InputDecoration(
-              labelText: '本地日期时间',
-              hintText: '2026-08-17 14:30:00',
-              errorText: error,
-              suffixIcon: IconButton(
-                tooltip: '粘贴',
-                onPressed: onPaste,
-                icon: const Icon(Icons.content_paste_rounded),
-              ),
-            ),
+              if (useWebEditor)
+                Positioned(
+                  right: 2,
+                  top: 2,
+                  child: IconButton(
+                    tooltip: '粘贴',
+                    onPressed: onPaste,
+                    icon: const Icon(Icons.content_paste_rounded),
+                  ),
+                ),
+            ],
           ),
+          if (error != null && useWebEditor)
+            Padding(
+              padding: const EdgeInsets.only(top: 4, left: 14),
+              child: Text(error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+            ),
           const SizedBox(height: 18),
           _ResultBlock(
             label: '秒级时间戳',

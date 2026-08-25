@@ -1,7 +1,12 @@
+import 'dart:io';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../core/desktop/desktop_clipboard_focus_restorer.dart';
+import '../../core/desktop/desktop_text_selection.dart';
+import '../../core/desktop/web_text_editor.dart';
 import 'sql_log_controller.dart';
 import 'sql_log_converter.dart';
 
@@ -20,6 +25,11 @@ class _SqlLogPageState extends State<SqlLogPage> {
   late final TextEditingController _inputController;
   final _inputFocusNode = FocusNode();
   late final DesktopClipboardFocusRestorer _focusRestorer;
+
+  bool get _usesWebEditor =>
+      !kIsWeb &&
+      (Platform.isMacOS || Platform.isWindows) &&
+      Platform.environment['FLUTTER_TEST'] != 'true';
 
   @override
   void initState() {
@@ -61,6 +71,55 @@ class _SqlLogPageState extends State<SqlLogPage> {
     setState(() {});
   }
 
+  NativeTextSelection _nativeSelection() {
+    final selection = _inputController.selection;
+    return NativeTextSelection(
+      baseOffset: selection.baseOffset.clamp(0, _inputController.text.length),
+      extentOffset: selection.extentOffset.clamp(0, _inputController.text.length),
+    );
+  }
+
+  void _onWebSelectionChanged(NativeTextSelection selection) {
+    final textLength = _inputController.text.length;
+    final base = selection.baseOffset.clamp(0, textLength);
+    final extent = selection.extentOffset.clamp(0, textLength);
+    _inputController.selection = TextSelection(
+      baseOffset: base,
+      extentOffset: extent,
+    );
+  }
+
+  void _onWebChanged(String text) {
+    _inputController.value = TextEditingValue(
+      text: text,
+      selection: _inputController.selection.copyWith(
+        baseOffset: _inputController.selection.baseOffset.clamp(0, text.length),
+        extentOffset: _inputController.selection.extentOffset.clamp(0, text.length),
+      ),
+    );
+    _controller.updateSource(text);
+  }
+
+  Future<void> _paste() async {
+    if (!_usesWebEditor) {
+      _focusRestorer.pasteFocusedTarget();
+      return;
+    }
+    final data = await Clipboard.getData(Clipboard.kTextPlain);
+    final pasted = data?.text;
+    if (pasted == null) return;
+    final current = _inputController.text;
+    final selection = _inputController.selection;
+    final start = selection.start.clamp(0, current.length);
+    final end = selection.end.clamp(start, current.length);
+    final next = current.replaceRange(start, end, pasted);
+    _inputController.value = TextEditingValue(
+      text: next,
+      selection: TextSelection.collapsed(offset: start + pasted.length),
+    );
+    _controller.updateSource(next);
+  }
+
   Future<void> _copyOutput() async {
     final output = _controller.result.output;
     if (output.isEmpty) return;
@@ -92,10 +151,10 @@ class _SqlLogPageState extends State<SqlLogPage> {
 
   @override
   Widget build(BuildContext context) {
-    _focusRestorer.active = Visibility.of(context);
+    _focusRestorer.active = Visibility.of(context) && !_usesWebEditor;
     final result = _controller.result;
     return DesktopClipboardPasteRegion(
-      onPaste: _focusRestorer.pasteFocusedTarget,
+      onPaste: _paste,
       child: Material(
         color: Theme.of(context).colorScheme.surfaceContainerLowest,
         child: Column(
@@ -124,10 +183,26 @@ class _SqlLogPageState extends State<SqlLogPage> {
                       icon: Icons.article_outlined,
                       trailing: IconButton(
                         tooltip: '粘贴',
-                        onPressed: _focusRestorer.pasteFocusedTarget,
+                        onPressed: _paste,
                         icon: const Icon(Icons.content_paste_rounded, size: 19),
                       ),
-                      child: TextField(
+                      child: _usesWebEditor
+                          ? DesktopWebTextEditor(
+                              key: const ValueKey('sql-log-input'),
+                              text: _inputController.text,
+                              selection: _nativeSelection(),
+                              onChanged: _onWebChanged,
+                              onSelectionChanged: _onWebSelectionChanged,
+                              backgroundColor: Theme.of(context)
+                                  .colorScheme
+                                  .surfaceContainerLowest,
+                              textColor: Theme.of(context).colorScheme.onSurface,
+                              isDark:
+                                  Theme.of(context).brightness == Brightness.dark,
+                              placeholder: '粘贴 MyBatis SQL 日志',
+                              syntax: WebEditorSyntax.plain,
+                            )
+                          : TextField(
                         key: const ValueKey('sql-log-input'),
                         controller: _inputController,
                         focusNode: _inputFocusNode,

@@ -1,8 +1,13 @@
+import 'dart:io';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../core/desktop/desktop_clipboard_focus_restorer.dart';
+import '../../core/desktop/desktop_text_selection.dart';
 import '../../core/desktop/desktop_window_shell.dart';
+import '../../core/desktop/web_text_editor.dart';
 import 'translation_language.dart';
 import 'translator_controller.dart';
 
@@ -21,6 +26,11 @@ class _TranslatorPageState extends State<TranslatorPage> {
   final _sourceFocusNode = FocusNode();
   late final DesktopClipboardFocusRestorer _focusRestorer;
   bool _initialized = false;
+
+  bool get _usesWebEditor =>
+      !kIsWeb &&
+      (Platform.isMacOS || Platform.isWindows) &&
+      Platform.environment['FLUTTER_TEST'] != 'true';
 
   @override
   void initState() {
@@ -86,6 +96,54 @@ class _TranslatorPageState extends State<TranslatorPage> {
     if (mounted) setState(() {});
   }
 
+  NativeTextSelection _nativeSelection() {
+    final selection = _sourceController.selection;
+    return NativeTextSelection(
+      baseOffset: selection.baseOffset.clamp(0, _sourceController.text.length),
+      extentOffset: selection.extentOffset.clamp(0, _sourceController.text.length),
+    );
+  }
+
+  void _onWebSelectionChanged(NativeTextSelection selection) {
+    final length = _sourceController.text.length;
+    _sourceController.selection = TextSelection(
+      baseOffset: selection.baseOffset.clamp(0, length),
+      extentOffset: selection.extentOffset.clamp(0, length),
+    );
+  }
+
+  void _onWebChanged(String text) {
+    final selection = _sourceController.selection;
+    _sourceController.value = TextEditingValue(
+      text: text,
+      selection: selection.copyWith(
+        baseOffset: selection.baseOffset.clamp(0, text.length),
+        extentOffset: selection.extentOffset.clamp(0, text.length),
+      ),
+    );
+    widget.controller.updateSource(text);
+  }
+
+  Future<void> _paste() async {
+    if (!_usesWebEditor) {
+      _focusRestorer.pasteFocusedTarget();
+      return;
+    }
+    final data = await Clipboard.getData(Clipboard.kTextPlain);
+    final pasted = data?.text;
+    if (pasted == null) return;
+    final current = _sourceController.text;
+    final selection = _sourceController.selection;
+    final start = selection.start.clamp(0, current.length);
+    final end = selection.end.clamp(start, current.length);
+    final next = current.replaceRange(start, end, pasted);
+    _sourceController.value = TextEditingValue(
+      text: next,
+      selection: TextSelection.collapsed(offset: start + pasted.length),
+    );
+    widget.controller.updateSource(next);
+  }
+
   Future<void> _copyResult() async {
     if (widget.controller.translatedText.isEmpty) return;
     await Clipboard.setData(
@@ -110,7 +168,7 @@ class _TranslatorPageState extends State<TranslatorPage> {
 
   @override
   Widget build(BuildContext context) {
-    _focusRestorer.active = Visibility.of(context);
+    _focusRestorer.active = Visibility.of(context) && !_usesWebEditor;
     final shortcuts = <ShortcutActivator, VoidCallback>{
       const SingleActivator(LogicalKeyboardKey.enter, meta: true):
           widget.controller.translate,
@@ -120,7 +178,7 @@ class _TranslatorPageState extends State<TranslatorPage> {
     return CallbackShortcuts(
       bindings: shortcuts,
       child: DesktopClipboardPasteRegion(
-        onPaste: _focusRestorer.pasteFocusedTarget,
+        onPaste: _paste,
         child: Focus(
           autofocus: true,
           child: Material(
@@ -141,7 +199,7 @@ class _TranslatorPageState extends State<TranslatorPage> {
                         final source = Listener(
                           behavior: HitTestBehavior.translucent,
                           onPointerDown: (_) {
-                            if (!_sourceFocusNode.hasFocus) {
+                            if (!_usesWebEditor && !_sourceFocusNode.hasFocus) {
                               _sourceFocusNode.requestFocus();
                             }
                           },
@@ -150,29 +208,48 @@ class _TranslatorPageState extends State<TranslatorPage> {
                             footer: '${widget.controller.sourceText.length} 字符',
                             icon: Icons.edit_note_rounded,
                             emphasized: _sourceFocusNode.hasFocus,
-                            child: TextField(
-                              key: const ValueKey('translator-source'),
-                              controller: _sourceController,
-                              focusNode: _sourceFocusNode,
-                              autofocus: true,
-                              expands: true,
-                              maxLines: null,
-                              minLines: null,
-                              textAlignVertical: TextAlignVertical.top,
-                              style: const TextStyle(
-                                fontSize: 15,
-                                height: 1.65,
-                              ),
-                              decoration: const InputDecoration(
-                                hintText: '输入或粘贴文本',
-                                border: InputBorder.none,
-                                enabledBorder: InputBorder.none,
-                                focusedBorder: InputBorder.none,
-                                filled: false,
-                                contentPadding: EdgeInsets.all(18),
-                              ),
-                              onChanged: widget.controller.updateSource,
-                            ),
+                              child: _usesWebEditor
+                                  ? DesktopWebTextEditor(
+                                      key: const ValueKey('translator-source'),
+                                      text: _sourceController.text,
+                                      selection: _nativeSelection(),
+                                      onChanged: _onWebChanged,
+                                      onSelectionChanged:
+                                          _onWebSelectionChanged,
+                                      backgroundColor: Theme.of(context)
+                                          .colorScheme
+                                          .surfaceContainerLowest,
+                                      textColor:
+                                          Theme.of(context).colorScheme.onSurface,
+                                      isDark: Theme.of(context).brightness ==
+                                          Brightness.dark,
+                                      placeholder: '输入或粘贴文本',
+                                      fontSize: 15,
+                                      padding: const EdgeInsets.all(18),
+                                  )
+                                  : TextField(
+                                      key: const ValueKey('translator-source'),
+                                      controller: _sourceController,
+                                      focusNode: _sourceFocusNode,
+                                      autofocus: true,
+                                      expands: true,
+                                      maxLines: null,
+                                      minLines: null,
+                                      textAlignVertical: TextAlignVertical.top,
+                                      style: const TextStyle(
+                                        fontSize: 15,
+                                        height: 1.65,
+                                      ),
+                                      decoration: const InputDecoration(
+                                        hintText: '输入或粘贴文本',
+                                        border: InputBorder.none,
+                                        enabledBorder: InputBorder.none,
+                                        focusedBorder: InputBorder.none,
+                                        filled: false,
+                                        contentPadding: EdgeInsets.all(18),
+                                      ),
+                                      onChanged: widget.controller.updateSource,
+                                  ),
                           ),
                         );
                         final result = _TranslationPane(

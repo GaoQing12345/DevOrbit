@@ -10,7 +10,7 @@ import 'package:path/path.dart' as path;
 import 'package:re_editor/re_editor.dart';
 
 import '../../core/settings/settings_store.dart';
-import '../../core/desktop/native_macos_text_editor.dart';
+import '../../core/desktop/desktop_text_selection.dart';
 import '../../core/desktop/web_text_editor.dart';
 import 'json_code_indicator.dart';
 import 'json_document_controller.dart';
