@@ -28,6 +28,36 @@ class MainFlutterWindow: NSWindow {
     "cn.better365.iCopy",
   ]
 
+  /// Flutter embeds each desktop editor as a separate native WKWebView. A
+  /// click can activate the DOM inside the new view without updating the
+  /// NSWindow first responder, especially after another platform view was
+  /// focused. Keep AppKit's responder aligned with the view under the mouse so
+  /// the left and right compare panes can be switched repeatedly.
+  override func sendEvent(_ event: NSEvent) {
+    if event.type == .leftMouseDown,
+       let contentView,
+       let hitView = contentView.hitTest(contentView.convert(event.locationInWindow, from: nil)),
+       let webView = containingWebView(for: hitView),
+       firstResponder !== webView {
+      _ = makeFirstResponder(webView)
+    }
+    super.sendEvent(event)
+  }
+
+  private func containingWebView(for view: NSView?) -> WKWebView? {
+    var current = view
+    while let candidate = current {
+      if let webView = candidate as? WKWebView,
+         !webView.isHidden,
+         webView.alphaValue > 0.01,
+         webView.window != nil {
+        return webView
+      }
+      current = candidate.superview
+    }
+    return nil
+  }
+
   override func awakeFromNib() {
     let flutterViewController = FlutterViewController()
     self.backgroundColor = NSColor.clear
@@ -191,20 +221,6 @@ class MainFlutterWindow: NSWindow {
   /// `element.focus()` restores the DOM caret, but it cannot make the native
   /// platform view the key window's responder on its own.
   private func requestEditorFocus() {
-    func containingWebView(for view: NSView?) -> WKWebView? {
-      var current = view
-      while let candidate = current {
-        if let webView = candidate as? WKWebView,
-           !webView.isHidden,
-           webView.alphaValue > 0.01,
-           webView.window != nil {
-          return webView
-        }
-        current = candidate.superview
-      }
-      return nil
-    }
-
     func findWebView(in view: NSView) -> WKWebView? {
       if let webView = view as? WKWebView,
          !webView.isHidden,

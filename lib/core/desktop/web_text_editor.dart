@@ -169,13 +169,17 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
       handlerName: 'editorChanged',
       callback: (args) {
         if (args.length < 3 || args[0] is! String) return null;
-        widget.onChanged(args[0] as String);
+        // Publish the selection before the text callback. The text callback
+        // normally rebuilds the surrounding page; updating it first would
+        // let that rebuild send the previous (often zero) caret back to the
+        // WebView before the fresh selection reaches Flutter.
         widget.onSelectionChanged?.call(
           NativeTextSelection(
             baseOffset: _asInt(args[1]),
             extentOffset: _asInt(args[2]),
           ),
         );
+        widget.onChanged(args[0] as String);
         return null;
       },
     );
@@ -205,7 +209,23 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
         if (args.isNotEmpty && args.first == true) {
           _activeEditor = this;
           _editorSessionActive = true;
+          if (args.length >= 3) {
+            widget.onSelectionChanged?.call(
+              NativeTextSelection(
+                baseOffset: _asInt(args[1]),
+                extentOffset: _asInt(args[2]),
+              ),
+            );
+          }
         } else {
+          if (args.length >= 3) {
+            widget.onSelectionChanged?.call(
+              NativeTextSelection(
+                baseOffset: _asInt(args[1]),
+                extentOffset: _asInt(args[2]),
+              ),
+            );
+          }
           // A Flutter find/replace TextField can sit above this WebView. Its
           // focus is a deliberate editor switch, unlike a native window blur
           // where no Flutter EditableText owns focus yet. Keep the session for
@@ -526,6 +546,13 @@ window.devOrbitSetState = next => {
   }
 };
 let lastSelection = [0, 0];
+function selectionForBridge() {
+  const selection = window.getSelection();
+  if (!selection || !selection.rangeCount) return lastSelection;
+  const current = currentSelection();
+  lastSelection = current;
+  return current;
+}
 window.devOrbitRestoreFocus = () => {
   editor.focus();
   restoreSelection(lastSelection[0], lastSelection[1]);
@@ -542,8 +569,14 @@ window.addEventListener('focus', () => {
   restoreAfterWindowFocus = false;
   setTimeout(() => window.devOrbitRestoreFocus(), 0);
 });
-editor.addEventListener('focus', () => bridge('editorFocusChanged', [true]));
-editor.addEventListener('blur', () => bridge('editorFocusChanged', [false]));
+editor.addEventListener('focus', () => {
+  const selection = selectionForBridge();
+  bridge('editorFocusChanged', [true, selection[0], selection[1]]);
+});
+editor.addEventListener('blur', () => {
+  const selection = selectionForBridge();
+  bridge('editorFocusChanged', [false, selection[0], selection[1]]);
+});
 editor.addEventListener('compositionstart', () => composing = true);
 editor.addEventListener('compositionend', () => { composing = false; editor.dispatchEvent(new Event('input')); });
 editor.addEventListener('input', () => {
