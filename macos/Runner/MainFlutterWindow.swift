@@ -191,6 +191,20 @@ class MainFlutterWindow: NSWindow {
   /// `element.focus()` restores the DOM caret, but it cannot make the native
   /// platform view the key window's responder on its own.
   private func requestEditorFocus() {
+    func containingWebView(for view: NSView?) -> WKWebView? {
+      var current = view
+      while let candidate = current {
+        if let webView = candidate as? WKWebView,
+           !webView.isHidden,
+           webView.alphaValue > 0.01,
+           webView.window != nil {
+          return webView
+        }
+        current = candidate.superview
+      }
+      return nil
+    }
+
     func findWebView(in view: NSView) -> WKWebView? {
       if let webView = view as? WKWebView,
          !webView.isHidden,
@@ -206,7 +220,12 @@ class MainFlutterWindow: NSWindow {
       return nil
     }
 
-    guard let webView = contentView.flatMap({ findWebView(in: $0) }) else {
+    // Prefer the responder retained by NSWindow so a two-pane editor restores
+    // the pane that was actually being edited. Fall back to the first visible
+    // WebView only during initial activation.
+    let webView = containingWebView(for: firstResponder) ??
+      contentView.flatMap({ findWebView(in: $0) })
+    guard let webView else {
       return
     }
     if !NSApp.isActive {
