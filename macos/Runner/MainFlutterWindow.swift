@@ -566,7 +566,7 @@ private final class NativeTextEditorView: NSView, NSTextViewDelegate {
   private let channel: FlutterMethodChannel
   private var windowObservers: [NSObjectProtocol] = []
   private var suppressCallbacks = false
-  private var restoreFocusOnWindowActivation = false
+  private var focusRequested = true
   private var isDark = false
   private var backgroundColor = NSColor.textBackgroundColor
   private var textColor = NSColor.textColor
@@ -668,6 +668,13 @@ private final class NativeTextEditorView: NSView, NSTextViewDelegate {
     scrollView.frame = bounds
   }
 
+  override func viewDidMoveToWindow() {
+    super.viewDidMoveToWindow()
+    if window != nil {
+      restoreNativeFocus()
+    }
+  }
+
   private func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
     switch call.method {
     case "setText":
@@ -711,6 +718,7 @@ private final class NativeTextEditorView: NSView, NSTextViewDelegate {
       applySyntaxHighlighting()
       result(nil)
     case "focus":
+      focusRequested = true
       restoreNativeFocus()
       result(nil)
     default:
@@ -856,21 +864,36 @@ private final class NativeTextEditorView: NSView, NSTextViewDelegate {
 
   private func windowDidResignKey(_ notification: Notification) {
     guard let window = notification.object as? NSWindow, window === self.window else { return }
-    restoreFocusOnWindowActivation = window.firstResponder === textView
+    if window.firstResponder === textView {
+      focusRequested = true
+    }
   }
 
   private func windowDidBecomeKey(_ notification: Notification) {
-    guard restoreFocusOnWindowActivation,
-          let window = notification.object as? NSWindow,
+    guard let window = notification.object as? NSWindow,
           window === self.window else { return }
-    restoreFocusOnWindowActivation = false
     restoreNativeFocus()
   }
 
   private func restoreNativeFocus(attempt: Int = 0) {
     DispatchQueue.main.async { [weak self] in
-      guard let self, let window = self.window, window.isKeyWindow else { return }
+      guard let self, self.focusRequested else { return }
+      guard let window = self.window else {
+        guard attempt < 8 else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+          self?.restoreNativeFocus(attempt: attempt + 1)
+        }
+        return
+      }
+      guard window.isKeyWindow else {
+        guard attempt < 8 else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+          self?.restoreNativeFocus(attempt: attempt + 1)
+        }
+        return
+      }
       if window.makeFirstResponder(self.textView) {
+        self.focusRequested = false
         window.invalidateCursorRects(for: self.textView)
         return
       }
