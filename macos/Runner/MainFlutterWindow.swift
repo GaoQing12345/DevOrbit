@@ -1,6 +1,7 @@
 import Cocoa
 import FlutterMacOS
 import Security
+import WebKit
 
 class MainFlutterWindow: NSWindow {
   private var cursorChannel: FlutterMethodChannel?
@@ -113,6 +114,9 @@ class MainFlutterWindow: NSWindow {
     )
     channel.setMethodCallHandler { [weak self] call, result in
       switch call.method {
+      case "requestEditorFocus":
+        self?.requestEditorFocus()
+        result(nil)
       case "getChangeCount":
         result(NSPasteboard.general.changeCount)
       case "supportsPasteCapture":
@@ -180,6 +184,40 @@ class MainFlutterWindow: NSWindow {
       self.capturePasteRequestText()
       return self.notifyPasteRequestedIfReady(source: "key_event") ? nil : event
     }
+  }
+
+  /// Restore the AppKit first responder for the WKWebView after a clipboard
+  /// picker temporarily activates another application. JavaScript
+  /// `element.focus()` restores the DOM caret, but it cannot make the native
+  /// platform view the key window's responder on its own.
+  private func requestEditorFocus() {
+    func findWebView(in view: NSView) -> WKWebView? {
+      if let webView = view as? WKWebView,
+         !webView.isHidden,
+         webView.alphaValue > 0.01,
+         webView.window != nil {
+        return webView
+      }
+      for child in view.subviews.reversed() {
+        if let webView = findWebView(in: child) {
+          return webView
+        }
+      }
+      return nil
+    }
+
+    guard let webView = contentView.flatMap({ findWebView(in: $0) }) else {
+      return
+    }
+    if !NSApp.isActive {
+      NSApp.activate(ignoringOtherApps: true)
+    }
+    let hostWindow = webView.window ?? self
+    if !hostWindow.isKeyWindow {
+      hostWindow.makeKeyAndOrderFront(nil)
+    }
+    _ = hostWindow.makeFirstResponder(webView)
+    _ = webView.becomeFirstResponder()
   }
 
   private static func clipboardSessionId(from call: FlutterMethodCall) -> Int64? {

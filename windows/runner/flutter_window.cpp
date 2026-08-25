@@ -191,6 +191,20 @@ void ShowAndFocusProcessWindow(HWND window) {
   }
 }
 
+HWND FindChildWindowByClass(HWND parent, const wchar_t* class_name) {
+  if (!parent || !class_name) return nullptr;
+  for (HWND child = GetWindow(parent, GW_CHILD); child != nullptr;
+       child = GetWindow(child, GW_HWNDNEXT)) {
+    wchar_t current_class[128] = {};
+    GetClassNameW(child, current_class,
+                  static_cast<int>(sizeof(current_class) /
+                                   sizeof(current_class[0])));
+    if (_wcsicmp(current_class, class_name) == 0) return child;
+    if (HWND nested = FindChildWindowByClass(child, class_name)) return nested;
+  }
+  return nullptr;
+}
+
 BOOL CALLBACK ActivateProcessWindow(HWND window, LPARAM parameter) {
   auto* request = reinterpret_cast<WindowActivationRequest*>(parameter);
   DWORD window_process_id = 0;
@@ -346,6 +360,20 @@ void FlutterWindow::RegisterClipboardChannel() {
         if (call.method_name() == "supportsPasteCapture") {
           ClipboardTrace("supports_capture", "supported=true");
           result->Success(flutter::EncodableValue(true));
+          return;
+        }
+        if (call.method_name() == "requestEditorFocus") {
+          // Re-activate the top-level HWND first, then focus the composition
+          // platform view itself. Focusing only FLUTTERVIEW leaves Flutter's
+          // outer shortcut node active and WebView2 receives no keyboard input
+          // after a clipboard picker returns.
+          ShowAndFocusProcessWindow(GetHandle());
+          HWND platform_view =
+              FindChildWindowByClass(GetHandle(), L"CustomPlatformView");
+          if (platform_view && IsWindowEnabled(platform_view)) {
+            SetFocus(platform_view);
+          }
+          result->Success();
           return;
         }
         if (call.method_name() == "registerPasteTarget") {

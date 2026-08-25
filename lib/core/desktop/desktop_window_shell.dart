@@ -5,6 +5,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:window_manager/window_manager.dart';
 
+import 'web_text_editor.dart';
+
 class DesktopEscapeCloseRegion extends StatefulWidget {
   const DesktopEscapeCloseRegion({
     super.key,
@@ -62,6 +64,15 @@ class _DesktopEscapeCloseRegionState extends State<DesktopEscapeCloseRegion>
 
   void _restoreWindowFocus() {
     if (!mounted || !_focusNode.canRequestFocus) return;
+
+    // A WebView editor has a native responder/focus target in addition to the
+    // Flutter focus tree. Restoring this shell's Escape node here would steal
+    // the keyboard immediately after a clipboard picker returns, leaving the
+    // browser caret visible but unable to receive input.
+    if (DesktopWebTextEditor.hasActiveEditor) {
+      DesktopWebTextEditor.restoreActiveEditorFocus();
+      return;
+    }
 
     // A dialog, popup menu, or dropdown route must keep ownership of Escape.
     // This also covers the brief moment where that route has not restored its

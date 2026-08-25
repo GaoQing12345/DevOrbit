@@ -1,8 +1,10 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:window_manager/window_manager.dart';
 
@@ -51,6 +53,12 @@ class DesktopWebTextEditor extends StatefulWidget {
   final bool autofocus;
   final List<DesktopTextHighlight> highlights;
 
+  static bool get hasActiveEditor => _DesktopWebTextEditorState.hasActiveEditor;
+
+  static void restoreActiveEditorFocus() {
+    _DesktopWebTextEditorState.restoreActiveEditorFocus();
+  }
+
   @override
   State<DesktopWebTextEditor> createState() => _DesktopWebTextEditorState();
 }
@@ -74,17 +82,56 @@ class DesktopTextHighlight {
 class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
     with WindowListener {
   static _DesktopWebTextEditorState? _activeEditor;
+  static const _focusChannel = MethodChannel('dev_orbit/clipboard');
 
   InAppWebViewController? _controller;
   bool _loaded = false;
   bool _disposed = false;
   bool _restoreFocusOnWindowFocus = false;
-  final _webFocusNode = FocusNode(debugLabel: 'desktop web editor');
+  bool _editorSessionActive = false;
+  late final AppLifecycleListener _lifecycle;
+
+  /// Whether a WebView editor owns the editing session that should survive a
+  /// temporary native clipboard window. The flag intentionally remains true
+  /// after the WebView emits `blur`: that blur is exactly what happens while a
+  /// clipboard picker is in the foreground.
+  static bool get hasActiveEditor {
+    final editor = _activeEditor;
+    return editor != null && !editor._disposed && editor._editorSessionActive;
+  }
+
+  /// Called by the outer desktop focus shell before it restores its own
+  /// keyboard-shortcut focus node. Let the editor win that race instead.
+  static void restoreActiveEditorFocus() {
+    final editor = _activeEditor;
+    if (editor == null || editor._disposed) return;
+    editor._restoreFocusOnWindowFocus = true;
+    editor._restoreWebFocus();
+  }
 
   @override
   void initState() {
     super.initState();
     windowManager.addListener(this);
+    _lifecycle = AppLifecycleListener(
+      onInactive: _onAppInactive,
+      onResume: _onAppResume,
+    );
+  }
+
+  void _onAppInactive() {
+    if (identical(_activeEditor, this) && _editorSessionActive) {
+      _restoreFocusOnWindowFocus = true;
+    }
+  }
+
+  void _onAppResume() {
+    if (!identical(_activeEditor, this) || !_restoreFocusOnWindowFocus) {
+      return;
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_disposed && _restoreFocusOnWindowFocus) _restoreWebFocus();
+    });
   }
 
   bool get _supported =>
@@ -154,6 +201,7 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
       callback: (args) {
         if (args.isNotEmpty && args.first == true) {
           _activeEditor = this;
+          _editorSessionActive = true;
         }
         return null;
       },
@@ -166,7 +214,6 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
     _loaded = true;
     _syncState();
     if (widget.autofocus) {
-      _webFocusNode.requestFocus();
       Future<void>.delayed(const Duration(milliseconds: 60), () {
         if (!_disposed) {
           controller.evaluateJavascript(source: 'window.devOrbitFocus();');
@@ -178,7 +225,9 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
   void _restoreWebFocus({int attempt = 0}) {
     final controller = _controller;
     if (_disposed || !_loaded || controller == null) return;
-    if (!_webFocusNode.hasFocus) _webFocusNode.requestFocus();
+    if (attempt == 0 || attempt == 3) {
+      unawaited(_requestNativeEditorFocus());
+    }
     controller.evaluateJavascript(source: 'window.devOrbitRestoreFocus();');
     if (attempt >= 5) {
       _restoreFocusOnWindowFocus = false;
@@ -194,20 +243,32 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
   @override
   void onWindowBlur() {
     final primaryFocus = FocusManager.instance.primaryFocus;
-    final flutterEditableFocused = primaryFocus
-        ?.context
-        ?.findAncestorStateOfType<EditableTextState>() !=
+    final flutterEditableFocused =
+        primaryFocus?.context?.findAncestorStateOfType<EditableTextState>() !=
         null;
     _restoreFocusOnWindowFocus =
-        identical(_activeEditor, this) && !flutterEditableFocused;
+        identical(_activeEditor, this) &&
+        (_editorSessionActive || !flutterEditableFocused);
   }
 
   @override
   void onWindowFocus() {
-    if (!_restoreFocusOnWindowFocus) return;
+    if (!identical(_activeEditor, this)) return;
+    _restoreFocusOnWindowFocus = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _restoreWebFocus();
     });
+  }
+
+  Future<void> _requestNativeEditorFocus() async {
+    if (!_supported) return;
+    try {
+      await _focusChannel.invokeMethod<void>('requestEditorFocus');
+    } on MissingPluginException {
+      // The method is only available in the desktop runners.
+    } on PlatformException {
+      // Native focus recovery is best effort; the DOM recovery still runs.
+    }
   }
 
   void _syncState() {
@@ -260,9 +321,9 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
   @override
   void dispose() {
     _disposed = true;
+    _lifecycle.dispose();
     if (identical(_activeEditor, this)) _activeEditor = null;
     windowManager.removeListener(this);
-    _webFocusNode.dispose();
     _controller = null;
     super.dispose();
   }
@@ -270,34 +331,23 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
   @override
   Widget build(BuildContext context) {
     if (!_supported) return const SizedBox.shrink();
-    return Focus(
-      focusNode: _webFocusNode,
-      canRequestFocus: true,
-      onFocusChange: (focused) {
-        if (focused && _loaded) {
-          _controller?.evaluateJavascript(
-            source: 'window.devOrbitRestoreFocus();',
-          );
-        }
-      },
-      child: InAppWebView(
-        initialData: InAppWebViewInitialData(
-          data: _editorHtml,
-          baseUrl: WebUri('https://dev-orbit.local/'),
-        ),
-        initialSettings: InAppWebViewSettings(
-          javaScriptEnabled: true,
-          disableContextMenu: false,
-          transparentBackground: true,
-          supportZoom: false,
-          allowsBackForwardNavigationGestures: false,
-        ),
-        onWebViewCreated: _onWebViewCreated,
-        onLoadStop: _onLoadStop,
-        onWindowBlur: (_) => onWindowBlur(),
-        onWindowFocus: (_) => onWindowFocus(),
-        gestureRecognizers: const {},
+    return InAppWebView(
+      initialData: InAppWebViewInitialData(
+        data: _editorHtml,
+        baseUrl: WebUri('https://dev-orbit.local/'),
       ),
+      initialSettings: InAppWebViewSettings(
+        javaScriptEnabled: true,
+        disableContextMenu: false,
+        transparentBackground: true,
+        supportZoom: false,
+        allowsBackForwardNavigationGestures: false,
+      ),
+      onWebViewCreated: _onWebViewCreated,
+      onLoadStop: _onLoadStop,
+      onWindowBlur: (_) => onWindowBlur(),
+      onWindowFocus: (_) => onWindowFocus(),
+      gestureRecognizers: const {},
     );
   }
 }
@@ -332,6 +382,7 @@ const _editorHtml = r'''<!doctype html>
 const editor = document.getElementById('editor');
 let state = { text: '', baseOffset: 0, extentOffset: 0, syntax: 'plain', readOnly: false, findEnabled: false, highlights: [] };
 let composing = false;
+let restoreAfterWindowFocus = false;
 const bridge = (name, args) => {
   if (window.flutter_inappwebview) window.flutter_inappwebview.callHandler(name, ...args);
 };
@@ -470,6 +521,14 @@ window.devOrbitFocus = () => {
   editor.focus();
   restoreSelection(lastSelection[0], lastSelection[1]);
 };
+window.addEventListener('blur', () => {
+  if (document.activeElement === editor) restoreAfterWindowFocus = true;
+});
+window.addEventListener('focus', () => {
+  if (!restoreAfterWindowFocus) return;
+  restoreAfterWindowFocus = false;
+  setTimeout(() => window.devOrbitRestoreFocus(), 0);
+});
 editor.addEventListener('focus', () => bridge('editorFocusChanged', [true]));
 editor.addEventListener('blur', () => bridge('editorFocusChanged', [false]));
 editor.addEventListener('compositionstart', () => composing = true);
