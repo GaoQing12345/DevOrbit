@@ -32,6 +32,13 @@ set(CMAKE_CXX_FLAGS_PROFILE "${CMAKE_CXX_FLAGS_RELEASE}")
 # Use Unicode for all projects.
 add_definitions(-DUNICODE -D_UNICODE)
 
+# flutter_inappwebview_windows 0.6.x still includes Microsoft's transitional
+# <experimental/coroutine> header. Visual Studio 18 (MSVC 14.5x) promotes its
+# STL1011 deprecation notice to a hard error unless the compatibility warning
+# is explicitly silenced. Keep this at the project directory scope so the
+# generated plugin target receives it as well as the runner.
+add_compile_definitions(_SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS)
+
 # Compilation settings that should be applied to most targets.
 #
 # Be cautious about adding new options here, as plugins use this function by
