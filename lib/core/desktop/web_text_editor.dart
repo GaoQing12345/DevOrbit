@@ -97,7 +97,10 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
   /// clipboard picker is in the foreground.
   static bool get hasActiveEditor {
     final editor = _activeEditor;
-    return editor != null && !editor._disposed && editor._editorSessionActive;
+    return editor != null &&
+        !editor._disposed &&
+        editor._editorSessionActive &&
+        editor._restoreFocusOnWindowFocus;
   }
 
   /// Called by the outer desktop focus shell before it restores its own
