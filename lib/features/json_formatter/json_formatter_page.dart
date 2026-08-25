@@ -11,6 +11,7 @@ import 'package:re_editor/re_editor.dart';
 
 import '../../core/settings/settings_store.dart';
 import '../../core/desktop/native_macos_text_editor.dart';
+import '../../core/desktop/web_text_editor.dart';
 import 'json_code_indicator.dart';
 import 'json_document_controller.dart';
 import 'json_editor_chrome.dart';
@@ -42,8 +43,8 @@ class _JsonFormatterPageState extends State<JsonFormatterPage> {
   final _foldController = JsonFoldController();
   bool _syncing = false, _dragging = false;
 
-  bool get _usesNativeMacEditor =>
-      Platform.isMacOS &&
+  bool get _usesWebEditor =>
+      (Platform.isMacOS || Platform.isWindows) &&
       !kIsWeb &&
       Platform.environment['FLUTTER_TEST'] != 'true';
   @override
@@ -263,7 +264,7 @@ class _JsonFormatterPageState extends State<JsonFormatterPage> {
 
   @override
   Widget build(BuildContext context) {
-    _focusRestorer.active = !_usesNativeMacEditor && Visibility.of(context);
+    _focusRestorer.active = !_usesWebEditor && Visibility.of(context);
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     final shortcuts = buildJsonFormatterShortcuts(
@@ -320,7 +321,7 @@ class _JsonFormatterPageState extends State<JsonFormatterPage> {
       onFind: _findController.findMode,
       onCollapseAll: _foldController.collapseAll,
       onExpandAll: _foldController.expandAll,
-      showFoldControls: !_usesNativeMacEditor,
+      showFoldControls: !_usesWebEditor,
     );
   }
 
@@ -350,18 +351,20 @@ class _JsonFormatterPageState extends State<JsonFormatterPage> {
   }
 
   Widget _buildCodeEditor(ThemeData theme, bool isDark) {
-    if (_usesNativeMacEditor) {
+    if (_usesWebEditor) {
       return Stack(
         fit: StackFit.expand,
         children: [
-          MacNativeTextEditor(
+          DesktopWebTextEditor(
             text: _editor.text,
             selection: _nativeSelection(),
             onChanged: _onNativeEditorChanged,
             onSelectionChanged: _onNativeSelectionChanged,
+            onFind: _findController.findMode,
             backgroundColor: theme.colorScheme.surfaceContainerLowest,
             textColor: theme.colorScheme.onSurface,
             isDark: isDark,
+            syntax: WebEditorSyntax.json,
           ),
           if (_findController.value != null)
             Positioned(

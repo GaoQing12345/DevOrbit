@@ -48,6 +48,7 @@ dependencies:
   diffutil_dart: ^5.0.0
   jsonrepair_dart: ^0.1.2
   sql_formatter: ^0.1.0
+  flutter_inappwebview: ^6.1.5
 
 dev_dependencies:
   flutter_test:
