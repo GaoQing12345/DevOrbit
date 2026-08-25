@@ -555,7 +555,7 @@ private final class NativeTextEditorFactory: NSObject, FlutterPlatformViewFactor
     )
   }
 
-  func createArgsCodec() -> FlutterMessageCodec & NSObjectProtocol {
+  func createArgsCodec() -> (FlutterMessageCodec & NSObjectProtocol)? {
     FlutterStandardMessageCodec.sharedInstance()
   }
 }
@@ -585,8 +585,8 @@ private final class NativeTextEditorView: NSView, NSTextViewDelegate {
     textView.importsGraphics = false
     textView.allowsUndo = true
     textView.usesFindPanel = true
-    textView.automaticQuoteSubstitutionEnabled = false
-    textView.automaticDashSubstitutionEnabled = false
+    textView.isAutomaticQuoteSubstitutionEnabled = false
+    textView.isAutomaticDashSubstitutionEnabled = false
     textView.font = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
     textView.textColor = textColor
     textView.insertionPointColor = textColor
