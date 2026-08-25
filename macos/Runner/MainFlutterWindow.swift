@@ -223,7 +223,7 @@ class MainFlutterWindow: NSWindow {
     // Prefer the responder retained by NSWindow so a two-pane editor restores
     // the pane that was actually being edited. Fall back to the first visible
     // WebView only during initial activation.
-    let webView = containingWebView(for: firstResponder) ??
+    let webView = containingWebView(for: firstResponder as? NSView) ??
       contentView.flatMap({ findWebView(in: $0) })
     guard let webView else {
       return
@@ -233,7 +233,7 @@ class MainFlutterWindow: NSWindow {
     }
     let hostWindow = webView.window ?? self
     if !hostWindow.isKeyWindow {
-      hostWindow.makeKeyAndOrderFront(nil)
+      hostWindow.makeKeyAndOrderFront(self)
     }
     _ = hostWindow.makeFirstResponder(webView)
     _ = webView.becomeFirstResponder()
