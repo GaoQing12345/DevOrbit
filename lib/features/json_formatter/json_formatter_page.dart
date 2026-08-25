@@ -264,7 +264,12 @@ class _JsonFormatterPageState extends State<JsonFormatterPage> {
 
   @override
   Widget build(BuildContext context) {
-    _focusRestorer.active = !_usesWebEditor && Visibility.of(context);
+    // The WebView editor owns its own native clipboard path. When the custom
+    // Flutter find/replace panel is open, however, its TextFields still need
+    // the guarded clipboard bridge (including QuickClipboard/iCopy).
+    _focusRestorer.active =
+        Visibility.of(context) &&
+        (!_usesWebEditor || _findController.value != null);
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     final shortcuts = buildJsonFormatterShortcuts(
@@ -373,7 +378,7 @@ class _JsonFormatterPageState extends State<JsonFormatterPage> {
               child: JsonFindPanel(
                 controller: _findController,
                 readOnly: false,
-                onPaste: null,
+                onPaste: _focusRestorer.pasteFocusedTarget,
               ),
             ),
         ],

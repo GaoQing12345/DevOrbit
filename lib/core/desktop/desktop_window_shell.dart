@@ -65,6 +65,16 @@ class _DesktopEscapeCloseRegionState extends State<DesktopEscapeCloseRegion>
   void _restoreWindowFocus() {
     if (!mounted || !_focusNode.canRequestFocus) return;
 
+    // A Flutter TextField in a find/replace overlay has priority over the
+    // WebView editor that sits underneath it. Do not let the window shell's
+    // Escape focus node (or WebView recovery) steal that input focus.
+    final focusedEditable = FocusManager.instance.primaryFocus;
+    if (focusedEditable?.context
+            ?.findAncestorStateOfType<EditableTextState>() !=
+        null) {
+      return;
+    }
+
     // A WebView editor has a native responder/focus target in addition to the
     // Flutter focus tree. Restoring this shell's Escape node here would steal
     // the keyboard immediately after a clipboard picker returns, leaving the

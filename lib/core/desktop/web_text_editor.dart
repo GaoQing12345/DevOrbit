@@ -205,6 +205,16 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
         if (args.isNotEmpty && args.first == true) {
           _activeEditor = this;
           _editorSessionActive = true;
+        } else {
+          // A Flutter find/replace TextField can sit above this WebView. Its
+          // focus is a deliberate editor switch, unlike a native window blur
+          // where no Flutter EditableText owns focus yet. Keep the session for
+          // the latter so clipboard return can still restore the WebView.
+          final flutterEditableFocused =
+              FocusManager.instance.primaryFocus?.context
+                  ?.findAncestorStateOfType<EditableTextState>() !=
+              null;
+          if (flutterEditableFocused) _editorSessionActive = false;
         }
         return null;
       },
