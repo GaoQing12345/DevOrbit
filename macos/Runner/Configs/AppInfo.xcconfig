@@ -12,3 +12,8 @@ PRODUCT_BUNDLE_IDENTIFIER = com.gaoqing.devorbit
 
 // The copyright displayed in application information
 PRODUCT_COPYRIGHT = Copyright © 2026 com.gaoqing. All rights reserved.
+
+// Keep AppKit panels (including NSTextView's native find panel) in the app's
+// Simplified Chinese UI language instead of falling back to the Xcode default
+// English development region.
+DEVELOPMENT_LANGUAGE = zh-Hans
