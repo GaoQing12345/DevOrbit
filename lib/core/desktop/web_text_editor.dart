@@ -62,6 +62,14 @@ class DesktopWebTextEditor extends StatefulWidget {
     _DesktopWebTextEditorState.restoreActiveEditorFocus();
   }
 
+  static void collapseActiveJson() {
+    _DesktopWebTextEditorState.collapseActiveJson();
+  }
+
+  static void expandActiveJson() {
+    _DesktopWebTextEditorState.expandActiveJson();
+  }
+
   @override
   State<DesktopWebTextEditor> createState() => _DesktopWebTextEditorState();
 }
@@ -113,6 +121,20 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
     if (editor == null || editor._disposed) return;
     editor._restoreFocusOnWindowFocus = true;
     editor._restoreWebFocus();
+  }
+
+  /// Collapse every foldable JSON block in the active WebView editor.
+  ///
+  /// The JSON toolbar lives outside the WebView, so it cannot call the DOM
+  /// directly. Keep this small bridge here rather than exposing the private
+  /// state object to feature pages.
+  static void collapseActiveJson() {
+    _activeEditor?._evaluateJavascript('window.devOrbitCollapseAll();');
+  }
+
+  /// Expand every folded JSON block in the active WebView editor.
+  static void expandActiveJson() {
+    _activeEditor?._evaluateJavascript('window.devOrbitExpandAll();');
   }
 
   @override
@@ -317,6 +339,12 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
     }
   }
 
+  void _evaluateJavascript(String source) {
+    final controller = _controller;
+    if (_disposed || !_loaded || controller == null) return;
+    unawaited(controller.evaluateJavascript(source: source));
+  }
+
   void _syncState() {
     final controller = _controller;
     if (_disposed || !_loaded || controller == null) return;
@@ -421,6 +449,33 @@ const _editorHtml = r'''<!doctype html>
   .json-number { color: #986801; }
   .json-literal { color: #007fb9; }
   .json-null { color: #a626a4; }
+  /* The marker uses a negative margin so it occupies no net code width while
+     still providing a real hit target just before the opening brace, like
+     re_editor's original left-side fold indicator. */
+  .fold-toggle {
+    display: inline-flex;
+    width: 12px;
+    height: 1em;
+    margin-left: -12px;
+    vertical-align: text-bottom;
+    cursor: pointer;
+    user-select: none;
+    align-items: center;
+    justify-content: center;
+  }
+  .fold-toggle::before {
+    content: '\25be';
+    display: inline-flex;
+    width: 14px;
+    height: 16px;
+    align-items: center;
+    justify-content: center;
+    color: currentColor;
+    font: 13px/16px Menlo, Consolas, monospace;
+    opacity: .72;
+  }
+  .fold-toggle.collapsed::before { content: '\25b8'; }
+  .fold-hidden { display: none; }
 </style>
 </head>
 <body><div id="editor" contenteditable="true" spellcheck="false"></div>
@@ -429,6 +484,7 @@ const editor = document.getElementById('editor');
 let state = { text: '', baseOffset: 0, extentOffset: 0, syntax: 'plain', readOnly: false, findEnabled: false, highlights: [] };
 let composing = false;
 let restoreAfterWindowFocus = false;
+let collapsedFolds = [];
 const bridge = (name, args) => {
   if (window.flutter_inappwebview) window.flutter_inappwebview.callHandler(name, ...args);
 };
@@ -511,7 +567,82 @@ function restoreSelection(base, extent) {
   selection.removeAllRanges(); selection.addRange(range);
   lastSelection = [base, extent];
 }
-function readText() { return editor.innerText.replace(/\r/g, ''); }
+// textContent includes the contents of display:none fold spans, while the
+// empty fold-toggle elements contribute no characters. This keeps offsets
+// stable while a JSON block is collapsed. When everything is expanded, keep
+// innerText's normal handling of browser-created block elements (for example
+// from a rich clipboard paste).
+function readText() {
+  const value = state.syntax === 'json' && collapsedFolds.length
+    ? readTreeText(editor)
+    : editor.innerText;
+  return value.replace(/\r/g, '');
+}
+function readTreeText(node) {
+  if (node.nodeType === Node.TEXT_NODE) return node.nodeValue;
+  if (node.nodeType !== Node.ELEMENT_NODE) return '';
+  if (node.tagName === 'BR') return '\n';
+  let value = '';
+  const children = Array.from(node.childNodes);
+  children.forEach((child, index) => {
+    value += readTreeText(child);
+    const block = child.nodeType === Node.ELEMENT_NODE &&
+      (child.tagName === 'DIV' || child.tagName === 'P');
+    if (block && index < children.length - 1 && !value.endsWith('\n')) value += '\n';
+  });
+  return value;
+}
+function jsonFoldRanges(text) {
+  const pairs = { '{': '}', '[': ']' };
+  const closing = { '}': true, ']': true };
+  const stack = [];
+  const ranges = [];
+  let inString = false;
+  let escaped = false;
+  for (let index = 0; index < text.length; index++) {
+    const character = text[index];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (character === '\\') escaped = true;
+      else if (character === '"') inString = false;
+      continue;
+    }
+    if (character === '"') { inString = true; continue; }
+    if (pairs[character]) {
+      stack.push({ character, index });
+      continue;
+    }
+    if (!closing[character] || !stack.length) continue;
+    for (let stackIndex = stack.length - 1; stackIndex >= 0; stackIndex--) {
+      const opening = stack[stackIndex];
+      if (pairs[opening.character] !== character) continue;
+      stack.splice(stackIndex, 1);
+      if (index > opening.index + 1 && text.slice(opening.index + 1, index).includes('\n')) {
+        ranges.push({ start: opening.index, end: index, close: character });
+      }
+      break;
+    }
+  }
+  return ranges.sort((a, b) => a.start - b.start);
+}
+function foldRangeAt(text, offset) {
+  const ranges = jsonFoldRanges(text);
+  return ranges.find(range => Math.abs(range.start - offset) <= 1) || null;
+}
+function foldMarker(start) {
+  const collapsed = collapsedFolds.includes(start) ? ' collapsed' : '';
+  return `<span class="fold-toggle${collapsed}" data-fold-start="${start}" contenteditable="false" aria-label="折叠或展开"></span>`;
+}
+function escapeWithFoldMarkers(value, start, ranges) {
+  let html = '';
+  for (let index = 0; index < value.length; index++) {
+    const absolute = start + index;
+    const range = ranges.find(candidate => candidate.start === absolute);
+    if (range) html += foldMarker(absolute);
+    html += escapeHtml(value[index]);
+  }
+  return html;
+}
 function highlightedRanges(text) {
   const ranges = Array.isArray(state.highlights) ? state.highlights : [];
   if (!ranges.length) return escapeHtml(text);
@@ -530,30 +661,93 @@ function highlightedRanges(text) {
 }
 function highlighted(text) {
   if (state.syntax !== 'json') return highlightedRanges(text);
+  const folds = jsonFoldRanges(text);
   const token = /("(?:\\.|[^"\\])*")|(-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?)|\b(true|false|null)\b/g;
   let html = '', last = 0, match;
   while ((match = token.exec(text))) {
-    html += escapeHtml(text.slice(last, match.index));
+    html += escapeWithFoldMarkers(text.slice(last, match.index), last, folds);
     const value = match[0], after = text.slice(token.lastIndex);
     let cls = 'json-string';
     if (match[2]) cls = 'json-number';
     if (match[3] === 'null') cls = 'json-null';
     if (match[3] && match[3] !== 'null') cls = 'json-literal';
     if (match[1] && /^\s*:/.test(after)) cls = 'json-key';
-    html += '<span class="' + cls + '">' + escapeHtml(value) + '</span>';
+    html += '<span class="' + cls + '">' + escapeWithFoldMarkers(value, match.index, folds) + '</span>';
     last = token.lastIndex;
   }
-  return html + escapeHtml(text.slice(last));
+  return html + escapeWithFoldMarkers(text.slice(last), last, folds);
+}
+function applyCollapsedFolds(text) {
+  if (state.syntax !== 'json' || !collapsedFolds.length) return;
+  const ranges = jsonFoldRanges(text);
+  // Apply outer ranges first. Nested ranges then remain inside their parent's
+  // hidden span and become visible again when the parent is expanded.
+  for (const range of ranges) {
+    if (!collapsedFolds.includes(range.start)) continue;
+    const start = locate(editor, range.start + 1);
+    const end = locate(editor, range.end);
+    const domRange = document.createRange();
+    domRange.setStart(start.node, start.offset);
+    domRange.setEnd(end.node, end.offset);
+    const hidden = document.createElement('span');
+    hidden.className = 'fold-hidden';
+    hidden.dataset.foldEnd = String(range.end);
+    hidden.appendChild(domRange.extractContents());
+    domRange.insertNode(hidden);
+  }
+}
+function rerenderPreservingSelection(text, base, extent) {
+  editor.innerHTML = highlighted(text);
+  applyCollapsedFolds(text);
+  const ranges = jsonFoldRanges(text);
+  const visibleOffset = offset => {
+    for (const range of ranges) {
+      if (collapsedFolds.includes(range.start) &&
+          offset > range.start && offset < range.end) {
+        return range.start + 1;
+      }
+    }
+    return offset;
+  };
+  restoreSelection(visibleOffset(base), visibleOffset(extent));
 }
 function render(text, base, extent, preserve) {
   const saved = preserve ? currentSelection() : [base, extent];
-  editor.innerHTML = highlighted(text);
-  restoreSelection(preserve ? saved[0] : base, preserve ? saved[1] : extent);
+  rerenderPreservingSelection(
+    text,
+    preserve ? saved[0] : base,
+    preserve ? saved[1] : extent,
+  );
 }
+function toggleFoldAt(offset) {
+  if (state.syntax !== 'json' || state.readOnly) return;
+  const text = readText();
+  const range = foldRangeAt(text, offset);
+  if (!range) return;
+  const selection = currentSelection();
+  const index = collapsedFolds.indexOf(range.start);
+  if (index >= 0) collapsedFolds.splice(index, 1);
+  else collapsedFolds.push(range.start);
+  rerenderPreservingSelection(text, selection[0], selection[1]);
+}
+window.devOrbitCollapseAll = () => {
+  if (state.syntax !== 'json') return;
+  collapsedFolds = jsonFoldRanges(readText()).map(range => range.start);
+  const selection = currentSelection();
+  rerenderPreservingSelection(readText(), selection[0], selection[1]);
+};
+window.devOrbitExpandAll = () => {
+  if (state.syntax !== 'json') return;
+  const text = readText();
+  const selection = currentSelection();
+  collapsedFolds = [];
+  rerenderPreservingSelection(text, selection[0], selection[1]);
+};
 window.devOrbitSetState = next => {
   const changedText = next.text !== readText();
   const changedSyntax = state.syntax !== next.syntax;
   state = Object.assign(state, next);
+  if (changedText || changedSyntax) collapsedFolds = [];
   editor.style.background = next.backgroundColor || '#fbfcfc';
   editor.style.color = next.textColor || '#383a42';
   editor.classList.toggle('single-line', !!next.singleLine);
@@ -610,6 +804,7 @@ editor.addEventListener('compositionend', () => { composing = false; editor.disp
 editor.addEventListener('input', () => {
   if (composing) return;
   const text = readText(), selection = currentSelection();
+  collapsedFolds = [];
   lastSelection = selection;
   render(text, selection[0], selection[1], false);
   // Publish the caret before the text callback. Flutter may rebuild the
@@ -617,6 +812,21 @@ editor.addEventListener('input', () => {
   // the controller prevents that rebuild from restoring the previous caret.
   bridge('selectionChanged', selection);
   bridge('editorChanged', [text, selection[0], selection[1]]);
+});
+editor.addEventListener('click', event => {
+  const marker = event.target.closest ? event.target.closest('.fold-toggle') : null;
+  if (marker && editor.contains(marker)) {
+    event.preventDefault();
+    event.stopPropagation();
+    toggleFoldAt(Number(marker.dataset.foldStart));
+    return;
+  }
+  if (state.syntax !== 'json' || state.readOnly) return;
+  // A direct click on the opening brace is also supported. WebKit reports the
+  // caret just before or just after the clicked character depending on zoom
+  // and font metrics, so accept both neighboring offsets.
+  const selection = currentSelection();
+  if (selection[0] === selection[1]) toggleFoldAt(selection[0]);
 });
 document.addEventListener('selectionchange', () => {
   if (document.activeElement !== editor) return;

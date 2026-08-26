@@ -324,9 +324,13 @@ class _JsonFormatterPageState extends State<JsonFormatterPage> {
       onCopy: _copy,
       onCompactAndCopy: _compactAndCopy,
       onFind: _findController.findMode,
-      onCollapseAll: _foldController.collapseAll,
-      onExpandAll: _foldController.expandAll,
-      showFoldControls: !_usesWebEditor,
+      onCollapseAll: _usesWebEditor
+          ? DesktopWebTextEditor.collapseActiveJson
+          : _foldController.collapseAll,
+      onExpandAll: _usesWebEditor
+          ? DesktopWebTextEditor.expandActiveJson
+          : _foldController.expandAll,
+      showFoldControls: true,
     );
   }
 
