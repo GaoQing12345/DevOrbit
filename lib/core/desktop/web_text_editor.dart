@@ -13,9 +13,9 @@ import 'desktop_text_selection.dart';
 
 /// A single browser-backed editing surface shared by macOS and Windows.
 ///
-/// Keeping the input, selection, undo stack, IME and clipboard in one WebView
-/// avoids platform-specific responder/focus bridges. The surrounding Flutter
-/// page still owns document state and business actions.
+/// The DOM is authoritative for input, selection, undo, IME and clipboard
+/// commands. Flutter keeps a document snapshot for business actions, while
+/// the native responder only routes focus back to this editing surface.
 class DesktopWebTextEditor extends StatefulWidget {
   const DesktopWebTextEditor({
     super.key,
@@ -101,6 +101,7 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
   bool _isVisible = true;
   bool _restoreFocusOnWindowFocus = false;
   bool _editorSessionActive = false;
+  NativeTextSelection? _lastWebSelection;
   late final AppLifecycleListener _lifecycle;
 
   /// Whether a WebView editor owns the editing session that should survive a
@@ -234,17 +235,17 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
       callback: (args) {
         if (!_isVisible || _disposed) return null;
         if (args.length < 3 || args[0] is! String) return null;
-        // Publish the selection before the text callback. The text callback
-        // normally rebuilds the surrounding page; updating it first would
-        // let that rebuild send the previous (often zero) caret back to the
-        // WebView before the fresh selection reaches Flutter.
         final selection = NativeTextSelection(
           baseOffset: _asInt(args[1]),
           extentOffset: _asInt(args[2]),
         );
+        _lastWebSelection = selection;
         _traceSelection('web_input_selection', selection);
-        widget.onSelectionChanged?.call(selection);
+        // Consumers such as the JSON formatter clamp selections against
+        // their current text length. Sending the selection before the new
+        // text can turn a valid caret into 0,0.
         widget.onChanged(args[0] as String);
+        widget.onSelectionChanged?.call(selection);
         return null;
       },
     );
@@ -257,6 +258,7 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
           baseOffset: _asInt(args[0]),
           extentOffset: _asInt(args[1]),
         );
+        _lastWebSelection = selection;
         _traceSelection('web_selection', selection);
         widget.onSelectionChanged?.call(selection);
         return null;
@@ -266,6 +268,18 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
       handlerName: 'findRequested',
       callback: (_) {
         widget.onFind?.call();
+        return null;
+      },
+    );
+    controller.addJavaScriptHandler(
+      handlerName: 'copyRequested',
+      callback: (args) async {
+        if (args.isEmpty || args.first is! String) return null;
+        try {
+          await Clipboard.setData(ClipboardData(text: args.first as String));
+        } on PlatformException {
+          // WebKit's native copy path remains available as a fallback.
+        }
         return null;
       },
     );
@@ -287,6 +301,7 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
               baseOffset: _asInt(args[1]),
               extentOffset: _asInt(args[2]),
             );
+            _lastWebSelection = selection;
             _traceSelection('web_focus', selection);
             widget.onSelectionChanged?.call(selection);
           }
@@ -296,6 +311,7 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
               baseOffset: _asInt(args[1]),
               extentOffset: _asInt(args[2]),
             );
+            _lastWebSelection = selection;
             _traceSelection('web_blur', selection);
             widget.onSelectionChanged?.call(selection);
           }
@@ -405,10 +421,20 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
   void _syncState() {
     final controller = _controller;
     if (_disposed || !_loaded || controller == null) return;
+    final selection =
+        widget.selection ??
+        NativeTextSelection(
+          baseOffset: widget.text.length,
+          extentOffset: widget.text.length,
+        );
     final payload = jsonEncode({
       'text': widget.text,
-      'baseOffset': widget.selection?.baseOffset ?? widget.text.length,
-      'extentOffset': widget.selection?.extentOffset ?? widget.text.length,
+      'baseOffset': selection.baseOffset,
+      'extentOffset': selection.extentOffset,
+      // A selection just reported by the DOM is only a Flutter-side mirror.
+      // Do not echo it back into the active editor. A differing value is an
+      // explicit external command, such as a find-result jump.
+      'applySelection': selection != _lastWebSelection,
       'readOnly': widget.readOnly,
       'findEnabled': widget.onFind != null,
       'syntax': widget.syntax.name,
@@ -548,6 +574,24 @@ const _editorHtml = r'''<!doctype html>
     transform: translateY(-.5px) scale(1.05);
   }
   .fold-toggle:active { transform: scale(.96); }
+  .fold-placeholder {
+    display: inline-flex; align-items: center; min-height: 1.35em;
+    margin: 0 3px; padding: 0 5px;
+    border-radius: 4px;
+    background: rgba(100, 110, 125, .10);
+    color: rgba(80, 88, 100, .72);
+    font: 500 .82em/1.35 -apple-system, BlinkMacSystemFont, sans-serif;
+    vertical-align: .08em; cursor: pointer; user-select: none;
+    transition: background .12s ease, color .12s ease;
+  }
+  .fold-placeholder::before { content: attr(data-fold-label); }
+  .fold-placeholder:hover {
+    background: rgba(80, 120, 180, .16); color: currentColor;
+  }
+  .editor-shell.dark .fold-placeholder {
+    background: rgba(255, 255, 255, .09);
+    color: rgba(220, 228, 235, .62);
+  }
   .fold-hidden { display: none; }
 </style>
 </head>
@@ -706,7 +750,7 @@ function jsonFoldRanges(text) {
 }
 function foldRangeAt(text, offset) {
   const ranges = jsonFoldRanges(text);
-  return ranges.find(range => Math.abs(range.start - offset) <= 1) || null;
+  return ranges.find(range => range.start === offset) || null;
 }
 function foldMarker(start) {
   const collapsed = collapsedFolds.includes(start) ? ' collapsed' : '';
@@ -792,7 +836,43 @@ function applyCollapsedFolds(text) {
     hidden.dataset.foldEnd = String(range.end);
     hidden.appendChild(domRange.extractContents());
     domRange.insertNode(hidden);
+    const hiddenText = text.slice(range.start + 1, range.end).trim();
+    const lineCount = hiddenText ? hiddenText.split('\n').length : 0;
+    const placeholder = document.createElement('span');
+    placeholder.className = 'fold-placeholder';
+    placeholder.contentEditable = 'false';
+    placeholder.dataset.foldStart = String(range.start);
+    placeholder.dataset.foldLabel = lineCount > 0 ? `... ${lineCount} 行` : '...';
+    placeholder.setAttribute('aria-label', `已折叠 ${lineCount} 行，点击展开`);
+    hidden.parentNode.insertBefore(placeholder, hidden);
   }
+}
+
+function textOffsetAtPoint(x, y) {
+  const caretRange = document.caretRangeFromPoint
+    ? document.caretRangeFromPoint(x, y)
+    : null;
+  if (!caretRange || !editor.contains(caretRange.startContainer)) return null;
+  const caretOffset = selectionOffset(
+    editor,
+    caretRange.startContainer,
+    caretRange.startOffset,
+  );
+  const text = readText();
+  for (const offset of [caretOffset, caretOffset - 1]) {
+    if (offset < 0 || offset >= text.length || !'{['.includes(text[offset])) continue;
+    const start = locate(editor, offset);
+    const end = locate(editor, offset + 1);
+    const range = document.createRange();
+    range.setStart(start.node, start.offset);
+    range.setEnd(end.node, end.offset);
+    for (const rect of range.getClientRects()) {
+      if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) {
+        return offset;
+      }
+    }
+  }
+  return null;
 }
 function rerenderPreservingSelection(text, base, extent) {
   editor.innerHTML = highlighted(text);
@@ -871,7 +951,9 @@ window.devOrbitSetState = next => {
     // focus. Do not move the DOM caret, or overwrite its saved range, with a
     // stale Flutter selection while the editor is temporarily inactive; the
     // window-focus callback restores the range captured before blur.
-  } else {
+  } else if (next.applySelection) {
+    // DOM selection is authoritative while the user is editing. Flutter only
+    // writes a selection back when it represents an explicit external action.
     restoreSelection(next.baseOffset, next.extentOffset);
   }
 };
@@ -930,10 +1012,9 @@ editor.addEventListener('input', () => {
   collapsedFolds = [];
   lastSelection = selection;
   render(text, selection[0], selection[1], false);
-  // Publish the caret before the text callback. Flutter may rebuild the
-  // surrounding page from onChanged; having the latest selection already in
-  // the controller prevents that rebuild from restoring the previous caret.
-  bridge('selectionChanged', selection);
+  // Text and selection must cross the bridge atomically. Publishing a
+  // separate selection first lets Flutter clamp it against the previous text
+  // length and echo a stale caret back into the editor.
   bridge('editorChanged', [text, selection[0], selection[1]]);
 });
 editor.addEventListener('click', event => {
@@ -944,12 +1025,20 @@ editor.addEventListener('click', event => {
     toggleFoldAt(Number(marker.dataset.foldStart));
     return;
   }
+  const placeholder = event.target.closest
+    ? event.target.closest('.fold-placeholder')
+    : null;
+  if (placeholder && editor.contains(placeholder)) {
+    event.preventDefault();
+    event.stopPropagation();
+    toggleFoldAt(Number(placeholder.dataset.foldStart));
+    return;
+  }
   if (state.syntax !== 'json' || state.readOnly) return;
-  // A direct click on the opening brace is also supported. WebKit reports the
-  // caret just before or just after the clicked character depending on zoom
-  // and font metrics, so accept both neighboring offsets.
-  const selection = currentSelection();
-  if (selection[0] === selection[1]) toggleFoldAt(selection[0]);
+  // Hit-test the actual glyph. A caret offset alone only identifies the gap
+  // beside a character, which made clicks to the right of a brace fold it.
+  const offset = textOffsetAtPoint(event.clientX, event.clientY);
+  if (offset !== null) toggleFoldAt(offset);
 });
 editor.addEventListener('mousedown', () => selectionFrozen = false, true);
 editor.addEventListener('scroll', () => { lineNumbers.scrollTop = editor.scrollTop; }, { passive: true });
@@ -961,6 +1050,29 @@ document.addEventListener('selectionchange', () => {
 });
 editor.addEventListener('keydown', event => {
   selectionFrozen = false;
+  const modified = event.metaKey || event.ctrlKey;
+  const key = event.key.toLowerCase();
+  if (modified && key === 'a') {
+    // WebKit can route the command to the Flutter focus tree when the native
+    // responder is settling. Keep select-all deterministic at the DOM layer.
+    event.preventDefault();
+    editor.focus();
+    const length = readText().length;
+    restoreSelection(0, length);
+    lastSelection = [0, length];
+    bridge('selectionChanged', [0, length]);
+    return;
+  }
+  if (modified && key === 'c') {
+    const selection = currentSelection();
+    if (selection[0] !== selection[1]) {
+      event.preventDefault();
+      const start = Math.min(selection[0], selection[1]);
+      const end = Math.max(selection[0], selection[1]);
+      bridge('copyRequested', [readText().slice(start, end)]);
+    }
+    return;
+  }
   if (state.findEnabled && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'f') {
     event.preventDefault(); bridge('findRequested', []); return;
   }
