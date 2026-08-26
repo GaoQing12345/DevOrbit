@@ -24,6 +24,7 @@ class MainFlutterWindow: NSWindow {
   private var pasteFallbackEligible = false
   private var workspaceActivationObserver: NSObjectProtocol?
   private var clickFocusGeneration = 0
+  private weak var lastClickedEditorWebView: WKWebView?
 
   private static let clipboardManagerBundleIdentifiers: Set<String> = [
     "cn.better365.iCopy",
@@ -52,6 +53,10 @@ class MainFlutterWindow: NSWindow {
     }()
 
     if let clickedWebView {
+      // Clipboard focus recovery has no DOM editor identity. Remember the
+      // user's last pane click so returning from another app cannot fall back
+      // to whichever WebView happens to be first in the view hierarchy.
+      lastClickedEditorWebView = clickedWebView
       // Give the clicked platform view the responder before WebKit processes
       // the event, then repeat once after the event below. The first call makes
       // the target unambiguous; the second lets WebKit finish placing the DOM
@@ -308,10 +313,16 @@ class MainFlutterWindow: NSWindow {
       return nil
     }
 
-    // Prefer the responder retained by NSWindow so a two-pane editor restores
-    // the pane that was actually being edited. Fall back to the first visible
-    // WebView only during initial activation.
-    let webView = containingWebView(for: firstResponder as? NSView) ??
+    // Prefer the pane most recently clicked by the user. During clipboard
+    // recovery AppKit's responder may belong to another platform view, so it
+    // is not a reliable indication of which editor owned the caret.
+    let rememberedWebView = lastClickedEditorWebView.flatMap { webView in
+      webView.isHidden || webView.alphaValue <= 0.01 || webView.window == nil
+        ? nil
+        : webView
+    }
+    let webView = rememberedWebView ??
+      containingWebView(for: firstResponder as? NSView) ??
       contentView.flatMap({ findWebView(in: $0) })
     guard let webView else {
       return
