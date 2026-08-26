@@ -826,17 +826,27 @@ window.devOrbitSetState = next => {
   }
 };
 let lastSelection = [0, 0];
+let selectionFrozen = false;
 window.devOrbitRestoreFocus = () => {
+  selectionFrozen = true;
+  restoreSelection(lastSelection[0], lastSelection[1]);
   editor.focus();
   restoreSelection(lastSelection[0], lastSelection[1]);
 };
 window.devOrbitFocus = () => {
+  selectionFrozen = true;
+  restoreSelection(lastSelection[0], lastSelection[1]);
   editor.focus();
   restoreSelection(lastSelection[0], lastSelection[1]);
 };
 window.devOrbitBlur = () => editor.blur();
 window.addEventListener('blur', () => {
-  if (document.activeElement === editor) restoreAfterWindowFocus = true;
+  if (document.activeElement === editor) {
+    // WebKit can emit a zeroed selectionchange after the window has already
+    // blurred. Freeze the last real caret until focus is restored.
+    restoreAfterWindowFocus = true;
+    selectionFrozen = true;
+  }
 });
 window.addEventListener('focus', () => {
   if (!restoreAfterWindowFocus) return;
@@ -855,12 +865,17 @@ editor.addEventListener('blur', () => {
   // Do not read window.getSelection() after blur. On macOS it can already be
   // collapsed at offset zero even though the caret was at the end of the
   // document before a clipboard window took focus.
+  selectionFrozen = true;
   bridge('editorFocusChanged', [false, lastSelection[0], lastSelection[1]]);
 });
-editor.addEventListener('compositionstart', () => composing = true);
+editor.addEventListener('compositionstart', () => {
+  selectionFrozen = false;
+  composing = true;
+});
 editor.addEventListener('compositionend', () => { composing = false; editor.dispatchEvent(new Event('input')); });
 editor.addEventListener('input', () => {
   if (composing) return;
+  selectionFrozen = false;
   const text = readText(), selection = currentSelection();
   collapsedFolds = [];
   lastSelection = selection;
@@ -886,13 +901,15 @@ editor.addEventListener('click', event => {
   const selection = currentSelection();
   if (selection[0] === selection[1]) toggleFoldAt(selection[0]);
 });
+editor.addEventListener('mousedown', () => selectionFrozen = false, true);
 document.addEventListener('selectionchange', () => {
-  if (document.activeElement !== editor) return;
+  if (selectionFrozen || document.activeElement !== editor) return;
   const selection = currentSelection();
   lastSelection = selection;
   bridge('selectionChanged', selection);
 });
 editor.addEventListener('keydown', event => {
+  selectionFrozen = false;
   if (state.findEnabled && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'f') {
     event.preventDefault(); bridge('findRequested', []); return;
   }
