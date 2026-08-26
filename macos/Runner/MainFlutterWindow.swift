@@ -23,6 +23,7 @@ class MainFlutterWindow: NSWindow {
   private var lastExternalApplicationBundleIdentifier: String?
   private var pasteFallbackEligible = false
   private var workspaceActivationObserver: NSObjectProtocol?
+  private var clickFocusGeneration = 0
 
   private static let clipboardManagerBundleIdentifiers: Set<String> = [
     "cn.better365.iCopy",
@@ -34,14 +35,53 @@ class MainFlutterWindow: NSWindow {
   /// focused. Keep AppKit's responder aligned with the view under the mouse so
   /// the left and right compare panes can be switched repeatedly.
   override func sendEvent(_ event: NSEvent) {
-    if event.type == .leftMouseDown,
-       let contentView,
-       let hitView = contentView.hitTest(contentView.convert(event.locationInWindow, from: nil)),
-       let webView = containingWebView(for: hitView),
-       firstResponder !== webView {
-      _ = makeFirstResponder(webView)
-    }
+    let clickedWebView: WKWebView? = {
+      guard event.type == .leftMouseDown,
+            let contentView else { return nil }
+      let point = contentView.convert(event.locationInWindow, from: nil)
+      return containingWebView(for: contentView.hitTest(point)) ??
+        webView(at: point, in: contentView)
+    }()
+
     super.sendEvent(event)
+
+    // Let WebKit finish handling the click first. It may temporarily make an
+    // internal WKContentView the responder while placing the DOM caret; doing
+    // this before super.sendEvent would be overwritten by that same click.
+    guard let clickedWebView else { return }
+    clickFocusGeneration += 1
+    let generation = clickFocusGeneration
+    restoreClickedWebViewFocus(
+      clickedWebView,
+      generation: generation,
+      attempt: 0
+    )
+  }
+
+  private func restoreClickedWebViewFocus(
+    _ webView: WKWebView,
+    generation: Int,
+    attempt: Int
+  ) {
+    DispatchQueue.main.async { [weak self, weak webView] in
+      guard let self,
+            let webView,
+            self.clickFocusGeneration == generation,
+            webView.window === self,
+            !webView.isHidden,
+            webView.alphaValue > 0.01 else { return }
+      _ = self.makeFirstResponder(webView)
+      _ = webView.becomeFirstResponder()
+      guard attempt < 3 else { return }
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.03) { [weak self, weak webView] in
+        guard let self, let webView else { return }
+        self.restoreClickedWebViewFocus(
+          webView,
+          generation: generation,
+          attempt: attempt + 1
+        )
+      }
+    }
   }
 
   private func containingWebView(for view: NSView?) -> WKWebView? {
@@ -54,6 +94,24 @@ class MainFlutterWindow: NSWindow {
         return webView
       }
       current = candidate.superview
+    }
+    return nil
+  }
+
+  private func webView(at point: NSPoint, in root: NSView) -> WKWebView? {
+    for child in root.subviews.reversed() {
+      if let webView = child as? WKWebView,
+         !webView.isHidden,
+         webView.alphaValue > 0.01,
+         webView.window != nil {
+        let localPoint = webView.convert(point, from: root)
+        if webView.bounds.contains(localPoint) {
+          return webView
+        }
+      }
+      if let nested = webView(at: point, in: child) {
+        return nested
+      }
     }
     return nil
   }
