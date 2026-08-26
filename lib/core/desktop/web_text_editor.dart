@@ -493,12 +493,31 @@ const _editorHtml = r'''<!doctype html>
   * { box-sizing: border-box; }
   html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; }
   body { background: #fbfcfc; color: #383a42; }
+  .editor-shell {
+    display: flex; width: 100%; height: 100%; overflow: hidden;
+  }
+  #line-numbers {
+    display: none; flex: 0 0 50px; height: 100%; overflow: hidden;
+    border-right: 1px solid rgba(127, 127, 127, .16);
+    background: rgba(127, 127, 127, .045); color: rgba(80, 88, 100, .72);
+    font: 14px/1.55 Menlo, Consolas, monospace; text-align: right;
+    user-select: none; pointer-events: none;
+  }
+  .editor-shell.json #line-numbers { display: block; }
+  .editor-shell.dark #line-numbers {
+    border-right-color: rgba(255, 255, 255, .12);
+    background: rgba(255, 255, 255, .035); color: rgba(220, 228, 235, .58);
+  }
+  #line-numbers-content { min-height: 100%; }
+  .line-number { height: 1.55em; line-height: 1.55; padding-right: 10px; }
   #editor {
-    width: 100%; height: 100%; padding: 12px; overflow: auto;
-    outline: none; white-space: pre-wrap; overflow-wrap: anywhere;
+    flex: 1; min-width: 0; width: auto; height: 100%; padding: 12px;
+    overflow: auto; outline: none; white-space: pre-wrap;
+    overflow-wrap: anywhere;
     tab-size: 2; font: 14px/1.55 Menlo, Consolas, monospace;
     caret-color: currentColor; user-select: text;
   }
+  .editor-shell.json #editor { white-space: pre; overflow-wrap: normal; }
   #editor.single-line { white-space: pre; overflow-x: auto; overflow-y: hidden; }
   #editor:empty::before { color: rgba(127, 127, 127, .72); content: attr(data-placeholder); pointer-events: none; }
   .json-key { color: #986801; }
@@ -506,38 +525,41 @@ const _editorHtml = r'''<!doctype html>
   .json-number { color: #986801; }
   .json-literal { color: #007fb9; }
   .json-null { color: #a626a4; }
-  /* The marker uses a negative margin so it occupies no net code width while
-     still providing a real hit target just before the opening brace, like
-     re_editor's original left-side fold indicator. */
+  /* Keep the fold control outside the text width while giving it a clear,
+     forgiving hit target before the opening brace. */
   .fold-toggle {
     display: inline-flex;
-    width: 12px;
-    height: 1em;
-    margin-left: -12px;
-    vertical-align: text-bottom;
+    width: 18px; height: 18px; margin-left: -18px; margin-right: 0;
+    vertical-align: middle; align-items: center; justify-content: center;
+    border: 1px solid rgba(100, 110, 125, .34); border-radius: 5px;
+    background: rgba(100, 110, 125, .08); color: currentColor;
     cursor: pointer;
     user-select: none;
-    align-items: center;
-    justify-content: center;
+    transition: background .12s ease, border-color .12s ease, transform .12s ease;
   }
   .fold-toggle::before {
-    content: '\25be';
-    display: inline-flex;
-    width: 14px;
-    height: 16px;
-    align-items: center;
-    justify-content: center;
-    color: currentColor;
-    font: 13px/16px Menlo, Consolas, monospace;
-    opacity: .72;
+    content: ''; display: block; width: 6px; height: 6px;
+    border-right: 1.8px solid currentColor; border-bottom: 1.8px solid currentColor;
+    transform: rotate(45deg) translate(-1px, -1px); opacity: .82;
   }
-  .fold-toggle.collapsed::before { content: '\25b8'; }
+  .fold-toggle.collapsed::before { transform: rotate(-45deg) translate(-1px, -1px); }
+  .fold-toggle:hover {
+    background: rgba(80, 120, 180, .16); border-color: currentColor;
+    transform: translateY(-.5px) scale(1.05);
+  }
+  .fold-toggle:active { transform: scale(.96); }
   .fold-hidden { display: none; }
 </style>
 </head>
-<body><div id="editor" contenteditable="true" spellcheck="false"></div>
+<body><div class="editor-shell" id="editor-shell">
+  <div id="line-numbers" aria-hidden="true"><div id="line-numbers-content"></div></div>
+  <div id="editor" contenteditable="true" spellcheck="false"></div>
+</div>
 <script>
 const editor = document.getElementById('editor');
+const editorShell = document.getElementById('editor-shell');
+const lineNumbers = document.getElementById('line-numbers');
+const lineNumbersContent = document.getElementById('line-numbers-content');
 let state = { text: '', baseOffset: 0, extentOffset: 0, syntax: 'plain', readOnly: false, findEnabled: false, highlights: [] };
 let composing = false;
 let restoreAfterWindowFocus = false;
@@ -690,6 +712,25 @@ function foldMarker(start) {
   const collapsed = collapsedFolds.includes(start) ? ' collapsed' : '';
   return `<span class="fold-toggle${collapsed}" data-fold-start="${start}" contenteditable="false" aria-label="折叠或展开"></span>`;
 }
+function updateLineNumbers(text) {
+  if (state.syntax !== 'json') {
+    lineNumbersContent.innerHTML = '';
+    return;
+  }
+  const ranges = jsonFoldRanges(text);
+  const lineStarts = [0];
+  for (let index = 0; index < text.length; index++) {
+    if (text[index] === '\n') lineStarts.push(index + 1);
+  }
+  lineNumbersContent.innerHTML = lineStarts.map((start, index) => {
+    const hidden = ranges.some(range =>
+      collapsedFolds.includes(range.start) &&
+      start > range.start && start <= range.end
+    );
+    return hidden ? '' : `<div class="line-number">${index + 1}</div>`;
+  }).join('');
+  lineNumbers.scrollTop = editor.scrollTop;
+}
 function escapeWithFoldMarkers(value, start, ranges) {
   let html = '';
   for (let index = 0; index < value.length; index++) {
@@ -756,6 +797,7 @@ function applyCollapsedFolds(text) {
 function rerenderPreservingSelection(text, base, extent) {
   editor.innerHTML = highlighted(text);
   applyCollapsedFolds(text);
+  updateLineNumbers(text);
   const ranges = jsonFoldRanges(text);
   const visibleOffset = offset => {
     for (const range of ranges) {
@@ -804,6 +846,8 @@ window.devOrbitSetState = next => {
   const changedText = next.text !== readText();
   const changedSyntax = state.syntax !== next.syntax;
   state = Object.assign(state, next);
+  editorShell.classList.toggle('json', state.syntax === 'json');
+  editorShell.classList.toggle('dark', !!state.isDark);
   if (changedText || changedSyntax) collapsedFolds = [];
   editor.style.background = next.backgroundColor || '#fbfcfc';
   editor.style.color = next.textColor || '#383a42';
@@ -811,7 +855,13 @@ window.devOrbitSetState = next => {
   editor.dataset.placeholder = next.placeholder || '';
   editor.style.fontSize = (next.fontSize || 14) + 'px';
   const padding = next.padding || {};
-  editor.style.padding = `${padding.top ?? 12}px ${padding.right ?? 12}px ${padding.bottom ?? 12}px ${padding.left ?? 12}px`;
+  const leftPadding = state.syntax === 'json'
+    ? Math.max(20, Number(padding.left ?? 12))
+    : Number(padding.left ?? 12);
+  editor.style.padding = `${padding.top ?? 12}px ${padding.right ?? 12}px ${padding.bottom ?? 12}px ${leftPadding}px`;
+  lineNumbers.style.fontSize = `${next.fontSize || 14}px`;
+  lineNumbers.style.paddingTop = `${padding.top ?? 12}px`;
+  lineNumbers.style.paddingBottom = `${padding.bottom ?? 12}px`;
   document.documentElement.style.colorScheme = next.isDark ? 'dark' : 'light';
   editor.contentEditable = next.readOnly ? 'false' : 'true';
   if (changedText || changedSyntax) {
@@ -902,6 +952,7 @@ editor.addEventListener('click', event => {
   if (selection[0] === selection[1]) toggleFoldAt(selection[0]);
 });
 editor.addEventListener('mousedown', () => selectionFrozen = false, true);
+editor.addEventListener('scroll', () => { lineNumbers.scrollTop = editor.scrollTop; }, { passive: true });
 document.addEventListener('selectionchange', () => {
   if (selectionFrozen || document.activeElement !== editor) return;
   const selection = currentSelection();
