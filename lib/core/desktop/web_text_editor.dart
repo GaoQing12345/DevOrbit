@@ -606,6 +606,8 @@ const lineNumbers = document.getElementById('line-numbers');
 const lineNumbersContent = document.getElementById('line-numbers-content');
 let state = { text: '', baseOffset: 0, extentOffset: 0, syntax: 'plain', readOnly: false, findEnabled: false, highlights: [] };
 let composing = false;
+let inputPending = false;
+let inputCommitScheduled = false;
 let restoreAfterWindowFocus = false;
 let collapsedFolds = [];
 const bridge = (name, args) => {
@@ -1000,22 +1002,44 @@ editor.addEventListener('blur', () => {
   selectionFrozen = true;
   bridge('editorFocusChanged', [false, lastSelection[0], lastSelection[1]]);
 });
+function scheduleInputCommit() {
+  if (inputCommitScheduled) return;
+  inputCommitScheduled = true;
+  setTimeout(() => {
+    inputCommitScheduled = false;
+    if (composing || !inputPending) return;
+    const text = readText(), selection = currentSelection();
+    collapsedFolds = [];
+    lastSelection = selection;
+    render(text, selection[0], selection[1], false);
+    // Text and selection cross the bridge as one committed edit. Flutter
+    // never observes the temporary marked text used by an IME.
+    bridge('editorChanged', [text, selection[0], selection[1]]);
+    inputPending = false;
+  }, 0);
+}
+editor.addEventListener('beforeinput', () => {
+  // Selection changes caused by this edit must not reach Flutter before its
+  // text does. This is essential for marked text from Chinese/Japanese IMEs.
+  inputPending = true;
+});
 editor.addEventListener('compositionstart', () => {
   selectionFrozen = false;
   composing = true;
+  inputPending = true;
 });
-editor.addEventListener('compositionend', () => { composing = false; editor.dispatchEvent(new Event('input')); });
+editor.addEventListener('compositionend', () => {
+  composing = false;
+  inputPending = true;
+  // WebKit versions disagree on whether the final input event is dispatched
+  // before or after compositionend. A deferred, deduplicated commit supports
+  // both orders without rebuilding the DOM while marked text is still live.
+  scheduleInputCommit();
+});
 editor.addEventListener('input', () => {
-  if (composing) return;
   selectionFrozen = false;
-  const text = readText(), selection = currentSelection();
-  collapsedFolds = [];
-  lastSelection = selection;
-  render(text, selection[0], selection[1], false);
-  // Text and selection must cross the bridge atomically. Publishing a
-  // separate selection first lets Flutter clamp it against the previous text
-  // length and echo a stale caret back into the editor.
-  bridge('editorChanged', [text, selection[0], selection[1]]);
+  inputPending = true;
+  if (!composing) scheduleInputCommit();
 });
 editor.addEventListener('click', event => {
   const marker = event.target.closest ? event.target.closest('.fold-toggle') : null;
@@ -1043,13 +1067,18 @@ editor.addEventListener('click', event => {
 editor.addEventListener('mousedown', () => selectionFrozen = false, true);
 editor.addEventListener('scroll', () => { lineNumbers.scrollTop = editor.scrollTop; }, { passive: true });
 document.addEventListener('selectionchange', () => {
-  if (selectionFrozen || document.activeElement !== editor) return;
+  if (selectionFrozen || composing || inputPending || document.activeElement !== editor) return;
   const selection = currentSelection();
+  if (selection[0] === lastSelection[0] && selection[1] === lastSelection[1]) return;
   lastSelection = selection;
   bridge('selectionChanged', selection);
 });
 editor.addEventListener('keydown', event => {
   selectionFrozen = false;
+  // Let WebKit and the platform input method own every key while marked text
+  // is active. keyCode 229 covers older WebKit versions where isComposing is
+  // briefly false even though the IME still owns the event.
+  if (event.isComposing || composing || event.keyCode === 229) return;
   const modified = event.metaKey || event.ctrlKey;
   const key = event.key.toLowerCase();
   if (modified && key === 'a') {
