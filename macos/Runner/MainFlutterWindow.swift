@@ -35,6 +35,14 @@ class MainFlutterWindow: NSWindow {
   /// focused. Keep AppKit's responder aligned with the view under the mouse so
   /// the left and right compare panes can be switched repeatedly.
   override func sendEvent(_ event: NSEvent) {
+    if event.type == .leftMouseDown {
+      // Invalidate a pending restore even when the click lands on a Flutter
+      // wrapper rather than directly on the WKWebView. Otherwise the previous
+      // pane can steal the responder back a few frames after the user clicked
+      // the other pane.
+      clickFocusGeneration += 1
+    }
+    let generation = clickFocusGeneration
     let clickedWebView: WKWebView? = {
       guard event.type == .leftMouseDown,
             let contentView else { return nil }
@@ -43,14 +51,18 @@ class MainFlutterWindow: NSWindow {
         webView(at: point, in: contentView)
     }()
 
+    if let clickedWebView {
+      // Give the clicked platform view the responder before WebKit processes
+      // the event, then repeat once after the event below. The first call makes
+      // the target unambiguous; the second lets WebKit finish placing the DOM
+      // caret without leaving AppKit on the previous pane.
+      _ = makeFirstResponder(clickedWebView)
+      _ = clickedWebView.becomeFirstResponder()
+    }
+
     super.sendEvent(event)
 
-    // Let WebKit finish handling the click first. It may temporarily make an
-    // internal WKContentView the responder while placing the DOM caret; doing
-    // this before super.sendEvent would be overwritten by that same click.
     guard let clickedWebView else { return }
-    clickFocusGeneration += 1
-    let generation = clickFocusGeneration
     restoreClickedWebViewFocus(
       clickedWebView,
       generation: generation,
@@ -72,8 +84,10 @@ class MainFlutterWindow: NSWindow {
             webView.alphaValue > 0.01 else { return }
       _ = self.makeFirstResponder(webView)
       _ = webView.becomeFirstResponder()
-      guard attempt < 3 else { return }
-      DispatchQueue.main.asyncAfter(deadline: .now() + 0.03) { [weak self, weak webView] in
+      // One retry is enough for WebKit's post-click responder transition. Any
+      // later click increments the generation and cancels this continuation.
+      guard attempt < 1 else { return }
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.04) { [weak self, weak webView] in
         guard let self, let webView else { return }
         self.restoreClickedWebViewFocus(
           webView,
@@ -100,16 +114,16 @@ class MainFlutterWindow: NSWindow {
 
   private func webView(at point: NSPoint, in root: NSView) -> WKWebView? {
     for child in root.subviews.reversed() {
+      let childPoint = child.convert(point, from: root)
       if let webView = child as? WKWebView,
          !webView.isHidden,
          webView.alphaValue > 0.01,
          webView.window != nil {
-        let localPoint = webView.convert(point, from: root)
-        if webView.bounds.contains(localPoint) {
+        if webView.bounds.contains(childPoint) {
           return webView
         }
       }
-      if let nested = webView(at: point, in: child) {
+      if let nested = webView(at: childPoint, in: child) {
         return nested
       }
     }

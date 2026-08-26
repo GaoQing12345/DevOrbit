@@ -98,6 +98,7 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
   InAppWebViewController? _controller;
   bool _loaded = false;
   bool _disposed = false;
+  bool _isVisible = true;
   bool _restoreFocusOnWindowFocus = false;
   bool _editorSessionActive = false;
   late final AppLifecycleListener _lifecycle;
@@ -110,6 +111,7 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
     final editor = _activeEditor;
     return editor != null &&
         !editor._disposed &&
+        editor._isVisible &&
         editor._editorSessionActive &&
         editor._restoreFocusOnWindowFocus;
   }
@@ -118,7 +120,7 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
   /// keyboard-shortcut focus node. Let the editor win that race instead.
   static void restoreActiveEditorFocus() {
     final editor = _activeEditor;
-    if (editor == null || editor._disposed) return;
+    if (editor == null || editor._disposed || !editor._isVisible) return;
     editor._restoreFocusOnWindowFocus = true;
     editor._restoreWebFocus();
   }
@@ -147,8 +149,44 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
     );
   }
 
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final visible = Visibility.of(context);
+    if (visible == _isVisible) return;
+    _isVisible = visible;
+    if (!visible) {
+      // An IndexedStack keeps inactive tool pages mounted. They must not stay
+      // eligible for focus restoration while another page is visible.
+      if (identical(_activeEditor, this)) _activeEditor = null;
+      _restoreFocusOnWindowFocus = false;
+      _editorSessionActive = false;
+      _evaluateJavascript('window.devOrbitBlur();');
+      return;
+    }
+    if (widget.autofocus && _loaded) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!_disposed && _isVisible && widget.autofocus) {
+          _focusEditorFromAutofocus();
+        }
+      });
+    }
+  }
+
+  void _focusEditorFromAutofocus() {
+    final previous = _activeEditor;
+    if (previous != null && !identical(previous, this)) {
+      previous._restoreFocusOnWindowFocus = false;
+      previous._editorSessionActive = false;
+    }
+    _activeEditor = this;
+    _editorSessionActive = true;
+    _restoreFocusOnWindowFocus = false;
+    _evaluateJavascript('window.devOrbitFocus();');
+  }
+
   void _onAppInactive() {
-    if (identical(_activeEditor, this) && _editorSessionActive) {
+    if (_isVisible && identical(_activeEditor, this) && _editorSessionActive) {
       _restoreFocusOnWindowFocus = true;
     }
   }
@@ -194,6 +232,7 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
     controller.addJavaScriptHandler(
       handlerName: 'editorChanged',
       callback: (args) {
+        if (!_isVisible || _disposed) return null;
         if (args.length < 3 || args[0] is! String) return null;
         // Publish the selection before the text callback. The text callback
         // normally rebuilds the surrounding page; updating it first would
@@ -212,6 +251,7 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
     controller.addJavaScriptHandler(
       handlerName: 'selectionChanged',
       callback: (args) {
+        if (!_isVisible || _disposed) return null;
         if (args.length < 2) return null;
         final selection = NativeTextSelection(
           baseOffset: _asInt(args[0]),
@@ -232,9 +272,16 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
     controller.addJavaScriptHandler(
       handlerName: 'editorFocusChanged',
       callback: (args) {
+        if (!_isVisible || _disposed) return null;
         if (args.isNotEmpty && args.first == true) {
+          final previous = _activeEditor;
+          if (previous != null && !identical(previous, this)) {
+            previous._restoreFocusOnWindowFocus = false;
+            previous._editorSessionActive = false;
+          }
           _activeEditor = this;
           _editorSessionActive = true;
+          _restoreFocusOnWindowFocus = false;
           if (args.length >= 3) {
             final selection = NativeTextSelection(
               baseOffset: _asInt(args[1]),
@@ -281,10 +328,10 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
   void _onLoadStop(InAppWebViewController controller, WebUri? url) {
     _loaded = true;
     _syncState();
-    if (widget.autofocus) {
+    if (widget.autofocus && _isVisible) {
       Future<void>.delayed(const Duration(milliseconds: 60), () {
-        if (!_disposed) {
-          controller.evaluateJavascript(source: 'window.devOrbitFocus();');
+        if (!_disposed && _isVisible && widget.autofocus) {
+          _focusEditorFromAutofocus();
         }
       });
     }
@@ -292,7 +339,13 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
 
   void _restoreWebFocus({int attempt = 0}) {
     final controller = _controller;
-    if (_disposed || !_loaded || controller == null) return;
+    if (_disposed ||
+        !_loaded ||
+        !_isVisible ||
+        !identical(_activeEditor, this) ||
+        controller == null) {
+      return;
+    }
     if (attempt == 0 || attempt == 3) {
       unawaited(_requestNativeEditorFocus());
     }
@@ -302,7 +355,10 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
       return;
     }
     Future<void>.delayed(Duration(milliseconds: 40 + attempt * 40), () {
-      if (!_disposed && _restoreFocusOnWindowFocus) {
+      if (!_disposed &&
+          _isVisible &&
+          identical(_activeEditor, this) &&
+          _restoreFocusOnWindowFocus) {
         _restoreWebFocus(attempt: attempt + 1);
       }
     });
@@ -315,13 +371,14 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
         primaryFocus?.context?.findAncestorStateOfType<EditableTextState>() !=
         null;
     _restoreFocusOnWindowFocus =
+        _isVisible &&
         identical(_activeEditor, this) &&
         (_editorSessionActive || !flutterEditableFocused);
   }
 
   @override
   void onWindowFocus() {
-    if (!identical(_activeEditor, this)) return;
+    if (!_isVisible || !identical(_activeEditor, this)) return;
     _restoreFocusOnWindowFocus = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _restoreWebFocus();
@@ -777,6 +834,7 @@ window.devOrbitFocus = () => {
   editor.focus();
   restoreSelection(lastSelection[0], lastSelection[1]);
 };
+window.devOrbitBlur = () => editor.blur();
 window.addEventListener('blur', () => {
   if (document.activeElement === editor) restoreAfterWindowFocus = true;
 });
