@@ -63,8 +63,12 @@ class _TextComparePageState extends State<TextComparePage> {
     super.initState();
     _leftEditor = _createEditor(TextCompareSide.left);
     _rightEditor = _createEditor(TextCompareSide.right);
-    _leftWebController = TextEditingController(text: widget.controller.leftText);
-    _rightWebController = TextEditingController(text: widget.controller.rightText);
+    _leftWebController = TextEditingController(
+      text: widget.controller.leftText,
+    );
+    _rightWebController = TextEditingController(
+      text: widget.controller.rightText,
+    );
     _leftScrollController = CodeScrollController();
     _rightScrollController = CodeScrollController();
     _leftScrollController.verticalScroller.addListener(_syncLeftScroll);
@@ -177,13 +181,17 @@ class _TextComparePageState extends State<TextComparePage> {
     if (_leftWebController.text != widget.controller.leftText) {
       _leftWebController.value = TextEditingValue(
         text: widget.controller.leftText,
-        selection: TextSelection.collapsed(offset: widget.controller.leftText.length),
+        selection: TextSelection.collapsed(
+          offset: widget.controller.leftText.length,
+        ),
       );
     }
     if (_rightWebController.text != widget.controller.rightText) {
       _rightWebController.value = TextEditingValue(
         text: widget.controller.rightText,
-        selection: TextSelection.collapsed(offset: widget.controller.rightText.length),
+        selection: TextSelection.collapsed(
+          offset: widget.controller.rightText.length,
+        ),
       );
     }
     // Diff spans are derived from the controller result rather than editor
@@ -264,7 +272,9 @@ class _TextComparePageState extends State<TextComparePage> {
   ) {
     final result = widget.controller.result;
     if (result == null) return const [];
-    final lines = side == TextCompareSide.left ? result.leftLines : result.rightLines;
+    final lines = side == TextCompareSide.left
+        ? result.leftLines
+        : result.rightLines;
     final text = side == TextCompareSide.left
         ? widget.controller.leftText
         : widget.controller.rightText;
@@ -275,15 +285,12 @@ class _TextComparePageState extends State<TextComparePage> {
       final lineEnd = offset + _lineLengthAt(text, offset);
       if (line.status != TextDiffLineStatus.unchanged && lineEnd > offset) {
         final color = switch (line.status) {
-          TextDiffLineStatus.added => dark
-              ? const Color(0xFF183B2C)
-              : const Color(0xFFE0F2E7),
-          TextDiffLineStatus.removed => dark
-              ? const Color(0xFF432220)
-              : const Color(0xFFFBE3E0),
-          TextDiffLineStatus.modified => dark
-              ? const Color(0xFF493514)
-              : const Color(0xFFFFEBC7),
+          TextDiffLineStatus.added =>
+            dark ? const Color(0xFF183B2C) : const Color(0xFFE0F2E7),
+          TextDiffLineStatus.removed =>
+            dark ? const Color(0xFF432220) : const Color(0xFFFBE3E0),
+          TextDiffLineStatus.modified =>
+            dark ? const Color(0xFF493514) : const Color(0xFFFFEBC7),
           TextDiffLineStatus.unchanged => Colors.transparent,
         };
         highlights.add(
@@ -946,52 +953,60 @@ class _TextPane extends StatelessWidget {
                       textColor: scheme.onSurface,
                       isDark: scheme.brightness == Brightness.dark,
                       placeholder: isLeft ? '输入或粘贴旧文本' : '输入或粘贴新文本',
+                      debugLabel: isLeft
+                          ? 'text-compare-left'
+                          : 'text-compare-right',
                       autofocus: isLeft,
                       padding: const EdgeInsets.fromLTRB(14, 12, 14, 18),
-                  )
+                    )
                   : CodeEditor(
-                // Keep the editor state mounted while diff metadata changes.
-                // Re-mounting CodeEditor resets its internal input connection
-                // and can make the caret/focus look out of sync with the pane
-                // that will receive the next paste.
-                controller: editor,
-                scrollController: scrollController,
-                focusNode: focusNode,
-                shortcutOverrideActions: {
-                  CodeShortcutPasteIntent:
-                      CallbackAction<CodeShortcutPasteIntent>(
-                        onInvoke: (_) => onPaste(),
+                      // Keep the editor state mounted while diff metadata changes.
+                      // Re-mounting CodeEditor resets its internal input connection
+                      // and can make the caret/focus look out of sync with the pane
+                      // that will receive the next paste.
+                      controller: editor,
+                      scrollController: scrollController,
+                      focusNode: focusNode,
+                      shortcutOverrideActions: {
+                        CodeShortcutPasteIntent:
+                            CallbackAction<CodeShortcutPasteIntent>(
+                              onInvoke: (_) => onPaste(),
+                            ),
+                      },
+                      autofocus: false,
+                      wordWrap: false,
+                      autocompleteSymbols: false,
+                      chunkAnalyzer: const _TextCompareChunkAnalyzer(),
+                      onChanged: onChanged,
+                      hint: isLeft ? '输入或粘贴旧文本' : '输入或粘贴新文本',
+                      padding: const EdgeInsets.fromLTRB(14, 12, 14, 18),
+                      style: CodeEditorStyle(
+                        fontSize: 14,
+                        fontHeight: 1.6,
+                        fontFamily: 'Menlo',
+                        fontFamilyFallback: const ['Consolas', 'monospace'],
+                        backgroundColor: scheme.surfaceContainerLowest,
+                        cursorColor: scheme.primary,
+                        cursorLineColor: scheme.primary.withAlpha(24),
                       ),
-                },
-                autofocus: false,
-                wordWrap: false,
-                autocompleteSymbols: false,
-                chunkAnalyzer: const _TextCompareChunkAnalyzer(),
-                onChanged: onChanged,
-                hint: isLeft ? '输入或粘贴旧文本' : '输入或粘贴新文本',
-                padding: const EdgeInsets.fromLTRB(14, 12, 14, 18),
-                style: CodeEditorStyle(
-                  fontSize: 14,
-                  fontHeight: 1.6,
-                  fontFamily: 'Menlo',
-                  fontFamilyFallback: const ['Consolas', 'monospace'],
-                  backgroundColor: scheme.surfaceContainerLowest,
-                  cursorColor: scheme.primary,
-                  cursorLineColor: scheme.primary.withAlpha(24),
-                ),
-                indicatorBuilder:
-                    (context, editingController, chunkController, notifier) {
-                      return TextCompareIndicator(
-                        controller: editingController,
-                        notifier: notifier,
-                        lines: lines,
-                      );
-                    },
-                leadingDivider: Container(
-                  width: 1,
-                  color: scheme.outlineVariant,
-                ),
-              ),
+                      indicatorBuilder:
+                          (
+                            context,
+                            editingController,
+                            chunkController,
+                            notifier,
+                          ) {
+                            return TextCompareIndicator(
+                              controller: editingController,
+                              notifier: notifier,
+                              lines: lines,
+                            );
+                          },
+                      leadingDivider: Container(
+                        width: 1,
+                        color: scheme.outlineVariant,
+                      ),
+                    ),
             ),
             Container(
               height: 36,

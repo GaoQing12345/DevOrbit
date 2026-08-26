@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:window_manager/window_manager.dart';
 
+import 'desktop_clipboard_diagnostics.dart';
 import 'desktop_text_selection.dart';
 
 /// A single browser-backed editing surface shared by macOS and Windows.
@@ -34,6 +35,7 @@ class DesktopWebTextEditor extends StatefulWidget {
     this.padding = const EdgeInsets.all(12),
     this.autofocus = true,
     this.highlights = const [],
+    this.debugLabel = 'web-editor',
   });
 
   final String text;
@@ -52,6 +54,7 @@ class DesktopWebTextEditor extends StatefulWidget {
   final EdgeInsets padding;
   final bool autofocus;
   final List<DesktopTextHighlight> highlights;
+  final String debugLabel;
 
   static bool get hasActiveEditor => _DesktopWebTextEditorState.hasActiveEditor;
 
@@ -155,6 +158,7 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
         oldWidget.padding != widget.padding ||
         oldWidget.autofocus != widget.autofocus ||
         oldWidget.highlights != widget.highlights ||
+        oldWidget.debugLabel != widget.debugLabel ||
         oldWidget.isDark != widget.isDark ||
         oldWidget.backgroundColor != widget.backgroundColor ||
         oldWidget.textColor != widget.textColor ||
@@ -173,12 +177,12 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
         // normally rebuilds the surrounding page; updating it first would
         // let that rebuild send the previous (often zero) caret back to the
         // WebView before the fresh selection reaches Flutter.
-        widget.onSelectionChanged?.call(
-          NativeTextSelection(
-            baseOffset: _asInt(args[1]),
-            extentOffset: _asInt(args[2]),
-          ),
+        final selection = NativeTextSelection(
+          baseOffset: _asInt(args[1]),
+          extentOffset: _asInt(args[2]),
         );
+        _traceSelection('web_input_selection', selection);
+        widget.onSelectionChanged?.call(selection);
         widget.onChanged(args[0] as String);
         return null;
       },
@@ -187,12 +191,12 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
       handlerName: 'selectionChanged',
       callback: (args) {
         if (args.length < 2) return null;
-        widget.onSelectionChanged?.call(
-          NativeTextSelection(
-            baseOffset: _asInt(args[0]),
-            extentOffset: _asInt(args[1]),
-          ),
+        final selection = NativeTextSelection(
+          baseOffset: _asInt(args[0]),
+          extentOffset: _asInt(args[1]),
         );
+        _traceSelection('web_selection', selection);
+        widget.onSelectionChanged?.call(selection);
         return null;
       },
     );
@@ -210,21 +214,21 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
           _activeEditor = this;
           _editorSessionActive = true;
           if (args.length >= 3) {
-            widget.onSelectionChanged?.call(
-              NativeTextSelection(
-                baseOffset: _asInt(args[1]),
-                extentOffset: _asInt(args[2]),
-              ),
+            final selection = NativeTextSelection(
+              baseOffset: _asInt(args[1]),
+              extentOffset: _asInt(args[2]),
             );
+            _traceSelection('web_focus', selection);
+            widget.onSelectionChanged?.call(selection);
           }
         } else {
           if (args.length >= 3) {
-            widget.onSelectionChanged?.call(
-              NativeTextSelection(
-                baseOffset: _asInt(args[1]),
-                extentOffset: _asInt(args[2]),
-              ),
+            final selection = NativeTextSelection(
+              baseOffset: _asInt(args[1]),
+              extentOffset: _asInt(args[2]),
             );
+            _traceSelection('web_blur', selection);
+            widget.onSelectionChanged?.call(selection);
           }
           // A Flutter find/replace TextField can sit above this WebView. Its
           // focus is a deliberate editor switch, unlike a native window blur
@@ -242,6 +246,15 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
   }
 
   int _asInt(Object? value) => value is num ? value.toInt() : 0;
+
+  void _traceSelection(String event, NativeTextSelection selection) {
+    DesktopClipboardDiagnostics.write(event, {
+      'editor': widget.debugLabel,
+      'base': selection.baseOffset,
+      'extent': selection.extentOffset,
+      'text_length': widget.text.length,
+    });
+  }
 
   void _onLoadStop(InAppWebViewController controller, WebUri? url) {
     _loaded = true;
@@ -537,22 +550,14 @@ window.devOrbitSetState = next => {
     render(next.text, next.baseOffset, next.extentOffset, false);
   } else if (document.activeElement !== editor) {
     // Flutter rebuilds can arrive while a clipboard picker owns the native
-    // focus. Do not move the DOM caret to a stale Flutter selection while the
-    // editor is temporarily inactive; the window-focus callback restores the
-    // saved browser selection after activation.
-    lastSelection = [next.baseOffset, next.extentOffset];
+    // focus. Do not move the DOM caret, or overwrite its saved range, with a
+    // stale Flutter selection while the editor is temporarily inactive; the
+    // window-focus callback restores the range captured before blur.
   } else {
     restoreSelection(next.baseOffset, next.extentOffset);
   }
 };
 let lastSelection = [0, 0];
-function selectionForBridge() {
-  const selection = window.getSelection();
-  if (!selection || !selection.rangeCount) return lastSelection;
-  const current = currentSelection();
-  lastSelection = current;
-  return current;
-}
 window.devOrbitRestoreFocus = () => {
   editor.focus();
   restoreSelection(lastSelection[0], lastSelection[1]);
@@ -570,12 +575,18 @@ window.addEventListener('focus', () => {
   setTimeout(() => window.devOrbitRestoreFocus(), 0);
 });
 editor.addEventListener('focus', () => {
-  const selection = selectionForBridge();
+  // WebKit can report a transient [0, 0] range while focus is moving between
+  // the native WKWebView and its contenteditable element. Keep the last range
+  // observed while the editor was active; selectionchange will publish the
+  // new mouse-click position immediately afterwards.
+  const selection = lastSelection;
   bridge('editorFocusChanged', [true, selection[0], selection[1]]);
 });
 editor.addEventListener('blur', () => {
-  const selection = selectionForBridge();
-  bridge('editorFocusChanged', [false, selection[0], selection[1]]);
+  // Do not read window.getSelection() after blur. On macOS it can already be
+  // collapsed at offset zero even though the caret was at the end of the
+  // document before a clipboard window took focus.
+  bridge('editorFocusChanged', [false, lastSelection[0], lastSelection[1]]);
 });
 editor.addEventListener('compositionstart', () => composing = true);
 editor.addEventListener('compositionend', () => { composing = false; editor.dispatchEvent(new Event('input')); });

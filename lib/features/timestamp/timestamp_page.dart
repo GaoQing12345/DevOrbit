@@ -102,6 +102,27 @@ class _TimestampPageState extends State<TimestampPage> {
     });
   }
 
+  void _updateWebText(TextEditingController controller, String text) {
+    final selection = controller.selection;
+    controller.value = TextEditingValue(
+      text: text,
+      selection: TextSelection(
+        baseOffset: selection.baseOffset.clamp(0, text.length),
+        extentOffset: selection.extentOffset.clamp(0, text.length),
+      ),
+    );
+  }
+
+  void _onTimestampChanged(String value) {
+    _updateWebText(_timestampController, value);
+    _convertTimestamp(value);
+  }
+
+  void _onDateTimeChanged(String value) {
+    _updateWebText(_dateTimeController, value);
+    _convertDateTime(value);
+  }
+
   void _useCurrentTime() {
     final value = TimestampConverter.formatDateTime(_readNow());
     _dateTimeController.value = TextEditingValue(
@@ -198,7 +219,7 @@ class _TimestampPageState extends State<TimestampPage> {
                       focusNode: _timestampFocusNode,
                       conversion: _timestampConversion,
                       error: _timestampError,
-                      onChanged: _convertTimestamp,
+                      onChanged: _onTimestampChanged,
                       onPaste: () =>
                           _pasteInto(_timestampController, _timestampFocusNode),
                       useWebEditor: _usesWebEditor,
@@ -212,7 +233,7 @@ class _TimestampPageState extends State<TimestampPage> {
                       focusNode: _dateTimeFocusNode,
                       conversion: _dateTimeConversion,
                       error: _dateTimeError,
-                      onChanged: _convertDateTime,
+                      onChanged: _onDateTimeChanged,
                       onPaste: () =>
                           _pasteInto(_dateTimeController, _dateTimeFocusNode),
                       useWebEditor: _usesWebEditor,
@@ -437,7 +458,10 @@ class _TimestampToDateTimePanel extends StatelessWidget {
                     onSelectionChanged: onSelectionChanged,
                     singleLine: true,
                     placeholder: '1710000000 或 1710000000000',
-                    backgroundColor: Theme.of(context).colorScheme.surfaceContainerLowest,
+                    debugLabel: 'timestamp-input',
+                    backgroundColor: Theme.of(
+                      context,
+                    ).colorScheme.surfaceContainerLowest,
                     textColor: Theme.of(context).colorScheme.onSurface,
                     isDark: Theme.of(context).brightness == Brightness.dark,
                     autofocus: true,
@@ -481,7 +505,10 @@ class _TimestampToDateTimePanel extends StatelessWidget {
           if (error != null && useWebEditor)
             Padding(
               padding: const EdgeInsets.only(top: 4, left: 14),
-              child: Text(error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+              child: Text(
+                error!,
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
             ),
           const SizedBox(height: 18),
           _ResultBlock(
@@ -552,7 +579,10 @@ class _DateTimeToTimestampPanel extends StatelessWidget {
                     onSelectionChanged: onSelectionChanged,
                     singleLine: true,
                     placeholder: '2026-08-17 14:30:00',
-                    backgroundColor: Theme.of(context).colorScheme.surfaceContainerLowest,
+                    debugLabel: 'datetime-input',
+                    backgroundColor: Theme.of(
+                      context,
+                    ).colorScheme.surfaceContainerLowest,
                     textColor: Theme.of(context).colorScheme.onSurface,
                     isDark: Theme.of(context).brightness == Brightness.dark,
                     autofocus: false,
@@ -595,7 +625,10 @@ class _DateTimeToTimestampPanel extends StatelessWidget {
           if (error != null && useWebEditor)
             Padding(
               padding: const EdgeInsets.only(top: 4, left: 14),
-              child: Text(error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+              child: Text(
+                error!,
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
             ),
           const SizedBox(height: 18),
           _ResultBlock(

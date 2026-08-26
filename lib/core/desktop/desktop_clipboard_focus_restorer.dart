@@ -325,7 +325,7 @@ class DesktopClipboardFocusRestorer with WindowListener {
     DesktopClipboardDiagnostics.write('snapshot_captured', {
       'session': sessionId,
       'target': _targetIndex(target),
-      'selection': snapshot.selection,
+      ..._selectionDetails(snapshot.selection),
       'text_length': snapshot.content.length,
       'arm_native': armNative,
     });
@@ -359,6 +359,7 @@ class DesktopClipboardFocusRestorer with WindowListener {
     DesktopClipboardDiagnostics.write('focus_restored', {
       'session': snapshot.sessionId,
       'target': _targetIndex(snapshot.target),
+      ..._selectionDetails(snapshot.selection),
     });
   }
 
@@ -712,6 +713,7 @@ class DesktopClipboardFocusRestorer with WindowListener {
       'session': snapshot.sessionId,
       'target': _targetIndex(snapshot.target),
       'length': text.length,
+      ..._selectionDetails(snapshot.selection),
       'suppress_follow_up': suppressFollowUpPaste,
     });
     snapshot.target.replaceSelection(text, snapshot.selection);
@@ -791,6 +793,26 @@ class DesktopClipboardFocusRestorer with WindowListener {
   int? _targetIndex(DesktopClipboardTarget target) {
     final index = _targets.indexOf(target);
     return index < 0 ? null : index;
+  }
+
+  Map<String, Object?> _selectionDetails(Object selection) {
+    if (selection is TextSelection) {
+      return {
+        'selection_type': 'text',
+        'base': selection.baseOffset,
+        'extent': selection.extentOffset,
+      };
+    }
+    if (selection is CodeLineSelection) {
+      return {
+        'selection_type': 'code_line',
+        'base_index': selection.baseIndex,
+        'base': selection.baseOffset,
+        'extent_index': selection.extentIndex,
+        'extent': selection.extentOffset,
+      };
+    }
+    return {'selection_type': selection.runtimeType.toString()};
   }
 
   void _cancelRestore({_DesktopFocusSnapshot? expected}) {
