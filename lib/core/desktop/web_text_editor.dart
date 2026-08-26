@@ -484,6 +484,23 @@ function currentSelection() {
     selectionOffset(editor, range.endContainer, range.endOffset)
   ];
 }
+function insertPlainText(value) {
+  const selection = window.getSelection();
+  if (!selection || !selection.rangeCount) return;
+  const range = selection.getRangeAt(0);
+  range.deleteContents();
+  const node = document.createTextNode(value);
+  range.insertNode(node);
+  range.setStartAfter(node);
+  range.collapse(true);
+  selection.removeAllRanges();
+  selection.addRange(range);
+  editor.dispatchEvent(new InputEvent('input', {
+    bubbles: true,
+    inputType: 'insertText',
+    data: value
+  }));
+}
 function restoreSelection(base, extent) {
   const selection = window.getSelection();
   if (!selection) return;
@@ -614,8 +631,9 @@ editor.addEventListener('keydown', event => {
   if (event.key === 'Tab') {
     event.preventDefault(); document.execCommand('insertText', false, '  ');
   }
-  if (state.singleLine && event.key === 'Enter') {
+  if (event.key === 'Enter' && !composing) {
     event.preventDefault();
+    if (!state.singleLine) insertPlainText('\n');
   }
 });
 </script></body></html>''';
