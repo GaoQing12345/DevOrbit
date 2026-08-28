@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:hotkey_manager/hotkey_manager.dart';
@@ -30,6 +31,7 @@ class AppController extends ChangeNotifier {
   ToolboxSection _section = ToolboxSection.home;
   String? _selectedToolId;
   String? _hotKeyError;
+  bool _radialTransitioning = false;
 
   AppViewMode get mode => _mode;
   ToolboxSection get section => _section;
@@ -61,19 +63,45 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> toggleRadial() async {
-    if (_mode == AppViewMode.radial) {
-      await dismissRadial();
-      return;
+    // Window style changes on Windows can emit a transient blur before the
+    // radial window has finished showing. Ignore re-entrant hotkeys until the
+    // current show/hide operation has reached a stable state.
+    if (_radialTransitioning) return;
+    _radialTransitioning = true;
+    try {
+      if (_mode == AppViewMode.radial) {
+        await _dismissRadial();
+        return;
+      }
+      _mode = AppViewMode.radial;
+      notifyListeners();
+      // The native window may still contain the previous opaque toolbox frame.
+      // Wait until the transparent radial frame has been rasterized before
+      // showing the HWND, otherwise Windows can briefly expose a white frame.
+      if (Platform.environment['FLUTTER_TEST'] != 'true') {
+        await WidgetsBinding.instance.endOfFrame;
+      }
+      if (_mode != AppViewMode.radial) return;
+      await shell.showRadial();
+    } finally {
+      _radialTransitioning = false;
     }
-    _mode = AppViewMode.radial;
-    notifyListeners();
-    await shell.showRadial();
   }
 
-  Future<void> dismissRadial() async {
+  Future<void> _dismissRadial() async {
     _mode = AppViewMode.hidden;
     notifyListeners();
     await shell.hideRadial();
+  }
+
+  Future<void> dismissRadial() async {
+    if (_radialTransitioning) return;
+    _radialTransitioning = true;
+    try {
+      await _dismissRadial();
+    } finally {
+      _radialTransitioning = false;
+    }
   }
 
   Future<void> showToolbox() async {
@@ -155,6 +183,8 @@ class AppController extends ChangeNotifier {
   }
 
   void _handleWindowBlur() {
-    if (_mode == AppViewMode.radial) dismissRadial();
+    if (_mode == AppViewMode.radial && !_radialTransitioning) {
+      unawaited(dismissRadial());
+    }
   }
 }

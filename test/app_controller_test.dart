@@ -69,6 +69,29 @@ void main() {
     expect(fixture.shell.toolWindowShows, 1);
   });
 
+  test(
+    'transient blur while radial is opening does not show a white window',
+    () async {
+      final opening = Completer<void>();
+      final fixture = await _ControllerFixture.create(
+        onShowRadial: () => opening.future,
+      );
+      await fixture.controller.initialize();
+
+      final showing = fixture.controller.toggleRadial();
+      await Future<void>.delayed(Duration.zero);
+      fixture.shell.callbacks!.onWindowBlur();
+      await Future<void>.delayed(Duration.zero);
+
+      expect(fixture.controller.mode, AppViewMode.radial);
+      expect(fixture.shell.radialHideCount, 0);
+
+      opening.complete();
+      await showing;
+      expect(fixture.controller.mode, AppViewMode.radial);
+    },
+  );
+
   test('warms standalone tools while the desktop shell initializes', () async {
     final fixture = await _ControllerFixture.create();
 
@@ -219,10 +242,14 @@ class _ControllerFixture {
     List<ToolModule> modules = const [],
     _FakeStandaloneLauncher? launcher,
     Future<void> Function()? onHideRadial,
+    Future<void> Function()? onShowRadial,
   }) async {
     SharedPreferences.setMockInitialValues({});
     final settings = await SettingsStore.load();
-    final shell = _FakeDesktopShell(onHideRadial: onHideRadial);
+    final shell = _FakeDesktopShell(
+      onHideRadial: onHideRadial,
+      onShowRadial: onShowRadial,
+    );
     launcher ??= _FakeStandaloneLauncher();
     final controller = AppController(
       registry: ToolRegistry(modules),
@@ -261,9 +288,10 @@ class _FakeStandaloneLauncher implements StandaloneToolWindowLauncher {
 }
 
 class _FakeDesktopShell extends _FailingDesktopShell {
-  _FakeDesktopShell({this.onHideRadial});
+  _FakeDesktopShell({this.onHideRadial, this.onShowRadial});
 
   final Future<void> Function()? onHideRadial;
+  final Future<void> Function()? onShowRadial;
   int hideCount = 0;
   int radialHideCount = 0;
   int quitCount = 0;
@@ -277,6 +305,11 @@ class _FakeDesktopShell extends _FailingDesktopShell {
   Future<void> hideRadial() async {
     radialHideCount++;
     await onHideRadial?.call();
+  }
+
+  @override
+  Future<void> showRadial() async {
+    await onShowRadial?.call();
   }
 
   @override

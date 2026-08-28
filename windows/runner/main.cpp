@@ -44,11 +44,15 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
       has_argument("--text-compare-prewarm") ||
       has_argument("--timestamp-prewarm") ||
       has_argument("--sql-log-prewarm");
+  const bool starts_hidden = has_argument("--hidden");
 
   project.set_dart_entrypoint_arguments(std::move(command_line_arguments));
 
   FlutterWindow window(project);
-  window.SetShowOnFirstFrame(!is_prewarmed_tool_window);
+  // A background launch must remain hidden until the first real user action.
+  // Showing the opaque startup frame here races the Dart hide callback and
+  // can expose a white window before the radial surface becomes transparent.
+  window.SetShowOnFirstFrame(!is_prewarmed_tool_window && !starts_hidden);
   Win32Window::Point origin(10, 10);
   Win32Window::Size size(1280, 720);
   if (!window.Create(L"DevOrbit", origin, size)) {

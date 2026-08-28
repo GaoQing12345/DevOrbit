@@ -141,6 +141,10 @@ class NativeDesktopShell
     await windowManager.setResizable(false);
     await windowManager.setAlwaysOnTop(true);
     await windowManager.setSkipTaskbar(true);
+    // Apply transparency before changing the frame style. On Windows the
+    // style change can trigger an immediate repaint while the window is being
+    // moved to the cursor, so the native backdrop must already be transparent.
+    await windowManager.setBackgroundColor(Colors.transparent);
     if (_isWindows) {
       await windowManager.setAsFrameless();
     } else {
@@ -151,7 +155,6 @@ class NativeDesktopShell
     }
     await windowManager.setHasShadow(false);
     await _windowEffects.setRadialMode(true);
-    await windowManager.setBackgroundColor(Colors.transparent);
     await windowManager.setBounds(bounds);
     await windowManager.show();
     await windowManager.focus();
