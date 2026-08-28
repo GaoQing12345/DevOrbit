@@ -75,10 +75,11 @@ class AppController extends ChangeNotifier {
       }
       _mode = AppViewMode.radial;
       notifyListeners();
-      // The native window may still contain the previous opaque toolbox frame.
-      // Wait until the transparent radial frame has been rasterized before
-      // showing the HWND, otherwise Windows can briefly expose a white frame.
-      if (Platform.environment['FLUTTER_TEST'] != 'true') {
+      // Only Windows needs to wait for the transparent radial frame before
+      // showing its HWND. Waiting here on a hidden macOS window can leave a
+      // global-hotkey invocation pending without ever presenting the radial.
+      if (Platform.isWindows &&
+          Platform.environment['FLUTTER_TEST'] != 'true') {
         await WidgetsBinding.instance.endOfFrame;
       }
       if (_mode != AppViewMode.radial) return;
