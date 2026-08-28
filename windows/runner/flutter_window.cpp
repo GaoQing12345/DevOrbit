@@ -205,6 +205,29 @@ HWND FindChildWindowByClass(HWND parent, const wchar_t* class_name) {
   return nullptr;
 }
 
+HWND FindAncestorWindowByClass(HWND window, HWND root,
+                               const wchar_t* class_name) {
+  for (HWND current = window; current && current != root;
+       current = GetParent(current)) {
+    wchar_t current_class[128] = {};
+    GetClassNameW(current, current_class,
+                  static_cast<int>(sizeof(current_class) /
+                                   sizeof(current_class[0])));
+    if (_wcsicmp(current_class, class_name) == 0 &&
+        GetAncestor(current, GA_ROOT) == root) {
+      return current;
+    }
+  }
+  return nullptr;
+}
+
+HWND FindPlatformViewUnderCursor(HWND root) {
+  POINT cursor = {};
+  if (!GetCursorPos(&cursor)) return nullptr;
+  return FindAncestorWindowByClass(WindowFromPoint(cursor), root,
+                                   L"CustomPlatformView");
+}
+
 BOOL CALLBACK ActivateProcessWindow(HWND window, LPARAM parameter) {
   auto* request = reinterpret_cast<WindowActivationRequest*>(parameter);
   DWORD window_process_id = 0;
@@ -368,9 +391,29 @@ void FlutterWindow::RegisterClipboardChannel() {
           // outer shortcut node active and WebView2 receives no keyboard input
           // after a clipboard picker returns.
           ShowAndFocusProcessWindow(GetHandle());
-          HWND platform_view =
-              FindChildWindowByClass(GetHandle(), L"CustomPlatformView");
+          HWND platform_view = last_editor_platform_view_;
+          if (!IsWindow(platform_view) ||
+              GetAncestor(platform_view, GA_ROOT) != GetHandle()) {
+            platform_view = FindPlatformViewUnderCursor(GetHandle());
+          }
+          if (!platform_view) {
+            platform_view =
+                FindChildWindowByClass(GetHandle(), L"CustomPlatformView");
+          }
           if (platform_view && IsWindowEnabled(platform_view)) {
+            last_editor_platform_view_ = platform_view;
+            SetFocus(platform_view);
+          }
+          result->Success();
+          return;
+        }
+        if (call.method_name() == "claimEditorFocus") {
+          // A DOM focus event is not emitted for a second click inside the
+          // same editor. Resolve the platform view from the live pointer so
+          // repeated clicks and side-by-side editors keep the correct HWND.
+          HWND platform_view = FindPlatformViewUnderCursor(GetHandle());
+          if (platform_view && IsWindowEnabled(platform_view)) {
+            last_editor_platform_view_ = platform_view;
             SetFocus(platform_view);
           }
           result->Success();
@@ -623,9 +666,9 @@ void FlutterWindow::ActivateToolWindow() {
     return;
   }
 
-  // Prewarmed tools deliberately render an empty first frame while hidden.
-  // Ask Dart to reveal the real page, then expose the HWND only after that
-  // frame is ready so Windows never presents a transparent tool window.
+  // Most prewarmed tools render an empty first frame while hidden; heavier
+  // tools may already have rendered their platform views. In either case,
+  // ask Dart for a fresh frame and reveal the HWND only after it completes.
   tool_window_activation_pending_ = true;
   flutter_controller_->engine()->SetNextFrameCallback([this]() {
     tool_window_activation_pending_ = false;
@@ -1379,6 +1422,7 @@ bool FlutterWindow::OnCreate() {
 
 void FlutterWindow::OnDestroy() {
   ResetPasteCapture();
+  last_editor_platform_view_ = nullptr;
   RemovePropW(GetHandle(), kToolWindowReadyProperty);
   if (window_effects_channel_) {
     window_effects_channel_ = nullptr;

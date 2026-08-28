@@ -102,6 +102,7 @@ class FlutterWindow : public Win32Window {
   int paste_target_client_count_ = 0;
   bool show_on_first_frame_ = true;
   bool tool_window_activation_pending_ = false;
+  HWND last_editor_platform_view_ = nullptr;
 };
 
 #endif  // RUNNER_FLUTTER_WINDOW_H_

@@ -82,6 +82,37 @@ void main() {
     },
   );
 
+  test(
+    'prewarmed content can render behind the hidden native window',
+    () async {
+      var activationCount = 0;
+      final activation = StandaloneWindowActivation(
+        prewarmed: true,
+        renderWhilePrewarmed: true,
+        onActivated: () async => activationCount++,
+      );
+
+      expect(activation.visible, isTrue);
+      await activation.initialize();
+      expect(activation.visible, isTrue);
+      expect(processWindowCalls.map((call) => call.method), [
+        'markReadyForActivation',
+      ]);
+
+      var frameRequestCount = 0;
+      activation.addListener(() => frameRequestCount++);
+      await _sendProcessWindowCall('prepareForActivation');
+      expect(activation.visible, isTrue);
+      expect(activationCount, 0);
+      expect(frameRequestCount, 1);
+
+      await _sendProcessWindowCall('activationComplete');
+      await Future<void>.delayed(Duration.zero);
+      expect(activationCount, 1);
+      activation.dispose();
+    },
+  );
+
   test('cold window is shown and focused before activation work', () async {
     var activationCount = 0;
     final activation = StandaloneWindowActivation(

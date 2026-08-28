@@ -62,6 +62,10 @@ class DesktopWebTextEditor extends StatefulWidget {
     _DesktopWebTextEditorState.restoreActiveEditorFocus();
   }
 
+  static void suspendActiveEditorFocus() {
+    _DesktopWebTextEditorState.suspendActiveEditorFocus();
+  }
+
   static void collapseActiveJson() {
     _DesktopWebTextEditorState.collapseActiveJson();
   }
@@ -121,9 +125,24 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
   /// keyboard-shortcut focus node. Let the editor win that race instead.
   static void restoreActiveEditorFocus() {
     final editor = _activeEditor;
-    if (editor == null || editor._disposed || !editor._isVisible) return;
+    if (editor == null ||
+        editor._disposed ||
+        !editor._isVisible ||
+        !editor._editorSessionActive) {
+      return;
+    }
     editor._restoreFocusOnWindowFocus = true;
     editor._restoreWebFocus();
+  }
+
+  /// A Flutter text field layered above a WebView has taken over editing.
+  /// Keep the DOM selection intact, but stop native window restoration from
+  /// returning keyboard focus to the browser behind that field.
+  static void suspendActiveEditorFocus() {
+    final editor = _activeEditor;
+    if (editor == null || editor._disposed) return;
+    editor._editorSessionActive = false;
+    editor._restoreFocusOnWindowFocus = false;
   }
 
   /// Collapse every foldable JSON block in the active WebView editor.
@@ -175,6 +194,11 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
   }
 
   void _focusEditorFromAutofocus() {
+    _claimEditorSession();
+    _evaluateJavascript('window.devOrbitFocus();');
+  }
+
+  void _claimEditorSession() {
     final previous = _activeEditor;
     if (previous != null && !identical(previous, this)) {
       previous._restoreFocusOnWindowFocus = false;
@@ -183,7 +207,6 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
     _activeEditor = this;
     _editorSessionActive = true;
     _restoreFocusOnWindowFocus = false;
-    _evaluateJavascript('window.devOrbitFocus();');
   }
 
   void _onAppInactive() {
@@ -288,14 +311,7 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
       callback: (args) {
         if (!_isVisible || _disposed) return null;
         if (args.isNotEmpty && args.first == true) {
-          final previous = _activeEditor;
-          if (previous != null && !identical(previous, this)) {
-            previous._restoreFocusOnWindowFocus = false;
-            previous._editorSessionActive = false;
-          }
-          _activeEditor = this;
-          _editorSessionActive = true;
-          _restoreFocusOnWindowFocus = false;
+          _claimEditorSession();
           if (args.length >= 3) {
             final selection = NativeTextSelection(
               baseOffset: _asInt(args[1]),
@@ -330,6 +346,15 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
     );
   }
 
+  void _onPointerDown(PointerDownEvent _) {
+    if (!_isVisible || _disposed) return;
+    // DOM focus does not fire when an already-focused editor is clicked a
+    // second time. Claim the editor directly from Flutter's pointer stream so
+    // focus recovery does not depend on a delayed JavaScript bridge callback.
+    _claimEditorSession();
+    if (Platform.isWindows) unawaited(_claimNativeEditorFocus());
+  }
+
   int _asInt(Object? value) => value is num ? value.toInt() : 0;
 
   void _traceSelection(String event, NativeTextSelection selection) {
@@ -359,6 +384,7 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
         !_loaded ||
         !_isVisible ||
         !identical(_activeEditor, this) ||
+        !_editorSessionActive ||
         controller == null) {
       return;
     }
@@ -374,6 +400,7 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
       if (!_disposed &&
           _isVisible &&
           identical(_activeEditor, this) &&
+          _editorSessionActive &&
           _restoreFocusOnWindowFocus) {
         _restoreWebFocus(attempt: attempt + 1);
       }
@@ -394,7 +421,11 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
 
   @override
   void onWindowFocus() {
-    if (!_isVisible || !identical(_activeEditor, this)) return;
+    if (!_isVisible ||
+        !identical(_activeEditor, this) ||
+        (!_editorSessionActive && !_restoreFocusOnWindowFocus)) {
+      return;
+    }
     _restoreFocusOnWindowFocus = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _restoreWebFocus();
@@ -409,6 +440,17 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
       // The method is only available in the desktop runners.
     } on PlatformException {
       // Native focus recovery is best effort; the DOM recovery still runs.
+    }
+  }
+
+  Future<void> _claimNativeEditorFocus() async {
+    if (!_supported || !Platform.isWindows) return;
+    try {
+      await _focusChannel.invokeMethod<void>('claimEditorFocus');
+    } on MissingPluginException {
+      // The method is only available in the Windows runner.
+    } on PlatformException {
+      // The DOM still owns the selection if native focus cannot be adjusted.
     }
   }
 
@@ -488,23 +530,26 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
   @override
   Widget build(BuildContext context) {
     if (!_supported) return const SizedBox.shrink();
-    return InAppWebView(
-      initialData: InAppWebViewInitialData(
-        data: _editorHtml,
-        baseUrl: WebUri('https://dev-orbit.local/'),
+    return Listener(
+      onPointerDown: _onPointerDown,
+      child: InAppWebView(
+        initialData: InAppWebViewInitialData(
+          data: _editorHtml,
+          baseUrl: WebUri('https://dev-orbit.local/'),
+        ),
+        initialSettings: InAppWebViewSettings(
+          javaScriptEnabled: true,
+          disableContextMenu: false,
+          transparentBackground: true,
+          supportZoom: false,
+          allowsBackForwardNavigationGestures: false,
+        ),
+        onWebViewCreated: _onWebViewCreated,
+        onLoadStop: _onLoadStop,
+        onWindowBlur: (_) => onWindowBlur(),
+        onWindowFocus: (_) => onWindowFocus(),
+        gestureRecognizers: const {},
       ),
-      initialSettings: InAppWebViewSettings(
-        javaScriptEnabled: true,
-        disableContextMenu: false,
-        transparentBackground: true,
-        supportZoom: false,
-        allowsBackForwardNavigationGestures: false,
-      ),
-      onWebViewCreated: _onWebViewCreated,
-      onLoadStop: _onLoadStop,
-      onWindowBlur: (_) => onWindowBlur(),
-      onWindowFocus: (_) => onWindowFocus(),
-      gestureRecognizers: const {},
     );
   }
 }

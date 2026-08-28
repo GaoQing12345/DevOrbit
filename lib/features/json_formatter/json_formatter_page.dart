@@ -53,6 +53,8 @@ class _JsonFormatterPageState extends State<JsonFormatterPage> {
     _editor = CodeLineEditingController.fromText(widget.controller.text);
     _findController = CodeFindController(_editor);
     _findController.addListener(_onFindChanged);
+    _findController.findInputFocusNode.addListener(_onFindFieldFocusChanged);
+    _findController.replaceInputFocusNode.addListener(_onFindFieldFocusChanged);
     _focusRestorer = JsonFocusRestorer(_findController, _editor);
     widget.controller.addListener(_syncFromDocument);
   }
@@ -62,6 +64,10 @@ class _JsonFormatterPageState extends State<JsonFormatterPage> {
     widget.controller.removeListener(_syncFromDocument);
     _focusRestorer.dispose();
     _findController.removeListener(_onFindChanged);
+    _findController.findInputFocusNode.removeListener(_onFindFieldFocusChanged);
+    _findController.replaceInputFocusNode.removeListener(
+      _onFindFieldFocusChanged,
+    );
     _findController.dispose();
     _editor.dispose();
     super.dispose();
@@ -150,6 +156,13 @@ class _JsonFormatterPageState extends State<JsonFormatterPage> {
 
   void _onFindChanged() {
     if (mounted) setState(() {});
+  }
+
+  void _onFindFieldFocusChanged() {
+    if (_findController.findInputFocusNode.hasFocus ||
+        _findController.replaceInputFocusNode.hasFocus) {
+      DesktopWebTextEditor.suspendActiveEditorFocus();
+    }
   }
 
   Future<bool> _confirmReplace() async {

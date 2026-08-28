@@ -92,6 +92,9 @@ class _StandaloneJsonFormatterAppState
     _controller = JsonDocumentController();
     _windowActivation = StandaloneWindowActivation(
       prewarmed: widget.prewarmed,
+      // Building WebView2 while the native HWND is still hidden turns Windows
+      // prewarming into real editor prewarming instead of only process startup.
+      renderWhilePrewarmed: widget.prewarmed && Platform.isWindows,
       onActivated: _importClipboard,
     );
     WidgetsBinding.instance.addPostFrameCallback(
