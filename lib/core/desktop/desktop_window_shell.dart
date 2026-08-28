@@ -14,6 +14,8 @@ class DesktopEscapeCloseRegion extends StatefulWidget {
     required this.child,
   });
 
+  static const doubleEscapeTimeout = Duration(milliseconds: 700);
+
   final Future<void> Function() onClose;
   final Widget child;
 
@@ -47,6 +49,8 @@ class _DesktopEscapeCloseRegionState extends State<DesktopEscapeCloseRegion>
     debugLabel: 'desktop-window-escape-close-region',
   );
   bool _closing = false;
+  bool _awaitingSecondEscape = false;
+  Timer? _doubleEscapeTimer;
 
   @override
   void initState() {
@@ -60,6 +64,11 @@ class _DesktopEscapeCloseRegionState extends State<DesktopEscapeCloseRegion>
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _restoreWindowFocus();
     });
+  }
+
+  @override
+  void onWindowBlur() {
+    _clearPendingEscape();
   }
 
   void _restoreWindowFocus() {
@@ -122,8 +131,34 @@ class _DesktopEscapeCloseRegionState extends State<DesktopEscapeCloseRegion>
     }
   }
 
+  void _handleEscape() {
+    if (DesktopEscapeCloseRegion._takeCurrentEscapeSuppression()) {
+      _clearPendingEscape();
+      return;
+    }
+
+    if (_awaitingSecondEscape) {
+      _clearPendingEscape();
+      unawaited(_close());
+      return;
+    }
+
+    _awaitingSecondEscape = true;
+    _doubleEscapeTimer = Timer(
+      DesktopEscapeCloseRegion.doubleEscapeTimeout,
+      _clearPendingEscape,
+    );
+  }
+
+  void _clearPendingEscape() {
+    _doubleEscapeTimer?.cancel();
+    _doubleEscapeTimer = null;
+    _awaitingSecondEscape = false;
+  }
+
   @override
   void dispose() {
+    _clearPendingEscape();
     windowManager.removeListener(this);
     _focusNode.dispose();
     super.dispose();
@@ -134,8 +169,7 @@ class _DesktopEscapeCloseRegionState extends State<DesktopEscapeCloseRegion>
     return CallbackShortcuts(
       bindings: {
         const SingleActivator(LogicalKeyboardKey.escape): () {
-          if (DesktopEscapeCloseRegion._takeCurrentEscapeSuppression()) return;
-          unawaited(_close());
+          _handleEscape();
         },
       },
       child: Focus(focusNode: _focusNode, autofocus: true, child: widget.child),

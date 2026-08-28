@@ -95,35 +95,41 @@ void main() {
     expect(controller.sourceText, 'edited source');
   });
 
-  testWidgets('idle translator lets Escape close the standalone window', (
-    tester,
-  ) async {
-    var closeCount = 0;
-    final controller = TranslatorController(
-      client: _NoopClient(),
-      keyStore: _MemoryApiKeyStore(),
-    )..translatedText = 'translated text';
-    addTearDown(controller.dispose);
-    await tester.binding.setSurfaceSize(const Size(960, 700));
-    addTearDown(() => tester.binding.setSurfaceSize(null));
+  testWidgets(
+    'idle translator needs two Escapes to close the standalone window',
+    (tester) async {
+      var closeCount = 0;
+      final controller = TranslatorController(
+        client: _NoopClient(),
+        keyStore: _MemoryApiKeyStore(),
+      )..translatedText = 'translated text';
+      addTearDown(controller.dispose);
+      await tester.binding.setSurfaceSize(const Size(960, 700));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
 
-    await tester.pumpWidget(
-      MaterialApp(
-        home: DesktopEscapeCloseRegion(
-          onClose: () async => closeCount++,
-          child: Scaffold(body: TranslatorPage(controller: controller)),
+      await tester.pumpWidget(
+        MaterialApp(
+          home: DesktopEscapeCloseRegion(
+            onClose: () async => closeCount++,
+            child: Scaffold(body: TranslatorPage(controller: controller)),
+          ),
         ),
-      ),
-    );
-    await tester.pump();
+      );
+      await tester.pump();
 
-    await tester.tap(find.text('translated text'));
-    await tester.pump();
-    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
-    await tester.pump();
+      await tester.tap(find.text('translated text'));
+      await tester.pump();
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pump();
 
-    expect(closeCount, 1);
-  });
+      expect(closeCount, 0);
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pump();
+
+      expect(closeCount, 1);
+    },
+  );
 
   testWidgets('Escape cancels translation before closing the window', (
     tester,
@@ -149,6 +155,11 @@ void main() {
     await tester.pump();
 
     expect(controller.isTranslating, isFalse);
+    expect(closeCount, 0);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pump();
+
     expect(closeCount, 0);
 
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);

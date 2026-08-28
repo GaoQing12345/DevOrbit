@@ -113,29 +113,35 @@ void main() {
     debugDefaultTargetPlatformOverride = null;
   });
 
-  testWidgets('Escape closes find before closing the formatter window', (
-    tester,
-  ) async {
-    var closeCount = 0;
-    final fixture = await JsonFormatterFixture.create(
-      onEscapeClose: () async => closeCount++,
-    );
-    await tester.pumpWidget(fixture.widget);
-    await tester.tap(find.byTooltip('查找'));
-    await tester.pump();
+  testWidgets(
+    'Escape closes find before a double Escape closes the formatter',
+    (tester) async {
+      var closeCount = 0;
+      final fixture = await JsonFormatterFixture.create(
+        onEscapeClose: () async => closeCount++,
+      );
+      await tester.pumpWidget(fixture.widget);
+      await tester.tap(find.byTooltip('查找'));
+      await tester.pump();
 
-    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
-    await tester.pump();
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pump();
 
-    expect(find.byKey(const ValueKey('json-find-input')), findsNothing);
-    expect(closeCount, 0);
+      expect(find.byKey(const ValueKey('json-find-input')), findsNothing);
+      expect(closeCount, 0);
 
-    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
-    await tester.pump();
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pump();
 
-    expect(closeCount, 1);
-    await disposeEditor(tester);
-  });
+      expect(closeCount, 0);
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pump();
+
+      expect(closeCount, 1);
+      await disposeEditor(tester);
+    },
+  );
 
   testWidgets('find panel can replace all matches', (tester) async {
     final fixture = await JsonFormatterFixture.create(text: 'foo foo');

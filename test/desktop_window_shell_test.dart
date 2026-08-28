@@ -6,7 +6,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:window_manager/window_manager.dart';
 
 void main() {
-  testWidgets('Escape closes the active desktop window', (tester) async {
+  testWidgets('two consecutive Escapes close the active desktop window', (
+    tester,
+  ) async {
     var closeCount = 0;
     await tester.pumpWidget(
       MaterialApp(
@@ -21,10 +23,15 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pump();
 
+    expect(closeCount, 0);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pump();
+
     expect(closeCount, 1);
   });
 
-  testWidgets('Escape closes a desktop window without an editable focus', (
+  testWidgets('two consecutive Escapes close without an editable focus', (
     tester,
   ) async {
     var closeCount = 0;
@@ -37,6 +44,38 @@ void main() {
       ),
     );
     await tester.pump();
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pump();
+
+    expect(closeCount, 0);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pump();
+
+    expect(closeCount, 1);
+  });
+
+  testWidgets('Escape presses separated by the timeout do not close a window', (
+    tester,
+  ) async {
+    var closeCount = 0;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: DesktopEscapeCloseRegion(
+          onClose: () async => closeCount++,
+          child: const Scaffold(body: SizedBox.expand()),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pump(DesktopEscapeCloseRegion.doubleEscapeTimeout);
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pump();
+
+    expect(closeCount, 0);
 
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pump();
@@ -63,6 +102,11 @@ void main() {
     await _sendWindowEvent('blur');
     await _sendWindowEvent('focus');
     await tester.pump();
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pump();
+
+    expect(closeCount, 0);
 
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pump();
