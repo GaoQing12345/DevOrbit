@@ -675,6 +675,10 @@ let state = { text: '', baseOffset: 0, extentOffset: 0, syntax: 'plain', readOnl
 let composing = false;
 let inputPending = false;
 let inputCommitScheduled = false;
+let pendingEditState = null;
+let historyStates = [];
+let historyIndex = -1;
+let historyApplying = false;
 let restoreAfterWindowFocus = false;
 let collapsedFolds = [];
 const bridge = (name, args) => {
@@ -731,6 +735,64 @@ function currentSelection() {
     selectionOffset(editor, range.startContainer, range.startOffset),
     selectionOffset(editor, range.endContainer, range.endOffset)
   ];
+}
+function selectionState(text, selection) {
+  return { text, base: selection[0], extent: selection[1] };
+}
+function sameHistoryState(left, right) {
+  return left && right && left.text === right.text &&
+    left.base === right.base && left.extent === right.extent;
+}
+function resetHistory(text, base, extent) {
+  historyStates = [{ text, base, extent }];
+  historyIndex = 0;
+  pendingEditState = null;
+}
+function captureEditStart() {
+  if (historyApplying || pendingEditState) return;
+  pendingEditState = selectionState(readText(), currentSelection());
+}
+function recordEdit(text, selection) {
+  if (historyApplying) return;
+  if (historyIndex < 0) resetHistory(text, selection[0], selection[1]);
+  const before = pendingEditState;
+  pendingEditState = null;
+  if (before && historyStates[historyIndex].text === before.text) {
+    // A click can move the caret without changing text. Preserve that actual
+    // pre-edit caret so undo returns to the location where this edit began.
+    historyStates[historyIndex] = before;
+  }
+  const current = historyStates[historyIndex];
+  const next = { text, base: selection[0], extent: selection[1] };
+  if (sameHistoryState(current, next)) return;
+  historyStates.splice(historyIndex + 1);
+  historyStates.push(next);
+  historyIndex = historyStates.length - 1;
+  // Keep the in-memory history bounded for long-lived standalone windows.
+  if (historyStates.length > 200) {
+    historyStates.shift();
+    historyIndex--;
+  }
+}
+function applyHistoryState(entry) {
+  if (!entry || historyApplying) return;
+  historyApplying = true;
+  pendingEditState = null;
+  collapsedFolds = [];
+  render(entry.text, entry.base, entry.extent, false);
+  lastSelection = [entry.base, entry.extent];
+  bridge('editorChanged', [entry.text, entry.base, entry.extent]);
+  historyApplying = false;
+}
+function undoHistory() {
+  if (historyIndex <= 0) return;
+  historyIndex--;
+  applyHistoryState(historyStates[historyIndex]);
+}
+function redoHistory() {
+  if (historyIndex < 0 || historyIndex >= historyStates.length - 1) return;
+  historyIndex++;
+  applyHistoryState(historyStates[historyIndex]);
 }
 function insertPlainText(value) {
   const selection = window.getSelection();
@@ -1040,6 +1102,7 @@ window.devOrbitSetState = next => {
   editor.contentEditable = next.readOnly ? 'false' : 'true';
   if (changedText || changedSyntax) {
     render(next.text, next.baseOffset, next.extentOffset, false);
+    resetHistory(next.text, next.baseOffset, next.extentOffset);
   } else if (document.activeElement !== editor) {
     // Flutter rebuilds can arrive while a clipboard picker owns the native
     // focus. Do not move the DOM caret, or overwrite its saved range, with a
@@ -1119,6 +1182,7 @@ function scheduleInputCommit() {
     if (composing || !inputPending) return;
     const text = readText(), selection = currentSelection();
     collapsedFolds = [];
+    recordEdit(text, selection);
     lastSelection = selection;
     render(text, selection[0], selection[1], false);
     // Text and selection cross the bridge as one committed edit. Flutter
@@ -1127,12 +1191,20 @@ function scheduleInputCommit() {
     inputPending = false;
   }, 0);
 }
-editor.addEventListener('beforeinput', () => {
+editor.addEventListener('beforeinput', event => {
+  if (event.inputType === 'historyUndo') {
+    event.preventDefault(); undoHistory(); return;
+  }
+  if (event.inputType === 'historyRedo') {
+    event.preventDefault(); redoHistory(); return;
+  }
+  captureEditStart();
   // Selection changes caused by this edit must not reach Flutter before its
   // text does. This is essential for marked text from Chinese/Japanese IMEs.
   inputPending = true;
 });
 editor.addEventListener('compositionstart', () => {
+  captureEditStart();
   selectionFrozen = false;
   composing = true;
   inputPending = true;
@@ -1201,6 +1273,14 @@ editor.addEventListener('keydown', event => {
     bridge('selectionChanged', [0, length]);
     return;
   }
+  if (modified && key === 'z') {
+    event.preventDefault();
+    if (event.shiftKey) redoHistory(); else undoHistory();
+    return;
+  }
+  if (modified && !event.metaKey && key === 'y') {
+    event.preventDefault(); redoHistory(); return;
+  }
   if (modified && key === 'c') {
     const selection = currentSelection();
     if (selection[0] !== selection[1]) {
@@ -1215,10 +1295,11 @@ editor.addEventListener('keydown', event => {
     event.preventDefault(); bridge('findRequested', []); return;
   }
   if (event.key === 'Tab') {
-    event.preventDefault(); document.execCommand('insertText', false, '  ');
+    event.preventDefault(); captureEditStart();
+    document.execCommand('insertText', false, '  ');
   }
   if (event.key === 'Enter' && !composing) {
-    event.preventDefault();
+    event.preventDefault(); captureEditStart();
     if (!state.singleLine) insertPlainText('\n');
   }
 });
