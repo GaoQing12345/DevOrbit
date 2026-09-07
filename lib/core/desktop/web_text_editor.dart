@@ -74,6 +74,12 @@ class DesktopWebTextEditor extends StatefulWidget {
     _DesktopWebTextEditorState.expandActiveJson();
   }
 
+  /// Reveal a match while a Flutter find field owns focus above the editor.
+  /// This intentionally does not restore keyboard focus to the WebView.
+  static void revealActiveSelection(NativeTextSelection selection) {
+    _DesktopWebTextEditorState.revealActiveSelection(selection);
+  }
+
   @override
   State<DesktopWebTextEditor> createState() => _DesktopWebTextEditorState();
 }
@@ -119,6 +125,10 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
         editor._isVisible &&
         editor._editorSessionActive &&
         editor._restoreFocusOnWindowFocus;
+  }
+
+  static void revealActiveSelection(NativeTextSelection selection) {
+    _activeEditor?._revealSelection(selection);
   }
 
   /// Called by the outer desktop focus shell before it restores its own
@@ -460,6 +470,18 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
     unawaited(controller.evaluateJavascript(source: source));
   }
 
+  void _revealSelection(NativeTextSelection selection) {
+    final controller = _controller;
+    if (_disposed || !_loaded || controller == null) return;
+    final base = selection.baseOffset.clamp(0, widget.text.length);
+    final extent = selection.extentOffset.clamp(0, widget.text.length);
+    unawaited(
+      controller.evaluateJavascript(
+        source: 'window.devOrbitRevealSelection($base, $extent);',
+      ),
+    );
+  }
+
   void _syncState() {
     final controller = _controller;
     if (_disposed || !_loaded || controller == null) return;
@@ -737,6 +759,31 @@ function restoreSelection(base, extent) {
   selection.removeAllRanges(); selection.addRange(range);
   lastSelection = [base, extent];
 }
+function revealSelection(base, extent) {
+  const start = locate(editor, Math.min(base, extent));
+  const end = locate(editor, Math.max(base, extent));
+  const range = document.createRange();
+  range.setStart(start.node, start.offset);
+  range.setEnd(end.node, end.offset);
+  const selection = window.getSelection();
+  if (!selection) return;
+  selection.removeAllRanges(); selection.addRange(range);
+  lastSelection = [base, extent];
+  const rect = range.getBoundingClientRect();
+  const editorRect = editor.getBoundingClientRect();
+  if (rect.height > 0) {
+    if (rect.top < editorRect.top) {
+      editor.scrollTop += rect.top - editorRect.top - editor.clientHeight * 0.35;
+    } else if (rect.bottom > editorRect.bottom) {
+      editor.scrollTop += rect.bottom - editorRect.bottom + editor.clientHeight * 0.35;
+    }
+    if (rect.left < editorRect.left) {
+      editor.scrollLeft += rect.left - editorRect.left - editor.clientWidth * 0.35;
+    } else if (rect.right > editorRect.right) {
+      editor.scrollLeft += rect.right - editorRect.right + editor.clientWidth * 0.35;
+    }
+  }
+}
 // textContent includes the contents of display:none fold spans, while the
 // empty fold-toggle elements contribute no characters. This keeps offsets
 // stable while a JSON block is collapsed. When everything is expanded, keep
@@ -1011,6 +1058,23 @@ window.devOrbitRestoreFocus = () => {
   restoreSelection(lastSelection[0], lastSelection[1]);
   editor.focus();
   restoreSelection(lastSelection[0], lastSelection[1]);
+};
+window.devOrbitRevealSelection = (base, extent) => {
+  const ranges = jsonFoldRanges(readText());
+  const hidden = ranges.filter(range =>
+    collapsedFolds.includes(range.start) &&
+    Math.max(base, extent) > range.start &&
+    Math.min(base, extent) < range.end
+  );
+  if (hidden.length) {
+    hidden.forEach(range => {
+      const index = collapsedFolds.indexOf(range.start);
+      if (index >= 0) collapsedFolds.splice(index, 1);
+    });
+    const text = readText();
+    rerenderPreservingSelection(text, base, extent);
+  }
+  revealSelection(base, extent);
 };
 window.devOrbitFocus = () => {
   selectionFrozen = true;

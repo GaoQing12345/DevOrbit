@@ -155,6 +155,19 @@ class _JsonFormatterPageState extends State<JsonFormatterPage> {
   }
 
   void _onFindChanged() {
+    if (_usesWebEditor) {
+      final match = _findController.currentMatchSelection;
+      if (match != null) {
+        _editor.selection = match;
+        final selection = _nativeSelection();
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted || _findController.currentMatchSelection != match) {
+            return;
+          }
+          DesktopWebTextEditor.revealActiveSelection(selection);
+        });
+      }
+    }
     if (mounted) setState(() {});
   }
 
