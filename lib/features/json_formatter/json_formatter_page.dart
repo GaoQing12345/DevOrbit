@@ -178,6 +178,11 @@ class _JsonFormatterPageState extends State<JsonFormatterPage> {
     }
   }
 
+  void _unfocusFindFields() {
+    _findController.findInputFocusNode.unfocus();
+    _findController.replaceInputFocusNode.unfocus();
+  }
+
   Future<bool> _confirmReplace() async {
     if (!widget.controller.isDirty) return true;
     return await showDialog<bool>(
@@ -395,6 +400,7 @@ class _JsonFormatterPageState extends State<JsonFormatterPage> {
             selection: _nativeSelection(),
             onChanged: _onNativeEditorChanged,
             onSelectionChanged: _onNativeSelectionChanged,
+            onEditorPointerDown: _unfocusFindFields,
             onFind: _findController.findMode,
             backgroundColor: theme.colorScheme.surfaceContainerLowest,
             textColor: theme.colorScheme.onSurface,

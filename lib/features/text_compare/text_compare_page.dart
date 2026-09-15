@@ -29,6 +29,13 @@ class _TextCompareChunkAnalyzer implements CodeChunkAnalyzer {
   }
 }
 
+class _TextCompareFindMatch {
+  const _TextCompareFindMatch(this.start, this.end);
+
+  final int start;
+  final int end;
+}
+
 class TextComparePage extends StatefulWidget {
   const TextComparePage({super.key, required this.controller});
 
@@ -52,6 +59,12 @@ class _TextComparePageState extends State<TextComparePage> {
   int _foldedLineCount = 0;
   bool _syncingScroll = false;
   bool _highlightRepaintScheduled = false;
+  late final TextEditingController _findInputController;
+  final _findFocusNode = FocusNode(debugLabel: 'text-compare-find');
+  TextCompareSide _activeFindSide = TextCompareSide.left;
+  List<_TextCompareFindMatch> _findMatches = const [];
+  int _findMatchIndex = -1;
+  bool _findVisible = false;
 
   bool get _usesWebEditor =>
       !kIsWeb &&
@@ -71,6 +84,8 @@ class _TextComparePageState extends State<TextComparePage> {
     );
     _leftScrollController = CodeScrollController();
     _rightScrollController = CodeScrollController();
+    _findInputController = TextEditingController();
+    _findInputController.addListener(_onFindQueryChanged);
     _leftScrollController.verticalScroller.addListener(_syncLeftScroll);
     _rightScrollController.verticalScroller.addListener(_syncRightScroll);
     _focusRestorer = DesktopClipboardFocusRestorer(
@@ -128,6 +143,9 @@ class _TextComparePageState extends State<TextComparePage> {
     _leftScrollController.horizontalScroller.dispose();
     _rightScrollController.verticalScroller.dispose();
     _rightScrollController.horizontalScroller.dispose();
+    _findInputController.removeListener(_onFindQueryChanged);
+    _findInputController.dispose();
+    _findFocusNode.dispose();
     _leftFocusNode.removeListener(_handleFocusChange);
     _rightFocusNode.removeListener(_handleFocusChange);
     _leftEditor.dispose();
@@ -140,7 +158,184 @@ class _TextComparePageState extends State<TextComparePage> {
   }
 
   void _handleFocusChange() {
+    if (_leftFocusNode.hasFocus) {
+      _setActiveFindSide(TextCompareSide.left);
+    } else if (_rightFocusNode.hasFocus) {
+      _setActiveFindSide(TextCompareSide.right);
+    }
     if (mounted) setState(() {});
+  }
+
+  void _activateWebSide(TextCompareSide side) {
+    _setActiveFindSide(side);
+    _findFocusNode.unfocus();
+    if (mounted) setState(() {});
+  }
+
+  void _setActiveFindSide(TextCompareSide side) {
+    if (_activeFindSide == side) return;
+    _activeFindSide = side;
+    if (_findVisible) _refreshFindMatches(resetIndex: true);
+  }
+
+  String _findText(TextCompareSide side) {
+    return side == TextCompareSide.left
+        ? widget.controller.leftText
+        : widget.controller.rightText;
+  }
+
+  TextEditingController _webControllerFor(TextCompareSide side) {
+    return side == TextCompareSide.left
+        ? _leftWebController
+        : _rightWebController;
+  }
+
+  CodeLineEditingController _editorFor(TextCompareSide side) {
+    return side == TextCompareSide.left ? _leftEditor : _rightEditor;
+  }
+
+  int _currentOffset(TextCompareSide side) {
+    if (_usesWebEditor) {
+      final controller = _webControllerFor(side);
+      return controller.selection.extentOffset.clamp(0, controller.text.length);
+    }
+    final editor = _editorFor(side);
+    final selection = editor.selection;
+    final text = _findText(side);
+    if (editor.codeLines.isEmpty) return 0;
+    var offset = 0;
+    final lineIndex = selection.extentIndex.clamp(
+      0,
+      editor.codeLines.length - 1,
+    );
+    for (var index = 0; index < lineIndex; index++) {
+      offset += editor.codeLines[index].text.length + 1;
+    }
+    return (offset + selection.extentOffset).clamp(0, text.length);
+  }
+
+  void _openFind(TextCompareSide side) {
+    _activeFindSide = side;
+    _findVisible = true;
+    _findFocusNode.requestFocus();
+    _findInputController.selection = TextSelection(
+      baseOffset: 0,
+      extentOffset: _findInputController.text.length,
+    );
+    _refreshFindMatches(resetIndex: true);
+    if (mounted) setState(() {});
+  }
+
+  void _closeFind() {
+    _findFocusNode.unfocus();
+    if (!_findVisible) return;
+    setState(() {
+      _findVisible = false;
+      _findMatches = const [];
+      _findMatchIndex = -1;
+    });
+  }
+
+  void _onFindQueryChanged() {
+    if (!_findVisible) return;
+    _refreshFindMatches(resetIndex: true);
+    if (mounted) setState(() {});
+  }
+
+  void _refreshFindMatches({required bool resetIndex}) {
+    final query = _findInputController.text;
+    final text = _findText(_activeFindSide);
+    if (query.isEmpty) {
+      _findMatches = const [];
+      _findMatchIndex = -1;
+      return;
+    }
+    final expression = RegExp(RegExp.escape(query), caseSensitive: false);
+    _findMatches = [
+      for (final match in expression.allMatches(text))
+        _TextCompareFindMatch(match.start, match.end),
+    ];
+    if (_findMatches.isEmpty) {
+      _findMatchIndex = -1;
+      return;
+    }
+    if (resetIndex) {
+      final offset = _currentOffset(_activeFindSide);
+      _findMatchIndex = _findMatches.indexWhere(
+        (match) => match.start >= offset,
+      );
+      if (_findMatchIndex < 0) _findMatchIndex = 0;
+    } else {
+      _findMatchIndex = _findMatchIndex.clamp(0, _findMatches.length - 1);
+    }
+    _revealCurrentFindMatch();
+  }
+
+  void _nextFindMatch() {
+    if (_findMatches.isEmpty) return;
+    _findMatchIndex = (_findMatchIndex + 1) % _findMatches.length;
+    if (mounted) setState(() {});
+    _revealCurrentFindMatch();
+  }
+
+  void _previousFindMatch() {
+    if (_findMatches.isEmpty) return;
+    _findMatchIndex =
+        (_findMatchIndex - 1 + _findMatches.length) % _findMatches.length;
+    if (mounted) setState(() {});
+    _revealCurrentFindMatch();
+  }
+
+  void _revealCurrentFindMatch() {
+    if (_findMatchIndex < 0 || _findMatchIndex >= _findMatches.length) return;
+    final match = _findMatches[_findMatchIndex];
+    final side = _activeFindSide;
+    final text = _findText(side);
+    if (_usesWebEditor) {
+      final controller = _webControllerFor(side);
+      controller.selection = TextSelection(
+        baseOffset: match.start,
+        extentOffset: match.end,
+      );
+      final selection = NativeTextSelection(
+        baseOffset: match.start,
+        extentOffset: match.end,
+      );
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted ||
+            !_findVisible ||
+            _activeFindSide != side ||
+            _findMatchIndex < 0 ||
+            _findMatches[_findMatchIndex] != match) {
+          return;
+        }
+        DesktopWebTextEditor.revealActiveSelection(selection);
+      });
+      return;
+    }
+    final editor = _editorFor(side);
+    final start = _selectionFromOffset(text, match.start);
+    final end = _selectionFromOffset(text, match.end);
+    editor.selection = CodeLineSelection(
+      baseIndex: start.baseIndex,
+      baseOffset: start.baseOffset,
+      extentIndex: end.baseIndex,
+      extentOffset: end.baseOffset,
+    );
+    editor.makePositionCenterIfInvisible(editor.selection.start);
+  }
+
+  CodeLineSelection _selectionFromOffset(String text, int offset) {
+    final safeOffset = offset.clamp(0, text.length);
+    var lineIndex = 0;
+    for (var index = 0; index < safeOffset; index++) {
+      if (text.codeUnitAt(index) == 10) lineIndex++;
+    }
+    final lineStart = safeOffset == 0
+        ? -1
+        : text.lastIndexOf('\n', safeOffset - 1);
+    final lineOffset = safeOffset - lineStart - 1;
+    return CodeLineSelection.collapsed(index: lineIndex, offset: lineOffset);
   }
 
   void _syncLeftScroll() {
@@ -172,11 +367,14 @@ class _TextComparePageState extends State<TextComparePage> {
   }
 
   void _syncFromController() {
+    var textChanged = false;
     if (_leftEditor.text != widget.controller.leftText) {
       _leftEditor.text = widget.controller.leftText;
+      textChanged = true;
     }
     if (_rightEditor.text != widget.controller.rightText) {
       _rightEditor.text = widget.controller.rightText;
+      textChanged = true;
     }
     if (_leftWebController.text != widget.controller.leftText) {
       _leftWebController.value = TextEditingValue(
@@ -185,6 +383,7 @@ class _TextComparePageState extends State<TextComparePage> {
           offset: widget.controller.leftText.length,
         ),
       );
+      textChanged = true;
     }
     if (_rightWebController.text != widget.controller.rightText) {
       _rightWebController.value = TextEditingValue(
@@ -193,6 +392,10 @@ class _TextComparePageState extends State<TextComparePage> {
           offset: widget.controller.rightText.length,
         ),
       );
+      textChanged = true;
+    }
+    if (_findVisible && textChanged) {
+      _refreshFindMatches(resetIndex: true);
     }
     // Diff spans are derived from the controller result rather than editor
     // text. `setState` below lets the existing editors rebuild their spans;
@@ -536,86 +739,127 @@ class _TextComparePageState extends State<TextComparePage> {
             widget.controller.compare,
         const SingleActivator(LogicalKeyboardKey.enter, control: true):
             widget.controller.compare,
+        const SingleActivator(LogicalKeyboardKey.keyF, meta: true): () =>
+            _openFind(_activeFindSide),
+        const SingleActivator(LogicalKeyboardKey.keyF, control: true): () =>
+            _openFind(_activeFindSide),
+        if (_findVisible)
+          const SingleActivator(LogicalKeyboardKey.escape): _closeFind,
+        if (_findVisible)
+          const SingleActivator(LogicalKeyboardKey.arrowDown): _nextFindMatch,
       },
       child: Focus(
         autofocus: true,
         child: Material(
           color: Theme.of(context).colorScheme.surface,
-          child: Column(
+          child: Stack(
+            fit: StackFit.expand,
             children: [
-              _CompareToolbar(
-                controller: widget.controller,
-                foldUnchanged: _foldUnchanged,
-                foldedLineCount: _foldedLineCount,
-                showFoldUnchanged: !_usesWebEditor,
-                onFoldUnchangedChanged: _setFoldUnchanged,
-                onOpenLeft: () => _openFile(TextCompareSide.left),
-                onOpenRight: () => _openFile(TextCompareSide.right),
-                onCopySummary: _copySummary,
+              Column(
+                children: [
+                  _CompareToolbar(
+                    controller: widget.controller,
+                    foldUnchanged: _foldUnchanged,
+                    foldedLineCount: _foldedLineCount,
+                    showFoldUnchanged: !_usesWebEditor,
+                    onFoldUnchangedChanged: _setFoldUnchanged,
+                    onOpenLeft: () => _openFile(TextCompareSide.left),
+                    onOpenRight: () => _openFile(TextCompareSide.right),
+                    onCopySummary: _copySummary,
+                  ),
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(18, 16, 18, 14),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: _TextPane(
+                              side: TextCompareSide.left,
+                              controller: widget.controller,
+                              editor: _leftEditor,
+                              scrollController: _leftScrollController,
+                              focusNode: _leftFocusNode,
+                              emphasized: _leftFocusNode.hasFocus,
+                              onPaste: () => _usesWebEditor
+                                  ? _pasteWeb(TextCompareSide.left)
+                                  : _focusRestorer.pasteFocusedTarget(),
+                              onFind: () => _openFind(TextCompareSide.left),
+                              onEditorPointerDown: () =>
+                                  _activateWebSide(TextCompareSide.left),
+                              useWebEditor: _usesWebEditor,
+                              webController: _leftWebController,
+                              webSelection: _webSelection(_leftWebController),
+                              webHighlights: _webHighlights(
+                                context,
+                                TextCompareSide.left,
+                              ),
+                              onWebSelectionChanged: (value) =>
+                                  _webSelectionChanged(
+                                    _leftWebController,
+                                    value,
+                                  ),
+                              onWebChanged: (value) =>
+                                  _webChanged(TextCompareSide.left, value),
+                              onChanged: (_) => widget.controller.updateLeft(
+                                _leftEditor.text,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 14),
+                          Expanded(
+                            child: _TextPane(
+                              side: TextCompareSide.right,
+                              controller: widget.controller,
+                              editor: _rightEditor,
+                              scrollController: _rightScrollController,
+                              focusNode: _rightFocusNode,
+                              emphasized: _rightFocusNode.hasFocus,
+                              onPaste: () => _usesWebEditor
+                                  ? _pasteWeb(TextCompareSide.right)
+                                  : _focusRestorer.pasteFocusedTarget(),
+                              onFind: () => _openFind(TextCompareSide.right),
+                              onEditorPointerDown: () =>
+                                  _activateWebSide(TextCompareSide.right),
+                              useWebEditor: _usesWebEditor,
+                              webController: _rightWebController,
+                              webSelection: _webSelection(_rightWebController),
+                              webHighlights: _webHighlights(
+                                context,
+                                TextCompareSide.right,
+                              ),
+                              onWebSelectionChanged: (value) =>
+                                  _webSelectionChanged(
+                                    _rightWebController,
+                                    value,
+                                  ),
+                              onWebChanged: (value) =>
+                                  _webChanged(TextCompareSide.right, value),
+                              onChanged: (_) => widget.controller.updateRight(
+                                _rightEditor.text,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  _CompareStatusBar(controller: widget.controller),
+                ],
               ),
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(18, 16, 18, 14),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: _TextPane(
-                          side: TextCompareSide.left,
-                          controller: widget.controller,
-                          editor: _leftEditor,
-                          scrollController: _leftScrollController,
-                          focusNode: _leftFocusNode,
-                          emphasized: _leftFocusNode.hasFocus,
-                          onPaste: () => _usesWebEditor
-                              ? _pasteWeb(TextCompareSide.left)
-                              : _focusRestorer.pasteFocusedTarget(),
-                          useWebEditor: _usesWebEditor,
-                          webController: _leftWebController,
-                          webSelection: _webSelection(_leftWebController),
-                          webHighlights: _webHighlights(
-                            context,
-                            TextCompareSide.left,
-                          ),
-                          onWebSelectionChanged: (value) =>
-                              _webSelectionChanged(_leftWebController, value),
-                          onWebChanged: (value) =>
-                              _webChanged(TextCompareSide.left, value),
-                          onChanged: (_) =>
-                              widget.controller.updateLeft(_leftEditor.text),
-                        ),
-                      ),
-                      const SizedBox(width: 14),
-                      Expanded(
-                        child: _TextPane(
-                          side: TextCompareSide.right,
-                          controller: widget.controller,
-                          editor: _rightEditor,
-                          scrollController: _rightScrollController,
-                          focusNode: _rightFocusNode,
-                          emphasized: _rightFocusNode.hasFocus,
-                          onPaste: () => _usesWebEditor
-                              ? _pasteWeb(TextCompareSide.right)
-                              : _focusRestorer.pasteFocusedTarget(),
-                          useWebEditor: _usesWebEditor,
-                          webController: _rightWebController,
-                          webSelection: _webSelection(_rightWebController),
-                          webHighlights: _webHighlights(
-                            context,
-                            TextCompareSide.right,
-                          ),
-                          onWebSelectionChanged: (value) =>
-                              _webSelectionChanged(_rightWebController, value),
-                          onWebChanged: (value) =>
-                              _webChanged(TextCompareSide.right, value),
-                          onChanged: (_) =>
-                              widget.controller.updateRight(_rightEditor.text),
-                        ),
-                      ),
-                    ],
+              if (_findVisible)
+                Positioned(
+                  top: 66,
+                  right: 24,
+                  child: _TextCompareFindPanel(
+                    controller: _findInputController,
+                    focusNode: _findFocusNode,
+                    matchIndex: _findMatchIndex,
+                    matchCount: _findMatches.length,
+                    onPrevious: _previousFindMatch,
+                    onNext: _nextFindMatch,
+                    onClose: _closeFind,
                   ),
                 ),
-              ),
-              _CompareStatusBar(controller: widget.controller),
             ],
           ),
         ),
@@ -847,6 +1091,106 @@ class _LegendItem extends StatelessWidget {
   }
 }
 
+class _TextCompareFindPanel extends StatelessWidget {
+  const _TextCompareFindPanel({
+    required this.controller,
+    required this.focusNode,
+    required this.matchIndex,
+    required this.matchCount,
+    required this.onPrevious,
+    required this.onNext,
+    required this.onClose,
+  });
+
+  final TextEditingController controller;
+  final FocusNode focusNode;
+  final int matchIndex;
+  final int matchCount;
+  final VoidCallback onPrevious;
+  final VoidCallback onNext;
+  final VoidCallback onClose;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final resultText = matchIndex < 0 || matchCount == 0
+        ? '0/0'
+        : '${matchIndex + 1}/$matchCount';
+    return Container(
+      width: 430,
+      height: 52,
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerLow,
+        border: Border.all(color: scheme.outlineVariant),
+        borderRadius: BorderRadius.circular(8),
+        boxShadow: [
+          BoxShadow(
+            color: scheme.shadow.withAlpha(28),
+            blurRadius: 18,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: CallbackShortcuts(
+              bindings: {
+                const SingleActivator(LogicalKeyboardKey.enter): onNext,
+                const SingleActivator(LogicalKeyboardKey.arrowDown): onNext,
+                const SingleActivator(LogicalKeyboardKey.escape): onClose,
+              },
+              child: TextField(
+                key: const ValueKey('text-compare-find-input'),
+                controller: controller,
+                focusNode: focusNode,
+                maxLines: 1,
+                onEditingComplete: () {},
+                onSubmitted: (_) => onNext(),
+                style: Theme.of(context).textTheme.bodyMedium,
+                decoration: InputDecoration(
+                  hintText: '查找',
+                  isDense: true,
+                  filled: true,
+                  fillColor: scheme.surfaceContainer,
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 11,
+                    vertical: 9,
+                  ),
+                ),
+              ),
+            ),
+          ),
+          SizedBox(
+            width: 48,
+            child: Text(
+              resultText,
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ),
+          IconButton(
+            tooltip: '上一个',
+            onPressed: matchCount == 0 ? null : onPrevious,
+            icon: const Icon(Icons.keyboard_arrow_up_rounded),
+          ),
+          IconButton(
+            tooltip: '下一个',
+            onPressed: matchCount == 0 ? null : onNext,
+            icon: const Icon(Icons.keyboard_arrow_down_rounded),
+          ),
+          IconButton(
+            tooltip: '关闭查找',
+            onPressed: onClose,
+            icon: const Icon(Icons.close_rounded),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _TextPane extends StatelessWidget {
   const _TextPane({
     required this.side,
@@ -856,6 +1200,8 @@ class _TextPane extends StatelessWidget {
     required this.focusNode,
     required this.emphasized,
     required this.onPaste,
+    required this.onFind,
+    required this.onEditorPointerDown,
     required this.onChanged,
     required this.useWebEditor,
     required this.webController,
@@ -872,6 +1218,8 @@ class _TextPane extends StatelessWidget {
   final FocusNode focusNode;
   final bool emphasized;
   final VoidCallback onPaste;
+  final VoidCallback onFind;
+  final VoidCallback onEditorPointerDown;
   final ValueChanged<CodeLineEditingValue> onChanged;
   final bool useWebEditor;
   final TextEditingController webController;
@@ -948,6 +1296,8 @@ class _TextPane extends StatelessWidget {
                       selection: webSelection,
                       onChanged: onWebChanged,
                       onSelectionChanged: onWebSelectionChanged,
+                      onEditorPointerDown: onEditorPointerDown,
+                      onFind: onFind,
                       highlights: webHighlights,
                       backgroundColor: scheme.surfaceContainerLowest,
                       textColor: scheme.onSurface,

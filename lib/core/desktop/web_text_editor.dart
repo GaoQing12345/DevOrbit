@@ -23,6 +23,7 @@ class DesktopWebTextEditor extends StatefulWidget {
     this.selection,
     required this.onChanged,
     this.onSelectionChanged,
+    this.onEditorPointerDown,
     this.onFind,
     this.backgroundColor,
     this.textColor,
@@ -42,6 +43,7 @@ class DesktopWebTextEditor extends StatefulWidget {
   final NativeTextSelection? selection;
   final ValueChanged<String> onChanged;
   final ValueChanged<NativeTextSelection>? onSelectionChanged;
+  final VoidCallback? onEditorPointerDown;
   final VoidCallback? onFind;
   final Color? backgroundColor;
   final Color? textColor;
@@ -98,6 +100,18 @@ class DesktopTextHighlight {
   final int end;
   final Color backgroundColor;
   final Color? textColor;
+
+  @override
+  bool operator ==(Object other) {
+    return other is DesktopTextHighlight &&
+        other.start == start &&
+        other.end == end &&
+        other.backgroundColor == backgroundColor &&
+        other.textColor == textColor;
+  }
+
+  @override
+  int get hashCode => Object.hash(start, end, backgroundColor, textColor);
 }
 
 class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
@@ -243,6 +257,10 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
   void didUpdateWidget(covariant DesktopWebTextEditor oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (!_loaded || _controller == null) return;
+    final highlightsChanged = !listEquals(
+      oldWidget.highlights,
+      widget.highlights,
+    );
     if (oldWidget.text != widget.text ||
         oldWidget.selection != widget.selection ||
         oldWidget.readOnly != widget.readOnly ||
@@ -251,13 +269,13 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
         oldWidget.fontSize != widget.fontSize ||
         oldWidget.padding != widget.padding ||
         oldWidget.autofocus != widget.autofocus ||
-        oldWidget.highlights != widget.highlights ||
+        highlightsChanged ||
         oldWidget.debugLabel != widget.debugLabel ||
         oldWidget.isDark != widget.isDark ||
         oldWidget.backgroundColor != widget.backgroundColor ||
         oldWidget.textColor != widget.textColor ||
         oldWidget.syntax != widget.syntax) {
-      _syncState();
+      _syncState(forceRender: highlightsChanged);
     }
   }
 
@@ -358,6 +376,7 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
 
   void _onPointerDown(PointerDownEvent _) {
     if (!_isVisible || _disposed) return;
+    widget.onEditorPointerDown?.call();
     // DOM focus does not fire when an already-focused editor is clicked a
     // second time. Claim the editor directly from Flutter's pointer stream so
     // focus recovery does not depend on a delayed JavaScript bridge callback.
@@ -482,7 +501,7 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
     );
   }
 
-  void _syncState() {
+  void _syncState({bool forceRender = false}) {
     final controller = _controller;
     if (_disposed || !_loaded || controller == null) return;
     final selection =
@@ -522,6 +541,7 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
               'textColor': _cssColor(highlight.textColor!),
           },
       ],
+      'forceRender': forceRender,
       'isDark': widget.isDark,
       'backgroundColor': _cssColor(
         widget.backgroundColor ??
@@ -1103,6 +1123,11 @@ window.devOrbitSetState = next => {
   if (changedText || changedSyntax) {
     render(next.text, next.baseOffset, next.extentOffset, false);
     resetHistory(next.text, next.baseOffset, next.extentOffset);
+  } else if (next.forceRender) {
+    const selection = document.activeElement === editor
+      ? currentSelection()
+      : lastSelection;
+    render(next.text, selection[0], selection[1], false);
   } else if (document.activeElement !== editor) {
     // Flutter rebuilds can arrive while a clipboard picker owns the native
     // focus. Do not move the DOM caret, or overwrite its saved range, with a
