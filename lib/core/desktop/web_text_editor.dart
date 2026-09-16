@@ -117,6 +117,7 @@ class DesktopTextHighlight {
 class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
     with WindowListener {
   static _DesktopWebTextEditorState? _activeEditor;
+  static final Set<_DesktopWebTextEditorState> _editors = {};
   static const _focusChannel = MethodChannel('dev_orbit/clipboard');
 
   InAppWebViewController? _controller;
@@ -159,14 +160,16 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
     editor._restoreWebFocus();
   }
 
-  /// A Flutter text field layered above a WebView has taken over editing.
-  /// Keep the DOM selection intact, but stop native window restoration from
-  /// returning keyboard focus to the browser behind that field.
+  /// A Flutter text field layered above one or more WebViews has taken over
+  /// editing. Keep each DOM selection intact, hide every visible DOM caret,
+  /// and stop native window restoration from returning focus to the editors.
   static void suspendActiveEditorFocus() {
-    final editor = _activeEditor;
-    if (editor == null || editor._disposed) return;
-    editor._editorSessionActive = false;
-    editor._restoreFocusOnWindowFocus = false;
+    for (final editor in _editors.toList(growable: false)) {
+      if (editor._disposed || !editor._isVisible) continue;
+      editor._editorSessionActive = false;
+      editor._restoreFocusOnWindowFocus = false;
+      editor._suspendWebFocus();
+    }
   }
 
   /// Collapse every foldable JSON block in the active WebView editor.
@@ -186,6 +189,7 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
   @override
   void initState() {
     super.initState();
+    _editors.add(this);
     windowManager.addListener(this);
     _lifecycle = AppLifecycleListener(
       onInactive: _onAppInactive,
@@ -489,6 +493,10 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
     unawaited(controller.evaluateJavascript(source: source));
   }
 
+  void _suspendWebFocus() {
+    _evaluateJavascript('window.devOrbitSuspendFocus();');
+  }
+
   void _revealSelection(NativeTextSelection selection) {
     final controller = _controller;
     if (_disposed || !_loaded || controller == null) return;
@@ -562,6 +570,7 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
   @override
   void dispose() {
     _disposed = true;
+    _editors.remove(this);
     _lifecycle.dispose();
     if (identical(_activeEditor, this)) _activeEditor = null;
     windowManager.removeListener(this);
@@ -1171,6 +1180,12 @@ window.devOrbitFocus = () => {
   restoreSelection(lastSelection[0], lastSelection[1]);
 };
 window.devOrbitBlur = () => editor.blur();
+window.devOrbitSuspendFocus = () => {
+  // Keep the native selection for the next editor focus, but hide the DOM
+  // caret while a Flutter find or replace field owns keyboard focus.
+  selectionFrozen = true;
+  if (document.activeElement === editor) editor.blur();
+};
 window.addEventListener('blur', () => {
   if (document.activeElement === editor) {
     // WebKit can emit a zeroed selectionchange after the window has already

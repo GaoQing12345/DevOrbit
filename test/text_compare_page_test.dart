@@ -67,12 +67,20 @@ void main() {
     await tester.enterText(input, 'one');
     await tester.pump();
     expect(find.text('1/2'), findsOneWidget);
-    expect(
-      tester.widget<TextField>(input).focusNode!.hasFocus,
-      isTrue,
-    );
+    expect(tester.widget<TextField>(input).focusNode!.hasFocus, isTrue);
 
-    await tester.testTextInput.receiveAction(TextInputAction.done);
+    final rightInput = find.byKey(
+      const ValueKey('text-compare-right-find-input'),
+    );
+    await tester.enterText(rightInput, 'other');
+    await tester.pump();
+    expect(tester.widget<TextField>(rightInput).controller!.text, 'other');
+    expect(find.text('1/1'), findsOneWidget);
+
+    await tester.tap(input);
+    await tester.pump();
+    expect(tester.widget<TextField>(input).focusNode!.hasFocus, isTrue);
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pump();
     expect(find.text('2/2'), findsOneWidget);
 
