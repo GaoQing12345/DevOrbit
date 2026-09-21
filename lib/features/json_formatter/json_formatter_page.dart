@@ -156,6 +156,10 @@ class _JsonFormatterPageState extends State<JsonFormatterPage> {
   }
 
   void _onFindChanged() {
+    // Closing the find panel only clears the controller value. Without an
+    // explicit handover the panel's TextField keeps Flutter focus, so the caret
+    // stays in the hidden query field and Command+V keeps inserting there.
+    if (_findController.value == null) _endFindFieldSession();
     if (_usesWebEditor) {
       final match = _findController.currentMatchSelection;
       if (match != null) {
@@ -181,17 +185,30 @@ class _JsonFormatterPageState extends State<JsonFormatterPage> {
       DesktopWebTextEditor.suspendActiveEditorFocus();
     } else if (_findFieldSessionActive &&
         _focusRestorer.shouldReleaseTargetOnFocusExit) {
-      _findFieldSessionActive = false;
-      _focusRestorer.clearActiveTarget();
+      // The overlay gave the editing session back. Return the single caret to
+      // the WebView editor instead of leaving it in the Flutter field.
+      _endFindFieldSession();
     }
     if (mounted) setState(() {});
   }
 
-  void _unfocusFindFields() {
+  void _unfocusFindFields() => _endFindFieldSession();
+
+  /// Ends the Flutter query-field session: the find and replace fields drop
+  /// focus, the clipboard restorer stops treating them as paste targets, and
+  /// the WebView editor takes the caret back.
+  void _endFindFieldSession() {
+    final hadSession =
+        _findFieldSessionActive ||
+        _findController.findInputFocusNode.hasFocus ||
+        _findController.replaceInputFocusNode.hasFocus;
     _findFieldSessionActive = false;
     _focusRestorer.clearActiveTarget();
     _findController.findInputFocusNode.unfocus();
     _findController.replaceInputFocusNode.unfocus();
+    if (hadSession && _usesWebEditor) {
+      DesktopWebTextEditor.restoreActiveEditorFocus();
+    }
     if (mounted) setState(() {});
   }
 

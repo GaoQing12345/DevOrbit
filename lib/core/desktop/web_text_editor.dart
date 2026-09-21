@@ -34,6 +34,13 @@ class DesktopWebTextEditorController {
   void debugScheduleAutofocus() {
     _state?._scheduleAutofocus();
   }
+
+  /// Simulates the DOM activation signal a real mouse click on the platform
+  /// view sends through the JavaScript bridge.
+  @visibleForTesting
+  void debugHandleEditorActivation() {
+    _state?._handleEditorActivation();
+  }
 }
 
 /// A single browser-backed editing surface shared by macOS and Windows.
@@ -70,6 +77,10 @@ class DesktopWebTextEditor extends StatefulWidget {
   final NativeTextSelection? selection;
   final ValueChanged<String> onChanged;
   final ValueChanged<NativeTextSelection>? onSelectionChanged;
+
+  /// Called whenever this editor becomes the editing surface the user is
+  /// interacting with, whether from a Flutter pointer event or from the DOM
+  /// itself. Pages use it to hand over ownership of their Flutter text fields.
   final VoidCallback? onEditorPointerDown;
   final VoidCallback? onFind;
   final Color? backgroundColor;
@@ -101,6 +112,23 @@ class DesktopWebTextEditor extends StatefulWidget {
 
   static void suspendActiveEditorFocus() {
     _DesktopWebTextEditorState.suspendActiveEditorFocus();
+  }
+
+  /// Whether the WebView editor owns the caret, keyboard input and paste.
+  static bool get editorOwnsEditingSession =>
+      _DesktopWebTextEditorState.editorOwnsEditingSession;
+
+  static void addEditingOwnershipListener(VoidCallback listener) {
+    _DesktopWebTextEditorState.addEditingOwnershipListener(listener);
+  }
+
+  static void removeEditingOwnershipListener(VoidCallback listener) {
+    _DesktopWebTextEditorState.removeEditingOwnershipListener(listener);
+  }
+
+  /// Inserts [text] into the WebView editor that owns the caret.
+  static bool pasteIntoActiveEditor(String text) {
+    return _DesktopWebTextEditorState.pasteIntoActiveEditor(text);
   }
 
   static void collapseActiveJson() {
@@ -155,7 +183,11 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
   static final Set<_DesktopWebTextEditorState> _editors = {};
   static const _focusChannel = MethodChannel('dev_orbit/clipboard');
   static int _autofocusGeneration = 0;
-  static bool _autofocusSuspended = false;
+
+  /// A Flutter text field (a find or replace overlay) owns the caret. Delayed
+  /// autofocus stays suspended until a real editor interaction resumes it.
+  static bool _flutterFieldOwnsEditing = false;
+  static final Set<VoidCallback> _ownershipListeners = {};
 
   InAppWebViewController? _controller;
   bool _loaded = false;
@@ -183,25 +215,74 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
     _activeEditor?._revealSelection(selection);
   }
 
-  /// Called by the outer desktop focus shell before it restores its own
-  /// keyboard-shortcut focus node. Let the editor win that race instead.
-  static void restoreActiveEditorFocus() {
+  /// Whether a visible WebView editor currently owns the caret, keyboard input
+  /// and therefore the paste destination.
+  ///
+  /// While this is true no Flutter text field may keep clipboard ownership: the
+  /// user has already moved the caret into the editor, so inserting a captured
+  /// paste into the previously focused field would write into a surface the
+  /// user has deliberately left.
+  static bool get editorOwnsEditingSession {
+    final editor = _activeEditor;
+    return editor != null &&
+        !editor._disposed &&
+        editor._isVisible &&
+        editor._editorSessionActive;
+  }
+
+  /// Registers a callback that fires whenever a WebView editor starts or stops
+  /// owning the editing session. Flutter clipboard targets use it to drop stale
+  /// ownership instead of receiving the next paste.
+  static void addEditingOwnershipListener(VoidCallback listener) {
+    _ownershipListeners.add(listener);
+  }
+
+  static void removeEditingOwnershipListener(VoidCallback listener) {
+    _ownershipListeners.remove(listener);
+  }
+
+  static void _notifyEditingOwnership() {
+    for (final listener in _ownershipListeners.toList(growable: false)) {
+      listener();
+    }
+  }
+
+  /// Inserts [text] into the WebView editor that owns the caret and returns
+  /// whether it accepted the insert.
+  ///
+  /// The macOS clipboard monitor can swallow Command+V before WebKit sees it so
+  /// clipboard managers can publish their selection. That captured text must be
+  /// delivered even when no Flutter text field was registered as a paste
+  /// target; otherwise the key event is consumed and nothing is pasted.
+  static bool pasteIntoActiveEditor(String text) {
     final editor = _activeEditor;
     if (editor == null ||
         editor._disposed ||
         !editor._isVisible ||
-        !editor._editorSessionActive) {
-      return;
+        !editor._editorSessionActive ||
+        text.isEmpty) {
+      return false;
     }
-    editor._restoreFocusOnWindowFocus = true;
-    editor._restoreWebFocus();
+    editor._evaluateJavascript(
+      'window.devOrbitInsertText(${jsonEncode(text)});',
+    );
+    return true;
+  }
+
+  /// Called by the outer desktop focus shell and by pages that finish a Flutter
+  /// field session. The editor takes the caret back, including the case where a
+  /// find overlay had suspended it, so exactly one caret stays visible.
+  static void restoreActiveEditorFocus() {
+    final editor = _activeEditor;
+    if (editor == null || editor._disposed || !editor._isVisible) return;
+    editor._takeEditorFocus();
   }
 
   /// A Flutter text field layered above one or more WebViews has taken over
   /// editing. Keep each DOM selection intact, hide every visible DOM caret,
   /// and stop native window restoration from returning focus to the editors.
   static void suspendActiveEditorFocus() {
-    _autofocusSuspended = true;
+    _flutterFieldOwnsEditing = true;
     _autofocusGeneration += 1;
     for (final editor in _editors.toList(growable: false)) {
       if (editor._disposed || !editor._isVisible) continue;
@@ -209,6 +290,7 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
       editor._restoreFocusOnWindowFocus = false;
       editor._suspendWebFocus();
     }
+    _notifyEditingOwnership();
   }
 
   /// Collapse every foldable JSON block in the active WebView editor.
@@ -230,7 +312,7 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
     super.initState();
     widget.controller?._attach(this);
     if (_editors.isEmpty) {
-      _autofocusSuspended = false;
+      _flutterFieldOwnsEditing = false;
       _autofocusGeneration += 1;
     }
     _editors.add(this);
@@ -254,6 +336,7 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
       _restoreFocusOnWindowFocus = false;
       _editorSessionActive = false;
       _evaluateJavascript('window.devOrbitBlur();');
+      _notifyEditingOwnership();
       return;
     }
     if (_loaded) {
@@ -272,7 +355,7 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
       if (!_disposed &&
           _isVisible &&
           widget.autofocus &&
-          !_autofocusSuspended &&
+          !_flutterFieldOwnsEditing &&
           generation == _autofocusGeneration) {
         _focusEditorFromAutofocus();
       }
@@ -291,10 +374,46 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
     if (previous != null && !identical(previous, this)) {
       previous._restoreFocusOnWindowFocus = false;
       previous._editorSessionActive = false;
+      // Exactly one caret may exist in a window. Blur the DOM of the editor
+      // that just lost ownership instead of leaving its caret blinking behind
+      // the newly activated pane.
+      previous._suspendWebFocus();
     }
     _activeEditor = this;
     _editorSessionActive = true;
     _restoreFocusOnWindowFocus = false;
+    _notifyEditingOwnership();
+  }
+
+  /// The user interacted with this editor inside the DOM.
+  ///
+  /// This is the only reliable activation signal on macOS and Windows: the
+  /// native platform view consumes the mouse event before Flutter's own hit
+  /// test can see it, so a `Listener` above the WebView never fires for a real
+  /// click. The DOM always does, and it also covers keyboard entry (the caret
+  /// has to be visible before the user can type or paste into it).
+  void _handleEditorActivation() {
+    if (_disposed || !_isVisible) return;
+    _resumeEditorFocus();
+    widget.onEditorPointerDown?.call();
+    _releaseFlutterFieldFocus();
+    _claimEditorSession();
+  }
+
+  /// Hides the caret of a Flutter text field (a find or replace overlay) that
+  /// still owns Flutter focus while the WebView owns the real editing session.
+  ///
+  /// Leaving that field focused produces the two-caret state users report: the
+  /// overlay keeps blinking while typing goes to the editor, and `Command+V`
+  /// is delivered to the overlay instead of the editor.
+  void _releaseFlutterFieldFocus() {
+    final primaryFocus = FocusManager.instance.primaryFocus;
+    if (primaryFocus == null) return;
+    if (primaryFocus.context?.findAncestorStateOfType<EditableTextState>() ==
+        null) {
+      return;
+    }
+    primaryFocus.unfocus();
   }
 
   void _onAppInactive() {
@@ -406,12 +525,21 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
       },
     );
     controller.addJavaScriptHandler(
+      handlerName: 'editorPointerDown',
+      callback: (_) {
+        _handleEditorActivation();
+        return null;
+      },
+    );
+    controller.addJavaScriptHandler(
       handlerName: 'editorFocusChanged',
       callback: (args) {
         if (!_isVisible || _disposed) return null;
         if (args.isNotEmpty && args.first == true) {
-          if (_autofocusSuspended) return null;
-          _claimEditorSession();
+          // WebKit focuses the contenteditable for a real user click. That is
+          // the caret the user sees, so this editor owns the session even when
+          // an overlay field was holding Flutter focus a moment ago.
+          _handleEditorActivation();
           if (args.length >= 3) {
             final selection = NativeTextSelection(
               baseOffset: _asInt(args[1]),
@@ -439,7 +567,10 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
               FocusManager.instance.primaryFocus?.context
                   ?.findAncestorStateOfType<EditableTextState>() !=
               null;
-          if (flutterEditableFocused) _editorSessionActive = false;
+          if (flutterEditableFocused) {
+            _editorSessionActive = false;
+            _notifyEditingOwnership();
+          }
         }
         return null;
       },
@@ -448,12 +579,10 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
 
   void _onPointerDown(PointerDownEvent _) {
     if (!_isVisible || _disposed) return;
-    widget.onEditorPointerDown?.call();
-    // DOM focus does not fire when an already-focused editor is clicked a
-    // second time. Claim the editor directly from Flutter's pointer stream so
-    // focus recovery does not depend on a delayed JavaScript bridge callback.
-    _resumeEditorFocus();
-    _claimEditorSession();
+    // A Flutter pointer event only reaches a desktop platform view in some
+    // embedding configurations. Treat it as a redundant activation so the
+    // behaviour is identical wherever it does fire.
+    _handleEditorActivation();
     if (Platform.isWindows) unawaited(_claimNativeEditorFocus());
   }
 
@@ -517,6 +646,9 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
   void _takeEditorFocus() {
     if (_disposed || !_isVisible) return;
     _resumeEditorFocus();
+    // Taking the caret back has to release a Flutter overlay field that still
+    // holds it, otherwise both surfaces keep a visible caret.
+    _releaseFlutterFieldFocus();
     _claimEditorSession();
     _restoreFocusOnWindowFocus = true;
     if (_loaded) _restoreWebFocus();
@@ -573,8 +705,12 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
     }
   }
 
+  /// Clears a Flutter-field suspension. A real editor interaction always wins
+  /// over a previous find session: the suspension must never become sticky, or
+  /// clicking back into the editor could no longer restore its caret and the
+  /// editor would stop accepting typing and `Command+V` entirely.
   void _resumeEditorFocus() {
-    _autofocusSuspended = false;
+    _flutterFieldOwnsEditing = false;
     _autofocusGeneration += 1;
   }
 
@@ -686,6 +822,7 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
     _editors.remove(this);
     _lifecycle.dispose();
     if (identical(_activeEditor, this)) _activeEditor = null;
+    _notifyEditingOwnership();
     windowManager.removeListener(this);
     _controller = null;
     super.dispose();
@@ -1269,6 +1406,16 @@ window.devOrbitRestoreFocus = () => {
   editor.focus();
   restoreSelection(lastSelection[0], lastSelection[1]);
 };
+window.devOrbitInsertText = value => {
+  if (typeof value !== 'string' || value.length === 0) return;
+  selectionFrozen = false;
+  editor.focus();
+  const selection = window.getSelection();
+  if (!selection || !selection.rangeCount) {
+    restoreSelection(lastSelection[0], lastSelection[1]);
+  }
+  insertPlainText(value);
+};
 window.devOrbitRevealSelection = (base, extent) => {
   const ranges = jsonFoldRanges(readText());
   const hidden = ranges.filter(range =>
@@ -1398,7 +1545,12 @@ editor.addEventListener('click', event => {
   const offset = textOffsetAtPoint(event.clientX, event.clientY);
   if (offset !== null) toggleFoldAt(offset);
 });
-editor.addEventListener('mousedown', () => selectionFrozen = false, true);
+editor.addEventListener('mousedown', () => {
+  selectionFrozen = false;
+  // Desktop platform views consume the mouse event before Flutter's own hit
+  // test runs, so this bridge call is the only reliable activation signal.
+  bridge('editorPointerDown', []);
+}, true);
 editor.addEventListener('scroll', () => { lineNumbers.scrollTop = editor.scrollTop; }, { passive: true });
 document.addEventListener('selectionchange', () => {
   if (selectionFrozen || composing || inputPending || document.activeElement !== editor) return;

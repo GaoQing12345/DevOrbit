@@ -8,6 +8,7 @@ import 'package:window_manager/window_manager.dart';
 
 import 'desktop_clipboard_diagnostics.dart';
 import 'desktop_clipboard_reader.dart';
+import 'web_text_editor.dart';
 
 abstract class DesktopClipboardTarget {
   FocusNode get focusNode;
@@ -149,6 +150,9 @@ class DesktopClipboardFocusRestorer with WindowListener {
     );
     windowManager.addListener(this);
     HardwareKeyboard.instance.addHandler(_handleKeyEvent);
+    DesktopWebTextEditor.addEditingOwnershipListener(
+      _handleEditingOwnershipChange,
+    );
     _pasteRequestSubscription = _clipboardReader.pasteRequests.listen(
       _handleNativePasteRequest,
     );
@@ -229,6 +233,20 @@ class DesktopClipboardFocusRestorer with WindowListener {
     _cancelRestore();
   }
 
+  /// A WebView editor just took the caret. Flutter text fields (find, replace,
+  /// API key overlays) must give up paste ownership immediately: keeping it
+  /// makes the next Command+V write into a field the user has already left.
+  void _handleEditingOwnershipChange() {
+    if (!DesktopWebTextEditor.editorOwnsEditingSession) return;
+    if (_lastTarget == null && _snapshot == null) return;
+    DesktopClipboardDiagnostics.write('target_released', {
+      'reason': 'web_editor_owns_editing',
+      'target': _lastTarget == null ? null : _targetIndex(_lastTarget!),
+    });
+    _lastTarget = null;
+    _cancelRestore();
+  }
+
   Future<void> _setPasteTargetRegistration(bool value) async {
     if (value == _pasteTargetRegistered) return;
     _pasteTargetRegistered = value;
@@ -293,7 +311,10 @@ class DesktopClipboardFocusRestorer with WindowListener {
     _captureFocusSnapshot();
   }
 
-  void _captureFocusSnapshot({bool armNative = true}) {
+  void _captureFocusSnapshot({
+    bool armNative = true,
+    bool allowFallbackTarget = true,
+  }) {
     if (_snapshot != null) {
       DesktopClipboardDiagnostics.write('snapshot_skip', {
         'reason': 'already_active',
@@ -307,7 +328,11 @@ class DesktopClipboardFocusRestorer with WindowListener {
       });
       return;
     }
-    final target = _focusedTarget() ?? _lastTarget;
+    // A paste that arrives while nothing this page owns has focus must not be
+    // inserted into the target that happened to be focused last. Reviving that
+    // field is what makes Command+V land in an already abandoned input.
+    final target =
+        _focusedTarget() ?? (allowFallbackTarget ? _lastTarget : null);
     if (target == null || !target.isAvailable) {
       DesktopClipboardDiagnostics.write('snapshot_skip', {
         'reason': 'no_target',
@@ -392,9 +417,20 @@ class DesktopClipboardFocusRestorer with WindowListener {
       'length': request.text?.length,
       'active_session': _snapshot?.sessionId,
     });
+    // A WebView editor owns the caret. The captured text must be inserted
+    // there, not into a Flutter field that simply had focus earlier; leaving
+    // the request unhandled lets the clipboard reader deliver it to the
+    // editor that owns the session.
+    if (DesktopWebTextEditor.editorOwnsEditingSession) {
+      DesktopClipboardDiagnostics.write('request_drop', {
+        'reason': 'web_editor_owns_editing',
+        'session': request.sessionId,
+      });
+      return;
+    }
     var capturedForRequest = false;
     if (_snapshot == null && request.text != null) {
-      _captureFocusSnapshot(armNative: false);
+      _captureFocusSnapshot(armNative: false, allowFallbackTarget: false);
       capturedForRequest = _snapshot != null;
     }
     final snapshot = _snapshot;
@@ -424,12 +460,14 @@ class DesktopClipboardFocusRestorer with WindowListener {
         });
         return;
       }
+      request.markHandled();
       _pasteFallbackArmed = false;
       _restoreSelection(snapshot);
       _requestFocus(snapshot.target);
       _pasteText(snapshot, text, suppressFollowUpPaste: true);
       return;
     }
+    request.markHandled();
     _pasteFallbackArmed = false;
     if (_pasteOperationInFlight) {
       // Windows can report that the paste key was pressed before the selected
@@ -522,6 +560,14 @@ class DesktopClipboardFocusRestorer with WindowListener {
       return true;
     }
     final snapshot = _snapshot;
+    // A WebView editor owns the caret, so the key event has to reach WebKit's
+    // own paste path. Inserting a Flutter-field paste here is what makes
+    // Command+V land in an input the user already left.
+    if (DesktopWebTextEditor.editorOwnsEditingSession) {
+      _lastTarget = null;
+      if (snapshot != null) _cancelRestore(expected: snapshot);
+      return false;
+    }
     if (_hasExternalEditableFocus()) {
       if (snapshot != null) _cancelRestore(expected: snapshot);
       return false;
@@ -530,7 +576,7 @@ class DesktopClipboardFocusRestorer with WindowListener {
       // Some clipboard tools restore the target window without producing a
       // blur/focus pair. Capture the current selection at the paste boundary
       // so ordinary Ctrl/Command+V still uses the same guarded insertion path.
-      _captureFocusSnapshot(armNative: true);
+      _captureFocusSnapshot(armNative: true, allowFallbackTarget: false);
       final current = _snapshot;
       if (current == null) return false;
       _pasteFallbackArmed = false;
@@ -860,6 +906,9 @@ class DesktopClipboardFocusRestorer with WindowListener {
     _disposed = true;
     _cancelRestore();
     _pasteRequestSubscription.cancel();
+    DesktopWebTextEditor.removeEditingOwnershipListener(
+      _handleEditingOwnershipChange,
+    );
     if (_pasteTargetRegistered) {
       _pasteTargetRegistered = false;
       unawaited(_clipboardReader.unregisterPasteTarget());

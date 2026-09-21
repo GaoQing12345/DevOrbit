@@ -2,14 +2,29 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/widgets.dart';
 
 import 'desktop_clipboard_diagnostics.dart';
+import 'web_text_editor.dart';
 
+/// A paste the native runner captured before WebKit could see it.
+///
+/// The native monitor swallows the original key event once it has captured the
+/// text, so the request must reach exactly one destination. Listeners that
+/// perform the insert call [markHandled]; an unhandled request is delivered to
+/// the surface that currently owns the caret.
 class DesktopPasteRequest {
-  const DesktopPasteRequest({this.sessionId, this.text});
+  DesktopPasteRequest({this.sessionId, this.text});
 
   final int? sessionId;
   final String? text;
+  bool _handled = false;
+
+  bool get handled => _handled;
+
+  void markHandled() {
+    _handled = true;
+  }
 }
 
 enum DesktopPasteCaptureState { unavailable, armed, prearmed }
@@ -230,13 +245,87 @@ class DesktopClipboardReader {
         'length': text is String ? text.length : null,
         'source': source is String ? source : null,
       });
-      _pasteRequests.add(
-        DesktopPasteRequest(
-          sessionId: sessionId is int ? sessionId : null,
-          text: text is String ? text : null,
-        ),
+      final request = DesktopPasteRequest(
+        sessionId: sessionId is int ? sessionId : null,
+        text: text is String ? text : null,
       );
+      _pasteRequests.add(request);
+      _deliverUnhandledPaste(request);
     });
+  }
+
+  /// Delivers a captured paste to the surface that owns the caret.
+  ///
+  /// The native runner consumes Command+V as soon as it captures the clipboard
+  /// text, so a request no clipboard target claimed would be a silently lost
+  /// paste. Route it to the active WebView editor first, then to whatever
+  /// Flutter text field holds focus.
+  static void _deliverUnhandledPaste(DesktopPasteRequest request) {
+    if (request.handled) return;
+    final text = request.text;
+    if (text == null || text.isEmpty) {
+      DesktopClipboardDiagnostics.write('paste_fallback_skip', {
+        'session': request.sessionId,
+        'reason': text == null ? 'no_text' : 'empty_text',
+      });
+      return;
+    }
+    if (DesktopWebTextEditor.pasteIntoActiveEditor(text)) {
+      DesktopClipboardDiagnostics.write('paste_fallback', {
+        'session': request.sessionId,
+        'target': 'web_editor',
+        'length': text.length,
+      });
+      return;
+    }
+    if (_pasteIntoFocusedFlutterField(text)) {
+      DesktopClipboardDiagnostics.write('paste_fallback', {
+        'session': request.sessionId,
+        'target': 'flutter_field',
+      });
+      return;
+    }
+    DesktopClipboardDiagnostics.write('paste_fallback_drop', {
+      'session': request.sessionId,
+      'length': text.length,
+    });
+  }
+
+  /// Inserts [text] into the Flutter text field that currently holds focus.
+  ///
+  /// The native runner already consumed the key event, so Flutter's own paste
+  /// shortcut can no longer run. Replacing the selection through the input
+  /// client keeps fields that are not registered clipboard targets working.
+  static bool _pasteIntoFocusedFlutterField(String text) {
+    final state = FocusManager.instance.primaryFocus?.context
+        ?.findAncestorStateOfType<EditableTextState>();
+    if (state == null || state.widget.readOnly) return false;
+    final value = state.textEditingValue;
+    final selection = value.selection;
+    final start = selection.isValid
+        ? selection.start.clamp(0, value.text.length)
+        : value.text.length;
+    final end = selection.isValid
+        ? selection.end.clamp(0, value.text.length)
+        : value.text.length;
+    state.userUpdateTextEditingValue(
+      TextEditingValue(
+        text: value.text.replaceRange(start, end, text),
+        selection: TextSelection.collapsed(offset: start + text.length),
+      ),
+      SelectionChangedCause.keyboard,
+    );
+    return true;
+  }
+
+  /// Dispatches a captured paste through the same path the native runner uses.
+  ///
+  /// Tests use this to cover the routing decisions without a native pasteboard.
+  @visibleForTesting
+  static void debugDeliverPasteRequest({int? sessionId, String? text}) {
+    final request = DesktopPasteRequest(sessionId: sessionId, text: text);
+    _pasteRequests.add(request);
+    _deliverUnhandledPaste(request);
   }
 
   Future<void> _invokeVoid(String method, {int? sessionId}) async {
