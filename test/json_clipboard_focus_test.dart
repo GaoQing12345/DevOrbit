@@ -178,6 +178,40 @@ void main() {
     debugDefaultTargetPlatformOverride = null;
   });
 
+  testWidgets('find focus exit releases stale paste ownership', (tester) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    final fixture = await JsonFormatterFixture.create();
+    await tester.pumpWidget(fixture.widget);
+    mockClipboard(tester, initialText: 'must not enter query');
+
+    await tester.tap(find.byTooltip('查找'));
+    await tester.pump();
+    final field = tester.widget<TextField>(
+      find.descendant(
+        of: find.byKey(const ValueKey('json-find-input')),
+        matching: find.byType(TextField),
+      ),
+    );
+    await tester.enterText(
+      find.descendant(
+        of: find.byKey(const ValueKey('json-find-input')),
+        matching: find.byType(EditableText),
+      ),
+      'needle',
+    );
+    await tester.pump();
+
+    field.focusNode!.unfocus();
+    await tester.pump();
+    await pasteWithControl(tester);
+    await tester.pump(const Duration(milliseconds: 80));
+
+    expect(field.controller!.text, 'needle');
+    await disposeEditor(tester);
+    debugDefaultTargetPlatformOverride = null;
+  });
+
   testWidgets('Windows+V arms find paste without window events', (
     tester,
   ) async {

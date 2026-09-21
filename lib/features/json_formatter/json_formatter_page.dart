@@ -173,10 +173,16 @@ class _JsonFormatterPageState extends State<JsonFormatterPage> {
   }
 
   void _onFindFieldFocusChanged() {
-    if (_findController.findInputFocusNode.hasFocus ||
-        _findController.replaceInputFocusNode.hasFocus) {
+    final findFieldFocused =
+        _findController.findInputFocusNode.hasFocus ||
+        _findController.replaceInputFocusNode.hasFocus;
+    if (findFieldFocused) {
       _findFieldSessionActive = true;
       DesktopWebTextEditor.suspendActiveEditorFocus();
+    } else if (_findFieldSessionActive &&
+        _focusRestorer.shouldReleaseTargetOnFocusExit) {
+      _findFieldSessionActive = false;
+      _focusRestorer.clearActiveTarget();
     }
     if (mounted) setState(() {});
   }

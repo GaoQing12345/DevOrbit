@@ -1,5 +1,6 @@
 import 'dart:ui' as ui;
 
+import 'package:dev_orbit/core/desktop/web_text_editor.dart';
 import 'package:dev_orbit/features/text_compare/text_compare_controller.dart';
 import 'package:dev_orbit/features/text_compare/text_compare_engine.dart';
 import 'package:dev_orbit/features/text_compare/text_compare_models.dart';
@@ -238,6 +239,80 @@ void main() {
 
     FocusManager.instance.primaryFocus?.unfocus();
     await tester.pump(const Duration(milliseconds: 120));
+    debugDefaultTargetPlatformOverride = null;
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('find focus exit releases stale paste ownership', (tester) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    final controller = TextCompareController(service: _ImmediateService());
+    addTearDown(controller.dispose);
+    controller.updateLeft('left');
+    controller.updateRight('right');
+    mockClipboard(tester, initialText: 'must not enter query');
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(body: TextComparePage(controller: controller)),
+      ),
+    );
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyF);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    await tester.pump();
+    final input = find.byKey(const ValueKey('text-compare-find-input'));
+    await tester.enterText(input, 'needle');
+    await tester.pump();
+    final field = tester.widget<TextField>(input);
+
+    field.focusNode!.unfocus();
+    await tester.pump();
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyV);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    await tester.pump(const Duration(milliseconds: 80));
+
+    expect(field.controller!.text, 'needle');
+    debugDefaultTargetPlatformOverride = null;
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('closing find claims the target editor before WebView load', (
+    tester,
+  ) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    final controller = TextCompareController(service: _ImmediateService());
+    addTearDown(controller.dispose);
+    controller.updateLeft('left');
+    controller.updateRight('needle right');
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: TextComparePage(
+            controller: controller,
+            debugUseWebEditor: true,
+          ),
+        ),
+      ),
+    );
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyF);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    await tester.pump();
+    final input = find.byKey(const ValueKey('text-compare-find-input'));
+    await tester.enterText(input, 'needle');
+    await tester.pump();
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pump();
+
+    expect(
+      DesktopWebTextEditor.debugActiveEditorLabel,
+      'text-compare-right',
+    );
     debugDefaultTargetPlatformOverride = null;
     await tester.pumpWidget(const SizedBox.shrink());
   });

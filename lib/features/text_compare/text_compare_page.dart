@@ -38,9 +38,15 @@ class _TextCompareFindMatch {
 }
 
 class TextComparePage extends StatefulWidget {
-  const TextComparePage({super.key, required this.controller});
+  const TextComparePage({
+    super.key,
+    required this.controller,
+    this.debugUseWebEditor = false,
+  });
 
   final TextCompareController controller;
+  @visibleForTesting
+  final bool debugUseWebEditor;
 
   @override
   State<TextComparePage> createState() => _TextComparePageState();
@@ -73,9 +79,10 @@ class _TextComparePageState extends State<TextComparePage> {
   bool _findSessionActive = false;
 
   bool get _usesWebEditor =>
-      !kIsWeb &&
-      (Platform.isMacOS || Platform.isWindows) &&
-      Platform.environment['FLUTTER_TEST'] != 'true';
+      widget.debugUseWebEditor ||
+      (!kIsWeb &&
+          (Platform.isMacOS || Platform.isWindows) &&
+          Platform.environment['FLUTTER_TEST'] != 'true');
 
   @override
   void initState() {
@@ -286,6 +293,10 @@ class _TextComparePageState extends State<TextComparePage> {
     if (_findFocusNode.hasFocus) {
       _findSessionActive = true;
       DesktopWebTextEditor.suspendActiveEditorFocus();
+    } else if (_findSessionActive &&
+        _focusRestorer.shouldReleaseTargetOnFocusExit) {
+      _findSessionActive = false;
+      _focusRestorer.clearActiveTarget();
     }
     if (mounted) setState(() {});
   }

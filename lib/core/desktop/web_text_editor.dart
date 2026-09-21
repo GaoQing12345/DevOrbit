@@ -82,6 +82,10 @@ class DesktopWebTextEditor extends StatefulWidget {
 
   static bool get hasActiveEditor => _DesktopWebTextEditorState.hasActiveEditor;
 
+  @visibleForTesting
+  static String? get debugActiveEditorLabel =>
+      _DesktopWebTextEditorState._activeEditor?.widget.debugLabel;
+
   static void restoreActiveEditorFocus() {
     _DesktopWebTextEditorState.restoreActiveEditorFocus();
   }
@@ -245,6 +249,8 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
   }
 
   void _focusEditorFromAutofocus() {
+    final activeEditor = _activeEditor;
+    if (activeEditor != null && !identical(activeEditor, this)) return;
     _claimEditorSession();
     _evaluateJavascript('window.devOrbitFocus();');
   }
@@ -429,6 +435,12 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
   void _onLoadStop(InAppWebViewController controller, WebUri? url) {
     _loaded = true;
     _syncState();
+    if (identical(_activeEditor, this) &&
+        _editorSessionActive &&
+        _restoreFocusOnWindowFocus) {
+      _restoreWebFocus();
+      return;
+    }
     if (widget.autofocus && _isVisible) {
       Future<void>.delayed(const Duration(milliseconds: 60), () {
         if (!_disposed && _isVisible && widget.autofocus) {
@@ -468,10 +480,10 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
   }
 
   void _takeEditorFocus() {
-    if (_disposed || !_loaded || !_isVisible) return;
+    if (_disposed || !_isVisible) return;
     _claimEditorSession();
     _restoreFocusOnWindowFocus = true;
-    _restoreWebFocus();
+    if (_loaded) _restoreWebFocus();
   }
 
   @override

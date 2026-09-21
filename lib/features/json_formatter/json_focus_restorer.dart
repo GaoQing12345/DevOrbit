@@ -30,6 +30,9 @@ class JsonFocusRestorer {
 
   set active(bool value) => _restorer.active = value;
 
+  bool get shouldReleaseTargetOnFocusExit =>
+      _restorer.shouldReleaseTargetOnFocusExit;
+
   void clearActiveTarget() => _restorer.clearActiveTarget();
 
   void pasteFocusedTarget() => _restorer.pasteFocusedTarget();

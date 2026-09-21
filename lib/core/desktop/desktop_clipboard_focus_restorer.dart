@@ -208,6 +208,9 @@ class DesktopClipboardFocusRestorer with WindowListener {
   DateTime? _skipPasteActionUntil;
   bool _pasteTargetRegistered = false;
 
+  bool get shouldReleaseTargetOnFocusExit =>
+      _windowActive && _snapshot == null;
+
   set active(bool value) {
     if (_active == value) return;
     _active = value;
