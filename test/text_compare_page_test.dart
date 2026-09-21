@@ -309,10 +309,7 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pump();
 
-    expect(
-      DesktopWebTextEditor.debugActiveEditorLabel,
-      'text-compare-right',
-    );
+    expect(DesktopWebTextEditor.debugActiveEditorLabel, 'text-compare-right');
     debugDefaultTargetPlatformOverride = null;
     await tester.pumpWidget(const SizedBox.shrink());
   });
