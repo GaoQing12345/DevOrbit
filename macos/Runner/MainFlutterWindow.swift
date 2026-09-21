@@ -58,9 +58,9 @@ class MainFlutterWindow: NSWindow {
       // to whichever WebView happens to be first in the view hierarchy.
       lastClickedEditorWebView = clickedWebView
       // Give the clicked platform view the responder before WebKit processes
-      // the event, then repeat once after the event below. The first call makes
-      // the target unambiguous; the second lets WebKit finish placing the DOM
-      // caret without leaving AppKit on the previous pane.
+      // the event. The first call makes the target unambiguous; the post-event
+      // ownership checks preserve WebKit's internal responder and only recover
+      // when AppKit is still focused outside the clicked editor.
       _ = makeFirstResponder(clickedWebView)
       _ = clickedWebView.becomeFirstResponder()
     }
@@ -68,6 +68,10 @@ class MainFlutterWindow: NSWindow {
     super.sendEvent(event)
 
     guard let clickedWebView else { return }
+    guard !responderBelongsToEditor(
+      clickedWebView,
+      responder: firstResponder
+    ) else { return }
     restoreClickedWebViewFocus(
       clickedWebView,
       generation: generation,
@@ -86,7 +90,11 @@ class MainFlutterWindow: NSWindow {
             self.clickFocusGeneration == generation,
             webView.window === self,
             !webView.isHidden,
-            webView.alphaValue > 0.01 else { return }
+            webView.alphaValue > 0.01,
+            !self.responderBelongsToEditor(
+              webView,
+              responder: self.firstResponder
+            ) else { return }
       _ = self.makeFirstResponder(webView)
       _ = webView.becomeFirstResponder()
       // One retry is enough for WebKit's post-click responder transition. Any
@@ -101,6 +109,14 @@ class MainFlutterWindow: NSWindow {
         )
       }
     }
+  }
+
+  func responderBelongsToEditor(
+    _ webView: WKWebView,
+    responder: NSResponder?
+  ) -> Bool {
+    guard let responderView = responder as? NSView else { return false }
+    return containingWebView(for: responderView) === webView
   }
 
   private func containingWebView(for view: NSView?) -> WKWebView? {
