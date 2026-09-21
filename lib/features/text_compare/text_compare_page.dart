@@ -30,8 +30,9 @@ class _TextCompareChunkAnalyzer implements CodeChunkAnalyzer {
 }
 
 class _TextCompareFindMatch {
-  const _TextCompareFindMatch(this.start, this.end);
+  const _TextCompareFindMatch(this.side, this.start, this.end);
 
+  final TextCompareSide side;
   final int start;
   final int end;
 }
@@ -59,15 +60,12 @@ class _TextComparePageState extends State<TextComparePage> {
   int _foldedLineCount = 0;
   bool _syncingScroll = false;
   bool _highlightRepaintScheduled = false;
-  late final TextEditingController _leftFindInputController;
-  late final TextEditingController _rightFindInputController;
-  final _leftFindFocusNode = FocusNode(debugLabel: 'text-compare-find-left');
-  final _rightFindFocusNode = FocusNode(debugLabel: 'text-compare-find-right');
-  TextCompareSide _activeFindSide = TextCompareSide.left;
-  List<_TextCompareFindMatch> _leftFindMatches = const [];
-  List<_TextCompareFindMatch> _rightFindMatches = const [];
-  int _leftFindMatchIndex = -1;
-  int _rightFindMatchIndex = -1;
+  late final TextEditingController _findInputController;
+  final _findFocusNode = FocusNode(debugLabel: 'text-compare-find');
+  TextCompareSide _activeEditorSide = TextCompareSide.left;
+  TextCompareSide _findStartSide = TextCompareSide.left;
+  List<_TextCompareFindMatch> _findMatches = const [];
+  int _findMatchIndex = -1;
   bool _findVisible = false;
 
   bool get _usesWebEditor =>
@@ -88,14 +86,8 @@ class _TextComparePageState extends State<TextComparePage> {
     );
     _leftScrollController = CodeScrollController();
     _rightScrollController = CodeScrollController();
-    _leftFindInputController = TextEditingController();
-    _rightFindInputController = TextEditingController();
-    _leftFindInputController.addListener(
-      () => _onFindQueryChanged(TextCompareSide.left),
-    );
-    _rightFindInputController.addListener(
-      () => _onFindQueryChanged(TextCompareSide.right),
-    );
+    _findInputController = TextEditingController();
+    _findInputController.addListener(_onFindQueryChanged);
     _leftScrollController.verticalScroller.addListener(_syncLeftScroll);
     _rightScrollController.verticalScroller.addListener(_syncRightScroll);
     _focusRestorer = DesktopClipboardFocusRestorer(
@@ -115,8 +107,7 @@ class _TextComparePageState extends State<TextComparePage> {
     widget.controller.addListener(_syncFromController);
     _leftFocusNode.addListener(_handleFocusChange);
     _rightFocusNode.addListener(_handleFocusChange);
-    _leftFindFocusNode.addListener(_onLeftFindFocusChanged);
-    _rightFindFocusNode.addListener(_onRightFindFocusChanged);
+    _findFocusNode.addListener(_onFindFocusChanged);
   }
 
   CodeLineEditingController _createEditor(TextCompareSide side) {
@@ -155,12 +146,10 @@ class _TextComparePageState extends State<TextComparePage> {
     _leftScrollController.horizontalScroller.dispose();
     _rightScrollController.verticalScroller.dispose();
     _rightScrollController.horizontalScroller.dispose();
-    _leftFindInputController.dispose();
-    _rightFindInputController.dispose();
-    _leftFindFocusNode.removeListener(_onLeftFindFocusChanged);
-    _rightFindFocusNode.removeListener(_onRightFindFocusChanged);
-    _leftFindFocusNode.dispose();
-    _rightFindFocusNode.dispose();
+    _findInputController.removeListener(_onFindQueryChanged);
+    _findInputController.dispose();
+    _findFocusNode.removeListener(_onFindFocusChanged);
+    _findFocusNode.dispose();
     _leftFocusNode.removeListener(_handleFocusChange);
     _rightFocusNode.removeListener(_handleFocusChange);
     _leftEditor.dispose();
@@ -174,24 +163,22 @@ class _TextComparePageState extends State<TextComparePage> {
 
   void _handleFocusChange() {
     if (_leftFocusNode.hasFocus) {
-      _setActiveFindSide(TextCompareSide.left);
+      _setActiveEditorSide(TextCompareSide.left);
     } else if (_rightFocusNode.hasFocus) {
-      _setActiveFindSide(TextCompareSide.right);
+      _setActiveEditorSide(TextCompareSide.right);
     }
     if (mounted) setState(() {});
   }
 
   void _activateWebSide(TextCompareSide side) {
-    _setActiveFindSide(side);
-    _leftFindFocusNode.unfocus();
-    _rightFindFocusNode.unfocus();
+    _setActiveEditorSide(side);
+    _findFocusNode.unfocus();
     if (mounted) setState(() {});
   }
 
-  void _setActiveFindSide(TextCompareSide side) {
-    if (_activeFindSide == side) return;
-    _activeFindSide = side;
-    if (_findVisible) _refreshFindMatches(side, resetIndex: true);
+  void _setActiveEditorSide(TextCompareSide side) {
+    if (_activeEditorSide == side) return;
+    _activeEditorSide = side;
   }
 
   String _findText(TextCompareSide side) {
@@ -204,47 +191,6 @@ class _TextComparePageState extends State<TextComparePage> {
     return side == TextCompareSide.left
         ? _leftWebController
         : _rightWebController;
-  }
-
-  TextEditingController _findInputFor(TextCompareSide side) {
-    return side == TextCompareSide.left
-        ? _leftFindInputController
-        : _rightFindInputController;
-  }
-
-  FocusNode _findFocusFor(TextCompareSide side) {
-    return side == TextCompareSide.left
-        ? _leftFindFocusNode
-        : _rightFindFocusNode;
-  }
-
-  List<_TextCompareFindMatch> _findMatchesFor(TextCompareSide side) {
-    return side == TextCompareSide.left ? _leftFindMatches : _rightFindMatches;
-  }
-
-  int _findMatchIndexFor(TextCompareSide side) {
-    return side == TextCompareSide.left
-        ? _leftFindMatchIndex
-        : _rightFindMatchIndex;
-  }
-
-  void _setFindMatches(
-    TextCompareSide side,
-    List<_TextCompareFindMatch> matches,
-  ) {
-    if (side == TextCompareSide.left) {
-      _leftFindMatches = matches;
-    } else {
-      _rightFindMatches = matches;
-    }
-  }
-
-  void _setFindMatchIndex(TextCompareSide side, int index) {
-    if (side == TextCompareSide.left) {
-      _leftFindMatchIndex = index;
-    } else {
-      _rightFindMatchIndex = index;
-    }
   }
 
   CodeLineEditingController _editorFor(TextCompareSide side) {
@@ -272,116 +218,97 @@ class _TextComparePageState extends State<TextComparePage> {
   }
 
   void _openFind(TextCompareSide side) {
-    _activeFindSide = side;
+    _activeEditorSide = side;
+    _findStartSide = side;
     _findVisible = true;
-    final input = _findInputFor(side);
-    input.selection = TextSelection(
+    _findInputController.selection = TextSelection(
       baseOffset: 0,
-      extentOffset: input.text.length,
+      extentOffset: _findInputController.text.length,
     );
-    _refreshFindMatches(side, resetIndex: true);
+    _refreshFindMatches(resetIndex: true);
     if (mounted) {
       setState(() {});
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted && _findVisible) _findFocusFor(side).requestFocus();
+        if (mounted && _findVisible) _findFocusNode.requestFocus();
       });
     }
   }
 
   void _closeFind() {
-    _leftFindFocusNode.unfocus();
-    _rightFindFocusNode.unfocus();
+    _findFocusNode.unfocus();
     if (!_findVisible) return;
     setState(() {
       _findVisible = false;
-      _leftFindMatches = const [];
-      _rightFindMatches = const [];
-      _leftFindMatchIndex = -1;
-      _rightFindMatchIndex = -1;
+      _findMatches = const [];
+      _findMatchIndex = -1;
     });
   }
 
-  void _onFindFocusChanged(TextCompareSide side) {
-    if (_findFocusFor(side).hasFocus) {
-      _activeFindSide = side;
+  void _onFindFocusChanged() {
+    if (_findFocusNode.hasFocus) {
       DesktopWebTextEditor.suspendActiveEditorFocus();
     }
   }
 
-  void _onLeftFindFocusChanged() {
-    _onFindFocusChanged(TextCompareSide.left);
-  }
-
-  void _onRightFindFocusChanged() {
-    _onFindFocusChanged(TextCompareSide.right);
-  }
-
-  void _onFindQueryChanged(TextCompareSide side) {
+  void _onFindQueryChanged() {
     if (!_findVisible) return;
-    _refreshFindMatches(side, resetIndex: true);
+    _refreshFindMatches(resetIndex: true);
     if (mounted) setState(() {});
   }
 
-  void _refreshFindMatches(TextCompareSide side, {required bool resetIndex}) {
-    final query = _findInputFor(side).text;
-    final text = _findText(side);
+  void _refreshFindMatches({required bool resetIndex}) {
+    final query = _findInputController.text;
     if (query.isEmpty) {
-      _setFindMatches(side, const []);
-      _setFindMatchIndex(side, -1);
+      _findMatches = const [];
+      _findMatchIndex = -1;
       return;
     }
     final expression = RegExp(RegExp.escape(query), caseSensitive: false);
-    final matches = [
-      for (final match in expression.allMatches(text))
-        _TextCompareFindMatch(match.start, match.end),
+    final sides = _findStartSide == TextCompareSide.left
+        ? const [TextCompareSide.left, TextCompareSide.right]
+        : const [TextCompareSide.right, TextCompareSide.left];
+    _findMatches = [
+      for (final side in sides)
+        for (final match in expression.allMatches(_findText(side)))
+          _TextCompareFindMatch(side, match.start, match.end),
     ];
-    _setFindMatches(side, matches);
-    if (matches.isEmpty) {
-      _setFindMatchIndex(side, -1);
+    if (_findMatches.isEmpty) {
+      _findMatchIndex = -1;
       return;
     }
     if (resetIndex) {
-      final offset = _currentOffset(side);
-      var index = matches.indexWhere((match) => match.start >= offset);
-      if (index < 0) index = 0;
-      _setFindMatchIndex(side, index);
-    } else {
-      _setFindMatchIndex(
-        side,
-        _findMatchIndexFor(side).clamp(0, matches.length - 1),
+      final offset = _currentOffset(_findStartSide);
+      var index = _findMatches.indexWhere(
+        (match) => match.side == _findStartSide && match.start >= offset,
       );
+      if (index < 0) index = 0;
+      _findMatchIndex = index;
+    } else {
+      _findMatchIndex = _findMatchIndex.clamp(0, _findMatches.length - 1);
     }
-    _revealCurrentFindMatch(side);
+    _revealCurrentFindMatch();
   }
 
-  void _nextFindMatch(TextCompareSide side) {
-    final matches = _findMatchesFor(side);
-    if (matches.isEmpty) return;
-    _setFindMatchIndex(side, (_findMatchIndexFor(side) + 1) % matches.length);
+  void _nextFindMatch() {
+    if (_findMatches.isEmpty) return;
+    _findMatchIndex = (_findMatchIndex + 1) % _findMatches.length;
     if (mounted) setState(() {});
-    _revealCurrentFindMatch(side);
+    _revealCurrentFindMatch();
   }
 
-  void _nextActiveFindMatch() {
-    _nextFindMatch(_activeFindSide);
-  }
-
-  void _previousFindMatch(TextCompareSide side) {
-    final matches = _findMatchesFor(side);
-    if (matches.isEmpty) return;
-    _setFindMatchIndex(
-      side,
-      (_findMatchIndexFor(side) - 1 + matches.length) % matches.length,
-    );
+  void _previousFindMatch() {
+    if (_findMatches.isEmpty) return;
+    _findMatchIndex =
+        (_findMatchIndex - 1 + _findMatches.length) % _findMatches.length;
     if (mounted) setState(() {});
-    _revealCurrentFindMatch(side);
+    _revealCurrentFindMatch();
   }
 
-  void _revealCurrentFindMatch(TextCompareSide side) {
-    final matches = _findMatchesFor(side);
-    final index = _findMatchIndexFor(side);
-    if (index < 0 || index >= matches.length) return;
-    final match = matches[index];
+  void _revealCurrentFindMatch() {
+    if (_findMatchIndex < 0 || _findMatchIndex >= _findMatches.length) return;
+    final match = _findMatches[_findMatchIndex];
+    final side = match.side;
+    _activeEditorSide = side;
     final text = _findText(side);
     if (_usesWebEditor) {
       final controller = _webControllerFor(side);
@@ -396,8 +323,8 @@ class _TextComparePageState extends State<TextComparePage> {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted ||
             !_findVisible ||
-            _findMatchIndexFor(side) < 0 ||
-            _findMatchesFor(side)[_findMatchIndexFor(side)] != match) {
+            _findMatchIndex < 0 ||
+            _findMatches[_findMatchIndex] != match) {
           return;
         }
         DesktopWebTextEditor.revealActiveSelection(selection);
@@ -486,8 +413,7 @@ class _TextComparePageState extends State<TextComparePage> {
       textChanged = true;
     }
     if (_findVisible && textChanged) {
-      _refreshFindMatches(TextCompareSide.left, resetIndex: true);
-      _refreshFindMatches(TextCompareSide.right, resetIndex: true);
+      _refreshFindMatches(resetIndex: true);
     }
     // Diff spans are derived from the controller result rather than editor
     // text. `setState` below lets the existing editors rebuild their spans;
@@ -832,14 +758,13 @@ class _TextComparePageState extends State<TextComparePage> {
         const SingleActivator(LogicalKeyboardKey.enter, control: true):
             widget.controller.compare,
         const SingleActivator(LogicalKeyboardKey.keyF, meta: true): () =>
-            _openFind(_activeFindSide),
+            _openFind(_activeEditorSide),
         const SingleActivator(LogicalKeyboardKey.keyF, control: true): () =>
-            _openFind(_activeFindSide),
+            _openFind(_activeEditorSide),
         if (_findVisible)
           const SingleActivator(LogicalKeyboardKey.escape): _closeFind,
         if (_findVisible)
-          const SingleActivator(LogicalKeyboardKey.arrowDown):
-              _nextActiveFindMatch,
+          const SingleActivator(LogicalKeyboardKey.arrowDown): _nextFindMatch,
       },
       child: Focus(
         autofocus: true,
@@ -942,34 +867,22 @@ class _TextComparePageState extends State<TextComparePage> {
               if (_findVisible)
                 Positioned(
                   top: 66,
-                  left: 24,
-                  child: _TextCompareFindPanel(
-                    key: const ValueKey('text-compare-left-find-panel'),
-                    controller: _leftFindInputController,
-                    focusNode: _leftFindFocusNode,
-                    inputKey: const ValueKey('text-compare-find-input'),
-                    matchIndex: _leftFindMatchIndex,
-                    matchCount: _leftFindMatches.length,
-                    onFocus: () => _onFindFocusChanged(TextCompareSide.left),
-                    onPrevious: () => _previousFindMatch(TextCompareSide.left),
-                    onNext: () => _nextFindMatch(TextCompareSide.left),
-                    onClose: _closeFind,
-                  ),
-                ),
-              if (_findVisible)
-                Positioned(
-                  top: 66,
                   right: 24,
                   child: _TextCompareFindPanel(
-                    key: const ValueKey('text-compare-right-find-panel'),
-                    controller: _rightFindInputController,
-                    focusNode: _rightFindFocusNode,
-                    inputKey: const ValueKey('text-compare-right-find-input'),
-                    matchIndex: _rightFindMatchIndex,
-                    matchCount: _rightFindMatches.length,
-                    onFocus: () => _onFindFocusChanged(TextCompareSide.right),
-                    onPrevious: () => _previousFindMatch(TextCompareSide.right),
-                    onNext: () => _nextFindMatch(TextCompareSide.right),
+                    key: const ValueKey('text-compare-find-panel'),
+                    controller: _findInputController,
+                    focusNode: _findFocusNode,
+                    inputKey: const ValueKey('text-compare-find-input'),
+                    matchSide:
+                        _findMatchIndex < 0 ||
+                            _findMatchIndex >= _findMatches.length
+                        ? null
+                        : _findMatches[_findMatchIndex].side,
+                    matchIndex: _findMatchIndex,
+                    matchCount: _findMatches.length,
+                    onFocus: _onFindFocusChanged,
+                    onPrevious: _previousFindMatch,
+                    onNext: _nextFindMatch,
                     onClose: _closeFind,
                   ),
                 ),
@@ -1211,6 +1124,7 @@ class _TextCompareFindPanel extends StatelessWidget {
     required this.focusNode,
     required this.inputKey,
     required this.onFocus,
+    required this.matchSide,
     required this.matchIndex,
     required this.matchCount,
     required this.onPrevious,
@@ -1222,6 +1136,7 @@ class _TextCompareFindPanel extends StatelessWidget {
   final FocusNode focusNode;
   final Key inputKey;
   final VoidCallback onFocus;
+  final TextCompareSide? matchSide;
   final int matchIndex;
   final int matchCount;
   final VoidCallback onPrevious;
@@ -1231,9 +1146,10 @@ class _TextCompareFindPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final resultText = matchIndex < 0 || matchCount == 0
+    final sideLabel = matchSide == TextCompareSide.left ? '左' : '右';
+    final resultText = matchIndex < 0 || matchCount == 0 || matchSide == null
         ? '0/0'
-        : '${matchIndex + 1}/$matchCount';
+        : '$sideLabel ${matchIndex + 1}/$matchCount';
     return Container(
       width: 380,
       height: 52,

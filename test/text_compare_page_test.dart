@@ -66,31 +66,82 @@ void main() {
     expect(input, findsOneWidget);
     await tester.enterText(input, 'one');
     await tester.pump();
-    expect(find.text('1/2'), findsOneWidget);
+    expect(find.text('左 1/2'), findsOneWidget);
     expect(tester.widget<TextField>(input).focusNode!.hasFocus, isTrue);
 
-    final rightInput = find.byKey(
-      const ValueKey('text-compare-right-find-input'),
-    );
-    await tester.enterText(rightInput, 'other');
+    await tester.testTextInput.receiveAction(TextInputAction.done);
     await tester.pump();
-    expect(tester.widget<TextField>(rightInput).controller!.text, 'other');
-    expect(find.text('1/1'), findsOneWidget);
-
-    await tester.tap(input);
-    await tester.pump();
-    expect(tester.widget<TextField>(input).focusNode!.hasFocus, isTrue);
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-    await tester.pump();
-    expect(find.text('2/2'), findsOneWidget);
+    expect(find.text('左 2/2'), findsOneWidget);
 
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
     await tester.pump();
-    expect(find.text('1/2'), findsOneWidget);
+    expect(find.text('左 1/2'), findsOneWidget);
 
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pump();
     expect(input, findsNothing);
+    debugDefaultTargetPlatformOverride = null;
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('one find input searches both panes in active-pane order', (
+    tester,
+  ) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    final controller = TextCompareController(service: _ImmediateService());
+    addTearDown(controller.dispose);
+    controller.updateLeft('same left same');
+    controller.updateRight('same right');
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(body: TextComparePage(controller: controller)),
+      ),
+    );
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyF);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    await tester.pump();
+
+    final input = find.byKey(const ValueKey('text-compare-find-input'));
+    expect(input, findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('text-compare-right-find-input')),
+      findsNothing,
+    );
+    await tester.enterText(input, 'same');
+    await tester.pump();
+    expect(find.text('左 1/3'), findsOneWidget);
+
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pump();
+    expect(find.text('左 2/3'), findsOneWidget);
+
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pump();
+    expect(find.text('右 3/3'), findsOneWidget);
+
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pump();
+    expect(find.text('左 1/3'), findsOneWidget);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pump();
+    expect(input, findsNothing);
+    final panes = find.byWidgetPredicate(
+      (widget) => widget.runtimeType.toString() == '_TextPane',
+    );
+    final dynamic rightPane = tester.widget(panes.last);
+    rightPane.onFind();
+    await tester.pump();
+    expect(find.text('右 1/3'), findsOneWidget);
+
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pump();
+    expect(find.text('左 2/3'), findsOneWidget);
+
+    FocusManager.instance.primaryFocus?.unfocus();
     debugDefaultTargetPlatformOverride = null;
     await tester.pumpWidget(const SizedBox.shrink());
   });
