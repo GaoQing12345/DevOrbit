@@ -80,6 +80,8 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pump();
     expect(input, findsNothing);
+    FocusManager.instance.primaryFocus?.unfocus();
+    await tester.pump(const Duration(milliseconds: 120));
     debugDefaultTargetPlatformOverride = null;
     await tester.pumpWidget(const SizedBox.shrink());
   });
@@ -142,6 +144,100 @@ void main() {
     expect(find.text('左 2/3'), findsOneWidget);
 
     FocusManager.instance.primaryFocus?.unfocus();
+    await tester.pump(const Duration(milliseconds: 120));
+    debugDefaultTargetPlatformOverride = null;
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('closing find restores exactly one editor focus', (tester) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    final controller = TextCompareController(service: _ImmediateService());
+    addTearDown(controller.dispose);
+    controller.updateLeft('needle left');
+    controller.updateRight('right');
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(body: TextComparePage(controller: controller)),
+      ),
+    );
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyF);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    await tester.pump();
+    final input = find.byKey(const ValueKey('text-compare-find-input'));
+    await tester.enterText(input, 'needle');
+    await tester.pump();
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pump();
+
+    final editors = tester
+        .widgetList<CodeEditor>(find.byType(CodeEditor))
+        .toList(growable: false);
+    expect(input, findsNothing);
+    expect(editors.first.focusNode!.hasFocus, isTrue);
+    expect(editors.last.focusNode!.hasFocus, isFalse);
+
+    FocusManager.instance.primaryFocus?.unfocus();
+    await tester.pump(const Duration(milliseconds: 120));
+    debugDefaultTargetPlatformOverride = null;
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('editor activation releases find paste ownership', (
+    tester,
+  ) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    final controller = TextCompareController(service: _ImmediateService());
+    addTearDown(controller.dispose);
+    controller.updateLeft('left');
+    controller.updateRight('right');
+    mockClipboard(tester, initialText: 'must not enter query');
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(body: TextComparePage(controller: controller)),
+      ),
+    );
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyF);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    await tester.pump();
+    final input = find.byKey(const ValueKey('text-compare-find-input'));
+    await tester.enterText(input, 'needle');
+    await tester.pump();
+    final field = tester.widget<TextField>(input);
+    final panes = find.byWidgetPredicate(
+      (widget) => widget.runtimeType.toString() == '_TextPane',
+    );
+    final dynamic rightPane = tester.widget(panes.last);
+
+    rightPane.onEditorPointerDown();
+    await tester.pump();
+    expect(field.focusNode!.hasFocus, isFalse);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyV);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    await tester.pump(const Duration(milliseconds: 80));
+
+    expect(field.controller!.text, 'needle');
+
+    final editors = tester
+        .widgetList<CodeEditor>(find.byType(CodeEditor))
+        .toList(growable: false);
+    editors.last.focusNode!.requestFocus();
+    await tester.pump();
+    rightPane.onPaste();
+    await tester.pump(const Duration(milliseconds: 80));
+
+    expect(controller.rightText, contains('must not enter query'));
+    expect(field.controller!.text, 'needle');
+
+    FocusManager.instance.primaryFocus?.unfocus();
+    await tester.pump(const Duration(milliseconds: 120));
     debugDefaultTargetPlatformOverride = null;
     await tester.pumpWidget(const SizedBox.shrink());
   });

@@ -11,6 +11,26 @@ import 'package:window_manager/window_manager.dart';
 import 'desktop_clipboard_diagnostics.dart';
 import 'desktop_text_selection.dart';
 
+class DesktopWebTextEditorController {
+  _DesktopWebTextEditorState? _state;
+
+  void _attach(_DesktopWebTextEditorState state) {
+    _state = state;
+  }
+
+  void _detach(_DesktopWebTextEditorState state) {
+    if (identical(_state, state)) _state = null;
+  }
+
+  void revealSelection(NativeTextSelection selection) {
+    _state?._revealSelection(selection);
+  }
+
+  void restoreFocus() {
+    _state?._takeEditorFocus();
+  }
+}
+
 /// A single browser-backed editing surface shared by macOS and Windows.
 ///
 /// The DOM is authoritative for input, selection, undo, IME and clipboard
@@ -19,6 +39,7 @@ import 'desktop_text_selection.dart';
 class DesktopWebTextEditor extends StatefulWidget {
   const DesktopWebTextEditor({
     super.key,
+    this.controller,
     required this.text,
     this.selection,
     required this.onChanged,
@@ -39,6 +60,7 @@ class DesktopWebTextEditor extends StatefulWidget {
     this.debugLabel = 'web-editor',
   });
 
+  final DesktopWebTextEditorController? controller;
   final String text;
   final NativeTextSelection? selection;
   final ValueChanged<String> onChanged;
@@ -189,6 +211,7 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
   @override
   void initState() {
     super.initState();
+    widget.controller?._attach(this);
     _editors.add(this);
     windowManager.addListener(this);
     _lifecycle = AppLifecycleListener(
@@ -260,6 +283,10 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
   @override
   void didUpdateWidget(covariant DesktopWebTextEditor oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (!identical(oldWidget.controller, widget.controller)) {
+      oldWidget.controller?._detach(this);
+      widget.controller?._attach(this);
+    }
     if (!_loaded || _controller == null) return;
     final highlightsChanged = !listEquals(
       oldWidget.highlights,
@@ -440,6 +467,13 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
     });
   }
 
+  void _takeEditorFocus() {
+    if (_disposed || !_loaded || !_isVisible) return;
+    _claimEditorSession();
+    _restoreFocusOnWindowFocus = true;
+    _restoreWebFocus();
+  }
+
   @override
   void onWindowBlur() {
     final primaryFocus = FocusManager.instance.primaryFocus;
@@ -570,6 +604,7 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
   @override
   void dispose() {
     _disposed = true;
+    widget.controller?._detach(this);
     _editors.remove(this);
     _lifecycle.dispose();
     if (identical(_activeEditor, this)) _activeEditor = null;

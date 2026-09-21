@@ -42,6 +42,7 @@ class _JsonFormatterPageState extends State<JsonFormatterPage> {
   late final JsonFocusRestorer _focusRestorer;
   final _foldController = JsonFoldController();
   bool _syncing = false, _dragging = false;
+  bool _findFieldSessionActive = false;
 
   bool get _usesWebEditor =>
       (Platform.isMacOS || Platform.isWindows) &&
@@ -174,13 +175,18 @@ class _JsonFormatterPageState extends State<JsonFormatterPage> {
   void _onFindFieldFocusChanged() {
     if (_findController.findInputFocusNode.hasFocus ||
         _findController.replaceInputFocusNode.hasFocus) {
+      _findFieldSessionActive = true;
       DesktopWebTextEditor.suspendActiveEditorFocus();
     }
+    if (mounted) setState(() {});
   }
 
   void _unfocusFindFields() {
+    _findFieldSessionActive = false;
+    _focusRestorer.clearActiveTarget();
     _findController.findInputFocusNode.unfocus();
     _findController.replaceInputFocusNode.unfocus();
+    if (mounted) setState(() {});
   }
 
   Future<bool> _confirmReplace() async {
@@ -300,7 +306,8 @@ class _JsonFormatterPageState extends State<JsonFormatterPage> {
     // the guarded clipboard bridge (including QuickClipboard/iCopy).
     _focusRestorer.active =
         Visibility.of(context) &&
-        (!_usesWebEditor || _findController.value != null);
+        (!_usesWebEditor ||
+            (_findController.value != null && _findFieldSessionActive));
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     final shortcuts = buildJsonFormatterShortcuts(

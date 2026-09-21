@@ -51,10 +51,13 @@ class _TextComparePageState extends State<TextComparePage> {
   late final CodeLineEditingController _rightEditor;
   late final TextEditingController _leftWebController;
   late final TextEditingController _rightWebController;
+  final _leftWebEditorController = DesktopWebTextEditorController();
+  final _rightWebEditorController = DesktopWebTextEditorController();
   late final CodeScrollController _leftScrollController;
   late final CodeScrollController _rightScrollController;
   final _leftFocusNode = FocusNode();
   final _rightFocusNode = FocusNode();
+  final _pageFocusNode = FocusNode(debugLabel: 'text-compare-page');
   late final DesktopClipboardFocusRestorer _focusRestorer;
   bool _foldUnchanged = false;
   int _foldedLineCount = 0;
@@ -67,6 +70,7 @@ class _TextComparePageState extends State<TextComparePage> {
   List<_TextCompareFindMatch> _findMatches = const [];
   int _findMatchIndex = -1;
   bool _findVisible = false;
+  bool _findSessionActive = false;
 
   bool get _usesWebEditor =>
       !kIsWeb &&
@@ -101,6 +105,11 @@ class _TextComparePageState extends State<TextComparePage> {
           controller: _rightEditor,
           focusNode: _rightFocusNode,
           onChanged: widget.controller.updateRight,
+        ),
+        TextEditingClipboardTarget(
+          controller: _findInputController,
+          focusNode: _findFocusNode,
+          available: () => _findVisible,
         ),
       ],
     );
@@ -158,6 +167,7 @@ class _TextComparePageState extends State<TextComparePage> {
     _rightWebController.dispose();
     _leftFocusNode.dispose();
     _rightFocusNode.dispose();
+    _pageFocusNode.dispose();
     super.dispose();
   }
 
@@ -171,8 +181,11 @@ class _TextComparePageState extends State<TextComparePage> {
   }
 
   void _activateWebSide(TextCompareSide side) {
-    _setActiveEditorSide(side);
+    _findSessionActive = false;
+    _focusRestorer.clearActiveTarget();
     _findFocusNode.unfocus();
+    _setActiveEditorSide(side);
+    _pageFocusNode.requestFocus();
     if (mounted) setState(() {});
   }
 
@@ -191,6 +204,16 @@ class _TextComparePageState extends State<TextComparePage> {
     return side == TextCompareSide.left
         ? _leftWebController
         : _rightWebController;
+  }
+
+  DesktopWebTextEditorController _webEditorControllerFor(TextCompareSide side) {
+    return side == TextCompareSide.left
+        ? _leftWebEditorController
+        : _rightWebEditorController;
+  }
+
+  FocusNode _editorFocusNodeFor(TextCompareSide side) {
+    return side == TextCompareSide.left ? _leftFocusNode : _rightFocusNode;
   }
 
   CodeLineEditingController _editorFor(TextCompareSide side) {
@@ -221,6 +244,7 @@ class _TextComparePageState extends State<TextComparePage> {
     _activeEditorSide = side;
     _findStartSide = side;
     _findVisible = true;
+    _findSessionActive = true;
     _findInputController.selection = TextSelection(
       baseOffset: 0,
       extentOffset: _findInputController.text.length,
@@ -235,6 +259,12 @@ class _TextComparePageState extends State<TextComparePage> {
   }
 
   void _closeFind() {
+    final restoreSide =
+        _findMatchIndex >= 0 && _findMatchIndex < _findMatches.length
+        ? _findMatches[_findMatchIndex].side
+        : _activeEditorSide;
+    _findSessionActive = false;
+    _focusRestorer.clearActiveTarget();
     _findFocusNode.unfocus();
     if (!_findVisible) return;
     setState(() {
@@ -242,12 +272,22 @@ class _TextComparePageState extends State<TextComparePage> {
       _findMatches = const [];
       _findMatchIndex = -1;
     });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (_usesWebEditor) {
+        _webEditorControllerFor(restoreSide).restoreFocus();
+      } else {
+        _editorFocusNodeFor(restoreSide).requestFocus();
+      }
+    });
   }
 
   void _onFindFocusChanged() {
     if (_findFocusNode.hasFocus) {
+      _findSessionActive = true;
       DesktopWebTextEditor.suspendActiveEditorFocus();
     }
+    if (mounted) setState(() {});
   }
 
   void _onFindQueryChanged() {
@@ -327,7 +367,7 @@ class _TextComparePageState extends State<TextComparePage> {
             _findMatches[_findMatchIndex] != match) {
           return;
         }
-        DesktopWebTextEditor.revealActiveSelection(selection);
+        _webEditorControllerFor(side).revealSelection(selection);
       });
       return;
     }
@@ -750,7 +790,8 @@ class _TextComparePageState extends State<TextComparePage> {
 
   @override
   Widget build(BuildContext context) {
-    _focusRestorer.active = Visibility.of(context) && !_usesWebEditor;
+    _focusRestorer.active =
+        Visibility.of(context) && (!_usesWebEditor || _findSessionActive);
     return CallbackShortcuts(
       bindings: {
         const SingleActivator(LogicalKeyboardKey.enter, meta: true):
@@ -767,6 +808,7 @@ class _TextComparePageState extends State<TextComparePage> {
           const SingleActivator(LogicalKeyboardKey.arrowDown): _nextFindMatch,
       },
       child: Focus(
+        focusNode: _pageFocusNode,
         autofocus: true,
         child: Material(
           color: Theme.of(context).colorScheme.surface,
@@ -805,6 +847,7 @@ class _TextComparePageState extends State<TextComparePage> {
                               onEditorPointerDown: () =>
                                   _activateWebSide(TextCompareSide.left),
                               useWebEditor: _usesWebEditor,
+                              webEditorController: _leftWebEditorController,
                               webController: _leftWebController,
                               webSelection: _webSelection(_leftWebController),
                               webHighlights: _webHighlights(
@@ -839,6 +882,7 @@ class _TextComparePageState extends State<TextComparePage> {
                               onEditorPointerDown: () =>
                                   _activateWebSide(TextCompareSide.right),
                               useWebEditor: _usesWebEditor,
+                              webEditorController: _rightWebEditorController,
                               webController: _rightWebController,
                               webSelection: _webSelection(_rightWebController),
                               webHighlights: _webHighlights(
@@ -1237,6 +1281,7 @@ class _TextPane extends StatelessWidget {
     required this.onEditorPointerDown,
     required this.onChanged,
     required this.useWebEditor,
+    required this.webEditorController,
     required this.webController,
     required this.webSelection,
     required this.webHighlights,
@@ -1255,6 +1300,7 @@ class _TextPane extends StatelessWidget {
   final VoidCallback onEditorPointerDown;
   final ValueChanged<CodeLineEditingValue> onChanged;
   final bool useWebEditor;
+  final DesktopWebTextEditorController webEditorController;
   final TextEditingController webController;
   final NativeTextSelection webSelection;
   final List<DesktopTextHighlight> webHighlights;
@@ -1325,6 +1371,7 @@ class _TextPane extends StatelessWidget {
             Expanded(
               child: useWebEditor
                   ? DesktopWebTextEditor(
+                      controller: webEditorController,
                       text: webController.text,
                       selection: webSelection,
                       onChanged: onWebChanged,

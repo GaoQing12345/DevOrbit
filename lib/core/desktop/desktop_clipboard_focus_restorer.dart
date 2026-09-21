@@ -212,12 +212,19 @@ class DesktopClipboardFocusRestorer with WindowListener {
     if (_active == value) return;
     _active = value;
     unawaited(_setPasteTargetRegistration(value));
-    if (!value) {
+    if (value) {
+      _trackFocus();
+    } else {
       // Hidden pages and prewarmed helper windows must not keep a native
       // clipboard session alive or consume paste events for the visible page.
       _lastTarget = null;
       _cancelRestore();
     }
+  }
+
+  void clearActiveTarget() {
+    _lastTarget = null;
+    _cancelRestore();
   }
 
   Future<void> _setPasteTargetRegistration(bool value) async {
