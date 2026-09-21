@@ -228,6 +228,70 @@ HWND FindPlatformViewUnderCursor(HWND root) {
                                    L"CustomPlatformView");
 }
 
+struct PlatformViewPointSearch {
+  POINT screen_point;
+  HWND root;
+  HWND match = nullptr;
+};
+
+BOOL CALLBACK FindPlatformViewAtPoint(HWND window, LPARAM parameter) {
+  auto* search = reinterpret_cast<PlatformViewPointSearch*>(parameter);
+  wchar_t current_class[128] = {};
+  GetClassNameW(window, current_class,
+                static_cast<int>(sizeof(current_class) /
+                                 sizeof(current_class[0])));
+  RECT bounds = {};
+  if (_wcsicmp(current_class, L"CustomPlatformView") == 0 &&
+      IsWindowVisible(window) && GetWindowRect(window, &bounds) &&
+      PtInRect(&bounds, search->screen_point) &&
+      GetAncestor(window, GA_ROOT) == search->root) {
+    search->match = window;
+    return FALSE;
+  }
+  return TRUE;
+}
+
+HWND FindPlatformViewAtClientPoint(HWND root, double x, double y,
+                                   double scale_factor) {
+  POINT point = {static_cast<LONG>(x * scale_factor),
+                 static_cast<LONG>(y * scale_factor)};
+  HWND coordinate_root = FindWindowExW(root, nullptr, L"FLUTTERVIEW", nullptr);
+  if (!coordinate_root) coordinate_root = root;
+  if (!ClientToScreen(coordinate_root, &point)) return nullptr;
+  PlatformViewPointSearch search = {point, root, nullptr};
+  EnumChildWindows(root, FindPlatformViewAtPoint,
+                   reinterpret_cast<LPARAM>(&search));
+  return search.match;
+}
+
+const flutter::EncodableMap* MethodArgumentsMap(
+    const flutter::MethodCall<flutter::EncodableValue>& call) {
+  if (!call.arguments()) return nullptr;
+  return std::get_if<flutter::EncodableMap>(call.arguments());
+}
+
+std::optional<std::string> StringArgument(const flutter::EncodableMap* args,
+                                          const char* key) {
+  if (!args) return std::nullopt;
+  const auto iterator = args->find(flutter::EncodableValue(key));
+  if (iterator == args->end()) return std::nullopt;
+  if (const auto* value = std::get_if<std::string>(&iterator->second)) {
+    return *value;
+  }
+  return std::nullopt;
+}
+
+std::optional<double> DoubleArgument(const flutter::EncodableMap* args,
+                                     const char* key) {
+  if (!args) return std::nullopt;
+  const auto iterator = args->find(flutter::EncodableValue(key));
+  if (iterator == args->end()) return std::nullopt;
+  if (const auto* value = std::get_if<double>(&iterator->second)) {
+    return *value;
+  }
+  return std::nullopt;
+}
+
 BOOL CALLBACK ActivateProcessWindow(HWND window, LPARAM parameter) {
   auto* request = reinterpret_cast<WindowActivationRequest*>(parameter);
   DWORD window_process_id = 0;
@@ -385,13 +449,40 @@ void FlutterWindow::RegisterClipboardChannel() {
           result->Success(flutter::EncodableValue(true));
           return;
         }
+        if (call.method_name() == "registerEditorView") {
+          const auto* args = MethodArgumentsMap(call);
+          const auto editor_key = StringArgument(args, "editorKey");
+          const auto x = DoubleArgument(args, "x");
+          const auto y = DoubleArgument(args, "y");
+          const auto scale = DoubleArgument(args, "devicePixelRatio");
+          if (editor_key && x && y && scale) {
+            HWND platform_view = FindPlatformViewAtClientPoint(
+                GetHandle(), *x, *y, *scale);
+            if (platform_view) {
+              editor_platform_views_[*editor_key] = platform_view;
+            }
+          }
+          result->Success();
+          return;
+        }
         if (call.method_name() == "requestEditorFocus") {
           // Re-activate the top-level HWND first, then focus the composition
           // platform view itself. Focusing only FLUTTERVIEW leaves Flutter's
           // outer shortcut node active and WebView2 receives no keyboard input
           // after a clipboard picker returns.
           ShowAndFocusProcessWindow(GetHandle());
-          HWND platform_view = last_editor_platform_view_;
+          const auto editor_key = StringArgument(MethodArgumentsMap(call),
+                                                 "editorKey");
+          HWND platform_view = nullptr;
+          if (editor_key) {
+            const auto mapped = editor_platform_views_.find(*editor_key);
+            if (mapped != editor_platform_views_.end()) {
+              platform_view = mapped->second;
+            }
+          }
+          if (!IsWindow(platform_view)) {
+            platform_view = last_editor_platform_view_;
+          }
           if (!IsWindow(platform_view) ||
               GetAncestor(platform_view, GA_ROOT) != GetHandle()) {
             platform_view = FindPlatformViewUnderCursor(GetHandle());
@@ -413,6 +504,11 @@ void FlutterWindow::RegisterClipboardChannel() {
           // repeated clicks and side-by-side editors keep the correct HWND.
           HWND platform_view = FindPlatformViewUnderCursor(GetHandle());
           if (platform_view && IsWindowEnabled(platform_view)) {
+            const auto editor_key = StringArgument(MethodArgumentsMap(call),
+                                                   "editorKey");
+            if (editor_key) {
+              editor_platform_views_[*editor_key] = platform_view;
+            }
             last_editor_platform_view_ = platform_view;
             SetFocus(platform_view);
           }

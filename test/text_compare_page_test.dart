@@ -314,6 +314,59 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
+  testWidgets('find suspension cancels delayed WebView autofocus', (
+    tester,
+  ) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    final editorController = DesktopWebTextEditorController();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: DesktopWebTextEditor(
+          controller: editorController,
+          text: '',
+          onChanged: (_) {},
+          debugLabel: 'delayed-autofocus-editor',
+        ),
+      ),
+    );
+    editorController.debugScheduleAutofocus();
+    DesktopWebTextEditor.suspendActiveEditorFocus();
+    await tester.pump(const Duration(milliseconds: 80));
+
+    expect(DesktopWebTextEditor.debugActiveEditorLabel, isNull);
+    debugDefaultTargetPlatformOverride = null;
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('find suspension keeps the active WebView session suspended', (
+    tester,
+  ) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    final editorController = DesktopWebTextEditorController();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: DesktopWebTextEditor(
+          controller: editorController,
+          text: '',
+          onChanged: (_) {},
+          debugLabel: 'same-delayed-autofocus-editor',
+        ),
+      ),
+    );
+    editorController.restoreFocus();
+    editorController.debugScheduleAutofocus();
+    DesktopWebTextEditor.suspendActiveEditorFocus();
+    await tester.pump(const Duration(milliseconds: 80));
+
+    expect(DesktopWebTextEditor.debugActiveEditorSession, isFalse);
+    debugDefaultTargetPlatformOverride = null;
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   testWidgets('shows diff status without overflowing the minimum window', (
     tester,
   ) async {

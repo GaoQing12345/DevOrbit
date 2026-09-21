@@ -4,6 +4,14 @@ import Security
 import WebKit
 
 class MainFlutterWindow: NSWindow {
+  private final class WeakWebView {
+    weak var value: WKWebView?
+
+    init(_ value: WKWebView) {
+      self.value = value
+    }
+  }
+
   private var cursorChannel: FlutterMethodChannel?
   private var clipboardChannel: FlutterMethodChannel?
   private var pasteKeyMonitor: Any?
@@ -25,6 +33,7 @@ class MainFlutterWindow: NSWindow {
   private var workspaceActivationObserver: NSObjectProtocol?
   private var clickFocusGeneration = 0
   private weak var lastClickedEditorWebView: WKWebView?
+  private var editorWebViews: [String: WeakWebView] = [:]
 
   private static let clipboardManagerBundleIdentifiers: Set<String> = [
     "cn.better365.iCopy",
@@ -237,8 +246,11 @@ class MainFlutterWindow: NSWindow {
     )
     channel.setMethodCallHandler { [weak self] call, result in
       switch call.method {
+      case "registerEditorView":
+        self?.registerEditorView(from: call)
+        result(nil)
       case "requestEditorFocus":
-        self?.requestEditorFocus()
+        self?.requestEditorFocus(editorKey: Self.editorKey(from: call))
         result(nil)
       case "getChangeCount":
         result(NSPasteboard.general.changeCount)
@@ -313,7 +325,7 @@ class MainFlutterWindow: NSWindow {
   /// picker temporarily activates another application. JavaScript
   /// `element.focus()` restores the DOM caret, but it cannot make the native
   /// platform view the key window's responder on its own.
-  private func requestEditorFocus() {
+  private func requestEditorFocus(editorKey: String?) {
     func findWebView(in view: NSView) -> WKWebView? {
       if let webView = view as? WKWebView,
          !webView.isHidden,
@@ -329,15 +341,22 @@ class MainFlutterWindow: NSWindow {
       return nil
     }
 
-    // Prefer the pane most recently clicked by the user. During clipboard
-    // recovery AppKit's responder may belong to another platform view, so it
-    // is not a reliable indication of which editor owned the caret.
+    // Prefer the stable editor identity supplied by Dart. During clipboard
+    // recovery AppKit's responder and the most recent click can both belong to
+    // a different pane than the current find result.
+    let registeredWebView = editorKey.flatMap { key in
+      registeredEditorWebView(for: key)
+    }.flatMap { webView in
+      webView.isHidden || webView.alphaValue <= 0.01 || webView.window == nil
+        ? nil
+        : webView
+    }
     let rememberedWebView = lastClickedEditorWebView.flatMap { webView in
       webView.isHidden || webView.alphaValue <= 0.01 || webView.window == nil
         ? nil
         : webView
     }
-    let webView = rememberedWebView ??
+    let webView = registeredWebView ?? rememberedWebView ??
       containingWebView(for: firstResponder as? NSView) ??
       contentView.flatMap({ findWebView(in: $0) })
     guard let webView else {
@@ -350,8 +369,39 @@ class MainFlutterWindow: NSWindow {
     if !hostWindow.isKeyWindow {
       hostWindow.makeKeyAndOrderFront(self)
     }
+    if responderBelongsToEditor(
+      webView,
+      responder: hostWindow.firstResponder
+    ) {
+      return
+    }
     _ = hostWindow.makeFirstResponder(webView)
     _ = webView.becomeFirstResponder()
+  }
+
+  private func registerEditorView(from call: FlutterMethodCall) {
+    guard let arguments = call.arguments as? [String: Any],
+          let editorKey = arguments["editorKey"] as? String,
+          let x = (arguments["x"] as? NSNumber)?.doubleValue,
+          let y = (arguments["y"] as? NSNumber)?.doubleValue,
+          let contentView else { return }
+    let point = NSPoint(x: x, y: contentView.bounds.height - y)
+    guard let webView = containingWebView(for: contentView.hitTest(point)) ??
+      webView(at: point, in: contentView) else { return }
+    registerEditorWebView(webView, editorKey: editorKey)
+  }
+
+  func registerEditorWebView(_ webView: WKWebView, editorKey: String) {
+    editorWebViews[editorKey] = WeakWebView(webView)
+  }
+
+  func registeredEditorWebView(for editorKey: String) -> WKWebView? {
+    editorWebViews[editorKey]?.value
+  }
+
+  private static func editorKey(from call: FlutterMethodCall) -> String? {
+    guard let arguments = call.arguments as? [String: Any] else { return nil }
+    return arguments["editorKey"] as? String
   }
 
   private static func clipboardSessionId(from call: FlutterMethodCall) -> Int64? {

@@ -29,6 +29,11 @@ class DesktopWebTextEditorController {
   void restoreFocus() {
     _state?._takeEditorFocus();
   }
+
+  @visibleForTesting
+  void debugScheduleAutofocus() {
+    _state?._scheduleAutofocus();
+  }
 }
 
 /// A single browser-backed editing surface shared by macOS and Windows.
@@ -57,7 +62,7 @@ class DesktopWebTextEditor extends StatefulWidget {
     this.padding = const EdgeInsets.all(12),
     this.autofocus = true,
     this.highlights = const [],
-    this.debugLabel = 'web-editor',
+    required this.debugLabel,
   });
 
   final DesktopWebTextEditorController? controller;
@@ -85,6 +90,10 @@ class DesktopWebTextEditor extends StatefulWidget {
   @visibleForTesting
   static String? get debugActiveEditorLabel =>
       _DesktopWebTextEditorState._activeEditor?.widget.debugLabel;
+
+  @visibleForTesting
+  static bool get debugActiveEditorSession =>
+      _DesktopWebTextEditorState._activeEditor?._editorSessionActive ?? false;
 
   static void restoreActiveEditorFocus() {
     _DesktopWebTextEditorState.restoreActiveEditorFocus();
@@ -145,6 +154,8 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
   static _DesktopWebTextEditorState? _activeEditor;
   static final Set<_DesktopWebTextEditorState> _editors = {};
   static const _focusChannel = MethodChannel('dev_orbit/clipboard');
+  static int _autofocusGeneration = 0;
+  static bool _autofocusSuspended = false;
 
   InAppWebViewController? _controller;
   bool _loaded = false;
@@ -190,6 +201,8 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
   /// editing. Keep each DOM selection intact, hide every visible DOM caret,
   /// and stop native window restoration from returning focus to the editors.
   static void suspendActiveEditorFocus() {
+    _autofocusSuspended = true;
+    _autofocusGeneration += 1;
     for (final editor in _editors.toList(growable: false)) {
       if (editor._disposed || !editor._isVisible) continue;
       editor._editorSessionActive = false;
@@ -216,6 +229,10 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
   void initState() {
     super.initState();
     widget.controller?._attach(this);
+    if (_editors.isEmpty) {
+      _autofocusSuspended = false;
+      _autofocusGeneration += 1;
+    }
     _editors.add(this);
     windowManager.addListener(this);
     _lifecycle = AppLifecycleListener(
@@ -239,13 +256,27 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
       _evaluateJavascript('window.devOrbitBlur();');
       return;
     }
-    if (widget.autofocus && _loaded) {
+    if (_loaded) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!_disposed && _isVisible && widget.autofocus) {
-          _focusEditorFromAutofocus();
-        }
+        unawaited(_registerNativeEditorView());
       });
     }
+    if (widget.autofocus && _loaded) {
+      _scheduleAutofocus(delay: Duration.zero);
+    }
+  }
+
+  void _scheduleAutofocus({Duration delay = const Duration(milliseconds: 60)}) {
+    final generation = _autofocusGeneration;
+    Future<void>.delayed(delay, () {
+      if (!_disposed &&
+          _isVisible &&
+          widget.autofocus &&
+          !_autofocusSuspended &&
+          generation == _autofocusGeneration) {
+        _focusEditorFromAutofocus();
+      }
+    });
   }
 
   void _focusEditorFromAutofocus() {
@@ -318,6 +349,9 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
 
   void _onWebViewCreated(InAppWebViewController controller) {
     _controller = controller;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(_registerNativeEditorView());
+    });
     controller.addJavaScriptHandler(
       handlerName: 'editorChanged',
       callback: (args) {
@@ -376,6 +410,7 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
       callback: (args) {
         if (!_isVisible || _disposed) return null;
         if (args.isNotEmpty && args.first == true) {
+          if (_autofocusSuspended) return null;
           _claimEditorSession();
           if (args.length >= 3) {
             final selection = NativeTextSelection(
@@ -417,6 +452,7 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
     // DOM focus does not fire when an already-focused editor is clicked a
     // second time. Claim the editor directly from Flutter's pointer stream so
     // focus recovery does not depend on a delayed JavaScript bridge callback.
+    _resumeEditorFocus();
     _claimEditorSession();
     if (Platform.isWindows) unawaited(_claimNativeEditorFocus());
   }
@@ -435,6 +471,9 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
   void _onLoadStop(InAppWebViewController controller, WebUri? url) {
     _loaded = true;
     _syncState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(_registerNativeEditorView());
+    });
     if (identical(_activeEditor, this) &&
         _editorSessionActive &&
         _restoreFocusOnWindowFocus) {
@@ -442,11 +481,7 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
       return;
     }
     if (widget.autofocus && _isVisible) {
-      Future<void>.delayed(const Duration(milliseconds: 60), () {
-        if (!_disposed && _isVisible && widget.autofocus) {
-          _focusEditorFromAutofocus();
-        }
-      });
+      _scheduleAutofocus();
     }
   }
 
@@ -481,6 +516,7 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
 
   void _takeEditorFocus() {
     if (_disposed || !_isVisible) return;
+    _resumeEditorFocus();
     _claimEditorSession();
     _restoreFocusOnWindowFocus = true;
     if (_loaded) _restoreWebFocus();
@@ -514,7 +550,9 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
   Future<void> _requestNativeEditorFocus() async {
     if (!_supported) return;
     try {
-      await _focusChannel.invokeMethod<void>('requestEditorFocus');
+      await _focusChannel.invokeMethod<void>('requestEditorFocus', {
+        'editorKey': widget.debugLabel,
+      });
     } on MissingPluginException {
       // The method is only available in the desktop runners.
     } on PlatformException {
@@ -525,11 +563,39 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
   Future<void> _claimNativeEditorFocus() async {
     if (!_supported || !Platform.isWindows) return;
     try {
-      await _focusChannel.invokeMethod<void>('claimEditorFocus');
+      await _focusChannel.invokeMethod<void>('claimEditorFocus', {
+        'editorKey': widget.debugLabel,
+      });
     } on MissingPluginException {
       // The method is only available in the Windows runner.
     } on PlatformException {
       // The DOM still owns the selection if native focus cannot be adjusted.
+    }
+  }
+
+  void _resumeEditorFocus() {
+    _autofocusSuspended = false;
+    _autofocusGeneration += 1;
+  }
+
+  Future<void> _registerNativeEditorView() async {
+    if (!_supported || _disposed || !mounted) return;
+    final renderObject = context.findRenderObject();
+    if (renderObject is! RenderBox || !renderObject.hasSize) return;
+    final center = renderObject.localToGlobal(
+      renderObject.size.center(Offset.zero),
+    );
+    try {
+      await _focusChannel.invokeMethod<void>('registerEditorView', {
+        'editorKey': widget.debugLabel,
+        'x': center.dx,
+        'y': center.dy,
+        'devicePixelRatio': View.of(context).devicePixelRatio,
+      });
+    } on MissingPluginException {
+      // The method is only available in the desktop runners.
+    } on PlatformException {
+      // Native focus recovery remains best effort.
     }
   }
 

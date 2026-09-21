@@ -224,6 +224,7 @@ class _TranslatorPageState extends State<TranslatorPage> {
                                       isDark: Theme.of(context).brightness ==
                                           Brightness.dark,
                                       placeholder: '输入或粘贴文本',
+                                      debugLabel: 'translator-source',
                                       fontSize: 15,
                                       padding: const EdgeInsets.all(18),
                                   )

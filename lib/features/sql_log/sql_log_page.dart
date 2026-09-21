@@ -201,6 +201,7 @@ class _SqlLogPageState extends State<SqlLogPage> {
                                   Theme.of(context).brightness == Brightness.dark,
                               placeholder: '粘贴 MyBatis SQL 日志',
                               syntax: WebEditorSyntax.plain,
+                              debugLabel: 'sql-log-input',
                             )
                           : TextField(
                         key: const ValueKey('sql-log-input'),

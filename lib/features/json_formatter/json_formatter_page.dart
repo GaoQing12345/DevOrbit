@@ -419,6 +419,7 @@ class _JsonFormatterPageState extends State<JsonFormatterPage> {
             textColor: theme.colorScheme.onSurface,
             isDark: isDark,
             syntax: WebEditorSyntax.json,
+            debugLabel: 'json-formatter-editor',
           ),
           if (_findController.value != null)
             Positioned(

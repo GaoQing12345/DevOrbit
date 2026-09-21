@@ -6,8 +6,9 @@
 #include <flutter/flutter_view_controller.h>
 #include <flutter/method_channel.h>
 
-#include <memory>
 #include <cstdint>
+#include <map>
+#include <memory>
 #include <optional>
 #include <string>
 
@@ -103,6 +104,7 @@ class FlutterWindow : public Win32Window {
   bool show_on_first_frame_ = true;
   bool tool_window_activation_pending_ = false;
   HWND last_editor_platform_view_ = nullptr;
+  std::map<std::string, HWND> editor_platform_views_;
 };
 
 #endif  // RUNNER_FLUTTER_WINDOW_H_
