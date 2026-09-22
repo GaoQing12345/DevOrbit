@@ -84,6 +84,11 @@ class _DesktopEscapeCloseRegionState extends State<DesktopEscapeCloseRegion>
       return;
     }
 
+    // The overlay may have handed Flutter focus to a button or the panel itself
+    // while still owning the caret. Window activation is not an editor
+    // interaction, so the caret stays in the overlay either way.
+    if (DesktopWebTextEditor.flutterFieldOwnsEditing) return;
+
     // A WebView editor has a native responder/focus target in addition to the
     // Flutter focus tree. Restoring this shell's Escape node here would steal
     // the keyboard immediately after a clipboard picker returns, leaving the

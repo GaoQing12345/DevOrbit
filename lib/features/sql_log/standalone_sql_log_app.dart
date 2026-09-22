@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../../app/app_theme.dart';
+import '../../core/desktop/desktop_window_effects.dart';
 import '../../core/desktop/desktop_window_shell.dart';
 import '../../core/desktop/process_window_activator.dart';
 import '../../core/desktop/single_instance_registry.dart';
@@ -42,7 +43,7 @@ Future<void> runStandaloneSqlLog({bool prewarmed = false}) async {
       minimumSize: Size(720, 560 + titleBarHeight),
       center: true,
       skipTaskbar: true,
-      backgroundColor: Colors.transparent,
+      backgroundColor: desktopToolWindowBackground(),
       title: 'SQL 日志还原 - DevOrbit',
       titleBarStyle: useCustomWindowsTitleBar
           ? TitleBarStyle.hidden

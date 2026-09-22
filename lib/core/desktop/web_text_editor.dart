@@ -39,7 +39,30 @@ class DesktopWebTextEditorController {
   /// view sends through the JavaScript bridge.
   @visibleForTesting
   void debugHandleEditorActivation() {
-    _state?._handleEditorActivation();
+    _state?._handleEditorActivation(userInitiated: true);
+  }
+
+  /// Simulates the DOM `focus` event. WebKit emits it both for a real click and
+  /// when the native view becomes first responder after an app switch, so it
+  /// must not be treated as a user interaction with the editor.
+  @visibleForTesting
+  void debugHandleEditorFocusEvent() {
+    _state?._handleEditorActivation(userInitiated: false);
+  }
+
+  @visibleForTesting
+  void debugSimulateWindowBlur() {
+    _state?.onWindowBlur();
+  }
+
+  @visibleForTesting
+  void debugSimulateWindowFocus() {
+    _state?.onWindowFocus();
+  }
+
+  @visibleForTesting
+  void debugSimulateAppInactive() {
+    _state?._onAppInactive();
   }
 }
 
@@ -118,6 +141,17 @@ class DesktopWebTextEditor extends StatefulWidget {
   static bool get editorOwnsEditingSession =>
       _DesktopWebTextEditorState.editorOwnsEditingSession;
 
+  /// Whether a Flutter overlay field (a find or replace input) owns the caret
+  /// and must keep it across window and application activation.
+  static bool get flutterFieldOwnsEditing =>
+      _DesktopWebTextEditorState.flutterFieldOwnsEditing;
+
+  /// Whether the active editor is armed to reclaim the caret as soon as the
+  /// window is key again.
+  @visibleForTesting
+  static bool get debugEditorArmedForWindowRestore =>
+      _DesktopWebTextEditorState.debugEditorArmedForWindowRestore;
+
   static void addEditingOwnershipListener(VoidCallback listener) {
     _DesktopWebTextEditorState.addEditingOwnershipListener(listener);
   }
@@ -189,6 +223,11 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
   static bool _flutterFieldOwnsEditing = false;
   static final Set<VoidCallback> _ownershipListeners = {};
 
+  /// Set while an editor's subtree is being unmounted. Flutter asserts on
+  /// ancestor lookups performed from a tear-down, so the live focus probe is
+  /// skipped for the ownership notification that dispose emits.
+  static bool _disposingEditorSubtree = false;
+
   InAppWebViewController? _controller;
   bool _loaded = false;
   bool _disposed = false;
@@ -203,6 +242,7 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
   /// after the WebView emits `blur`: that blur is exactly what happens while a
   /// clipboard picker is in the foreground.
   static bool get hasActiveEditor {
+    if (flutterFieldOwnsEditing) return false;
     final editor = _activeEditor;
     return editor != null &&
         !editor._disposed &&
@@ -211,8 +251,36 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
         editor._restoreFocusOnWindowFocus;
   }
 
+  /// Whether an editor is armed to reclaim the caret as soon as the window is
+  /// key again. Exposed so the regression suite can prove an app switch does
+  /// not arm it while an overlay field owns the caret.
+  @visibleForTesting
+  static bool get debugEditorArmedForWindowRestore =>
+      _activeEditor?._restoreFocusOnWindowFocus ?? false;
+
   static void revealActiveSelection(NativeTextSelection selection) {
     _activeEditor?._revealSelection(selection);
+  }
+
+  /// Whether a Flutter overlay field (a find or replace input) currently owns
+  /// the caret and therefore the paste destination.
+  ///
+  /// Window activation is not a user interaction with the editor. While an
+  /// overlay field is focused, returning from another application (a clipboard
+  /// picker, the Dock, Spotlight) must leave the caret where the user left it.
+  static bool get flutterFieldOwnsEditing =>
+      _flutterFieldOwnsEditing || _flutterEditableHasFocus();
+
+  /// Whether a Flutter text field anywhere in the app tree currently holds
+  /// Flutter's primary focus.
+  static bool _flutterEditableHasFocus() {
+    // The element tree is not stable while a subtree is being torn down, and
+    // ancestor lookups assert on that. Dispose already reports the editor as
+    // gone, so there is nothing to probe.
+    if (_disposingEditorSubtree) return false;
+    final context = FocusManager.instance.primaryFocus?.context;
+    if (context == null) return false;
+    return context.findAncestorStateOfType<EditableTextState>() != null;
   }
 
   /// Whether a visible WebView editor currently owns the caret, keyboard input
@@ -221,8 +289,10 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
   /// While this is true no Flutter text field may keep clipboard ownership: the
   /// user has already moved the caret into the editor, so inserting a captured
   /// paste into the previously focused field would write into a surface the
-  /// user has deliberately left.
+  /// user has deliberately left. The reverse also has to hold — an overlay
+  /// field that owns editing means the editor must not claim the pasted text.
   static bool get editorOwnsEditingSession {
+    if (flutterFieldOwnsEditing) return false;
     final editor = _activeEditor;
     return editor != null &&
         !editor._disposed &&
@@ -385,15 +455,19 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
     _notifyEditingOwnership();
   }
 
-  /// The user interacted with this editor inside the DOM.
+  /// Claims the editing session for this editor.
   ///
-  /// This is the only reliable activation signal on macOS and Windows: the
-  /// native platform view consumes the mouse event before Flutter's own hit
-  /// test can see it, so a `Listener` above the WebView never fires for a real
-  /// click. The DOM always does, and it also covers keyboard entry (the caret
-  /// has to be visible before the user can type or paste into it).
-  void _handleEditorActivation() {
+  /// [userInitiated] separates a real interaction (a mouse-down inside the
+  /// WebView, a Flutter pointer event) from a programmatic DOM focus. WebKit
+  /// re-focuses its contenteditable whenever the native view becomes first
+  /// responder again, so returning from a clipboard picker emits the same
+  /// `focus` event as a click. Treating that as a user interaction is what
+  /// moves the caret out of an open find overlay back into the editor.
+  void _handleEditorActivation({required bool userInitiated}) {
     if (_disposed || !_isVisible) return;
+    // A programmatic focus must never take the caret away from a Flutter
+    // overlay field the user is still typing in.
+    if (!userInitiated && flutterFieldOwnsEditing) return;
     _resumeEditorFocus();
     widget.onEditorPointerDown?.call();
     _releaseFlutterFieldFocus();
@@ -417,7 +491,13 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
   }
 
   void _onAppInactive() {
-    if (_isVisible && identical(_activeEditor, this) && _editorSessionActive) {
+    // A clipboard picker takes the application out of the foreground. Only arm
+    // the restore when this editor really owned the caret, never when a find or
+    // replace overlay field did.
+    if (_isVisible &&
+        identical(_activeEditor, this) &&
+        _editorSessionActive &&
+        !flutterFieldOwnsEditing) {
       _restoreFocusOnWindowFocus = true;
     }
   }
@@ -527,7 +607,7 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
     controller.addJavaScriptHandler(
       handlerName: 'editorPointerDown',
       callback: (_) {
-        _handleEditorActivation();
+        _handleEditorActivation(userInitiated: true);
         return null;
       },
     );
@@ -536,10 +616,12 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
       callback: (args) {
         if (!_isVisible || _disposed) return null;
         if (args.isNotEmpty && args.first == true) {
-          // WebKit focuses the contenteditable for a real user click. That is
-          // the caret the user sees, so this editor owns the session even when
-          // an overlay field was holding Flutter focus a moment ago.
-          _handleEditorActivation();
+          // WebKit also re-focuses the contenteditable when the native view
+          // becomes first responder again, so this is not proof of a user
+          // interaction. The click path reports `editorPointerDown` separately
+          // and always wins; here the caret stays with an overlay field that
+          // owns it.
+          _handleEditorActivation(userInitiated: false);
           if (args.length >= 3) {
             final selection = NativeTextSelection(
               baseOffset: _asInt(args[1]),
@@ -582,7 +664,7 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
     // A Flutter pointer event only reaches a desktop platform view in some
     // embedding configurations. Treat it as a redundant activation so the
     // behaviour is identical wherever it does fire.
-    _handleEditorActivation();
+    _handleEditorActivation(userInitiated: true);
     if (Platform.isWindows) unawaited(_claimNativeEditorFocus());
   }
 
@@ -621,6 +703,11 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
         !_isVisible ||
         !identical(_activeEditor, this) ||
         !_editorSessionActive ||
+        // Single funnel for every caret restore, so the overlay guard cannot be
+        // forgotten by a future caller. Only the suspension flag is consulted
+        // here: this method also runs during an explicit handover, right after
+        // the overlay field was unfocused.
+        _flutterFieldOwnsEditing ||
         controller == null) {
       return;
     }
@@ -656,18 +743,27 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
 
   @override
   void onWindowBlur() {
-    final primaryFocus = FocusManager.instance.primaryFocus;
     final flutterEditableFocused =
-        primaryFocus?.context?.findAncestorStateOfType<EditableTextState>() !=
+        FocusManager.instance.primaryFocus?.context
+            ?.findAncestorStateOfType<EditableTextState>() !=
         null;
+    // `_editorSessionActive` stays true across a clipboard picker on purpose.
+    // It therefore cannot be used on its own here: while an overlay field holds
+    // the caret, arming the restore makes the editor reclaim it as soon as the
+    // window becomes key again.
     _restoreFocusOnWindowFocus =
         _isVisible &&
         identical(_activeEditor, this) &&
-        (_editorSessionActive || !flutterEditableFocused);
+        !_flutterFieldOwnsEditing &&
+        !flutterEditableFocused &&
+        _editorSessionActive;
   }
 
   @override
   void onWindowFocus() {
+    // Coming back from another application is not an editor interaction. Leave
+    // the caret in the overlay field that owns it.
+    if (flutterFieldOwnsEditing) return;
     if (!_isVisible ||
         !identical(_activeEditor, this) ||
         (!_editorSessionActive && !_restoreFocusOnWindowFocus)) {
@@ -822,7 +918,9 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
     _editors.remove(this);
     _lifecycle.dispose();
     if (identical(_activeEditor, this)) _activeEditor = null;
+    _disposingEditorSubtree = true;
     _notifyEditingOwnership();
+    _disposingEditorSubtree = false;
     windowManager.removeListener(this);
     _controller = null;
     super.dispose();

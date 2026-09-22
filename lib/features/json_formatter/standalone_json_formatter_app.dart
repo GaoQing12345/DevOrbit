@@ -7,6 +7,7 @@ import 'package:window_manager/window_manager.dart';
 
 import '../../app/app_theme.dart';
 import '../../core/desktop/process_window_activator.dart';
+import '../../core/desktop/desktop_window_effects.dart';
 import '../../core/desktop/desktop_window_shell.dart';
 import '../../core/desktop/single_instance_registry.dart';
 import '../../core/desktop/standalone_window_activation.dart';
@@ -46,7 +47,7 @@ Future<void> runStandaloneJsonFormatter({bool prewarmed = false}) async {
       // helper process out of the macOS Dock, including after window_manager
       // applies the WindowOptions.
       skipTaskbar: true,
-      backgroundColor: Colors.transparent,
+      backgroundColor: desktopToolWindowBackground(),
       title: 'JSON 格式化 - DevOrbit',
       titleBarStyle: useCustomWindowsTitleBar
           ? TitleBarStyle.hidden

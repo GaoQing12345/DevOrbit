@@ -199,6 +199,54 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
+  testWidgets('an app switch keeps the caret in the open find panel', (
+    tester,
+  ) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    final fixture = await pumpOwnershipFixture(tester);
+
+    // The user was editing inside the WebView.
+    fixture.editorController.debugHandleEditorActivation();
+    await tester.pump();
+    expect(DesktopWebTextEditor.editorOwnsEditingSession, isTrue);
+
+    // Command+F opens the find overlay and hands the caret to its field.
+    DesktopWebTextEditor.suspendActiveEditorFocus();
+    fixture.queryFocusNode.requestFocus();
+    await tester.pump();
+    expect(fixture.queryFocusNode.hasFocus, isTrue);
+
+    // A clipboard picker steals the application, then returns to it. The
+    // find field is a Flutter widget, so AppKit never moved the first
+    // responder away from the WKWebView: on window activation WebKit focuses
+    // its contenteditable again and reports a DOM focus event. That event is
+    // not a user interaction with the editor.
+    fixture.editorController.debugSimulateAppInactive();
+    fixture.editorController.debugSimulateWindowBlur();
+    fixture.editorController.debugSimulateWindowFocus();
+    await tester.pump();
+    fixture.editorController.debugHandleEditorFocusEvent();
+    await tester.pump();
+    await tester.pump();
+
+    expect(fixture.queryFocusNode.hasFocus, isTrue);
+    expect(DesktopWebTextEditor.editorOwnsEditingSession, isFalse);
+    // Nothing may be armed to reclaim the caret, and the window shell must
+    // not treat this as an editor session to restore.
+    expect(DesktopWebTextEditor.debugEditorArmedForWindowRestore, isFalse);
+    expect(DesktopWebTextEditor.hasActiveEditor, isFalse);
+    expect(fixture.restorer.shouldReleaseTargetOnFocusExit, isTrue);
+
+    // The picked clipboard entry must land in the field the user left.
+    DesktopClipboardReader.debugDeliverPasteRequest(text: 'picked');
+    await tester.pump(const Duration(milliseconds: 80));
+    expect(fixture.queryController.text, contains('picked'));
+
+    debugDefaultTargetPlatformOverride = null;
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   testWidgets('closing the find panel releases its query field', (
     tester,
   ) async {

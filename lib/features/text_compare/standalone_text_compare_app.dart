@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../../app/app_theme.dart';
+import '../../core/desktop/desktop_window_effects.dart';
 import '../../core/desktop/desktop_window_shell.dart';
 import '../../core/desktop/process_window_activator.dart';
 import '../../core/desktop/single_instance_registry.dart';
@@ -39,7 +40,7 @@ Future<void> runStandaloneTextCompare({bool prewarmed = false}) async {
       minimumSize: Size(820, 560 + titleBarHeight),
       center: true,
       skipTaskbar: true,
-      backgroundColor: Colors.transparent,
+      backgroundColor: desktopToolWindowBackground(),
       title: '文本比对 - DevOrbit',
       titleBarStyle: useCustomWindowsTitleBar
           ? TitleBarStyle.hidden

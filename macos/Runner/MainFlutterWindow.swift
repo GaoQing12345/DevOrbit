@@ -14,6 +14,7 @@ class MainFlutterWindow: NSWindow {
 
   private var cursorChannel: FlutterMethodChannel?
   private var clipboardChannel: FlutterMethodChannel?
+  private var windowEffectsChannel: FlutterMethodChannel?
   private var pasteKeyMonitor: Any?
   private var credentialsChannel: FlutterMethodChannel?
   private var processWindowChannel: FlutterMethodChannel?
@@ -34,6 +35,25 @@ class MainFlutterWindow: NSWindow {
   private var clickFocusGeneration = 0
   private weak var lastClickedEditorWebView: WKWebView?
   private var editorWebViews: [String: WeakWebView] = [:]
+
+  /// The radial launcher is the only surface that needs a transparent window.
+  /// Every other window shows its native titlebar, and AppKit paints that strip
+  /// from the window background: leaving the window clear makes the whole
+  /// titlebar — traffic lights included — disappear against the desktop.
+  private var usesTransparentBackdrop = false
+
+  private func applyWindowBackdrop() {
+    if usesTransparentBackdrop {
+      isOpaque = false
+      backgroundColor = .clear
+    } else {
+      isOpaque = true
+      // `windowBackgroundColor` is a dynamic system colour, so the titlebar
+      // keeps matching the rest of macOS in both light and dark appearance.
+      backgroundColor = .windowBackgroundColor
+    }
+    contentView?.superview?.needsDisplay = true
+  }
 
   private static let clipboardManagerBundleIdentifiers: Set<String> = [
     "cn.better365.iCopy",
@@ -162,17 +182,21 @@ class MainFlutterWindow: NSWindow {
 
   override func awakeFromNib() {
     let flutterViewController = FlutterViewController()
-    self.backgroundColor = NSColor.clear
-    self.isOpaque = false
     flutterViewController.backgroundColor = NSColor.clear
 
     let windowFrame = self.frame
     self.contentViewController = flutterViewController
     self.setFrame(windowFrame, display: true)
 
+    // window_manager clears the window when Dart requests a transparent
+    // background. Start from the opaque system backdrop and let the radial
+    // launcher opt into transparency through `dev_orbit/window_effects`.
+    applyWindowBackdrop()
+
     RegisterGeneratedPlugins(registry: flutterViewController)
     registerCursorChannel(flutterViewController)
     registerClipboardChannel(flutterViewController)
+    registerWindowEffectsChannel(flutterViewController)
     registerCredentialsChannel(flutterViewController)
     registerProcessWindowChannel(flutterViewController)
     registerAppLifecycleChannel(flutterViewController)
@@ -599,6 +623,30 @@ class MainFlutterWindow: NSWindow {
     pasteCaptureArmed = false
     pasteRequestPending = false
     pasteRequestNotificationSent = false
+  }
+
+  /// Mirrors the Windows `dev_orbit/window_effects` channel.
+  ///
+  /// Only the radial launcher sets `enabled` to true. Every other window needs
+  /// an opaque backdrop so its native titlebar stays visible; a clear window
+  /// background leaves the titlebar strip transparent on current macOS.
+  private func registerWindowEffectsChannel(_ controller: FlutterViewController) {
+    let channel = FlutterMethodChannel(
+      name: "dev_orbit/window_effects",
+      binaryMessenger: controller.engine.binaryMessenger
+    )
+    channel.setMethodCallHandler { [weak self] call, result in
+      guard call.method == "setRadialMode" else {
+        result(FlutterMethodNotImplemented)
+        return
+      }
+      let arguments = call.arguments as? [String: Any]
+      let enabled = (arguments?["enabled"] as? NSNumber)?.boolValue ?? false
+      self?.usesTransparentBackdrop = enabled
+      self?.applyWindowBackdrop()
+      result(nil)
+    }
+    windowEffectsChannel = channel
   }
 
   private func registerCredentialsChannel(_ controller: FlutterViewController) {

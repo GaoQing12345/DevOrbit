@@ -92,11 +92,11 @@ class NativeDesktopShell
     trayManager.addListener(this);
     await windowManager.setPreventClose(true);
     await windowManager.waitUntilReadyToShow(
-      const WindowOptions(
+      WindowOptions(
         size: toolSize,
         minimumSize: toolMinimumSize,
         center: true,
-        backgroundColor: Colors.transparent,
+        backgroundColor: desktopToolWindowBackground(isWindows: _isWindows),
         title: 'DevOrbit',
       ),
     );
