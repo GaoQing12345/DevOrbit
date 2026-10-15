@@ -81,6 +81,7 @@ class DesktopWebTextEditor extends StatefulWidget {
     this.onSelectionChanged,
     this.onEditorPointerDown,
     this.onFind,
+    this.onCommand,
     this.backgroundColor,
     this.textColor,
     this.isDark = false,
@@ -106,6 +107,10 @@ class DesktopWebTextEditor extends StatefulWidget {
   /// itself. Pages use it to hand over ownership of their Flutter text fields.
   final VoidCallback? onEditorPointerDown;
   final VoidCallback? onFind;
+
+  /// Receives keyboard commands the DOM owns and cannot dispatch itself, such
+  /// as `save`, `format`, `compact`, `sort` and `goToLine`.
+  final ValueChanged<String>? onCommand;
   final Color? backgroundColor;
   final Color? textColor;
   final bool isDark;
@@ -589,6 +594,14 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
       handlerName: 'findRequested',
       callback: (_) {
         widget.onFind?.call();
+        return null;
+      },
+    );
+    controller.addJavaScriptHandler(
+      handlerName: 'commandRequested',
+      callback: (args) {
+        if (args.isEmpty || args.first is! String) return null;
+        widget.onCommand?.call(args.first as String);
         return null;
       },
     );
@@ -1478,8 +1491,18 @@ window.devOrbitSetState = next => {
   document.documentElement.style.colorScheme = next.isDark ? 'dark' : 'light';
   editor.contentEditable = next.readOnly ? 'false' : 'true';
   if (changedText || changedSyntax) {
+    const previousText = readText();
+    const previousSelection = currentSelection();
     render(next.text, next.baseOffset, next.extentOffset, false);
-    resetHistory(next.text, next.baseOffset, next.extentOffset);
+    if (changedSyntax) {
+      resetHistory(next.text, next.baseOffset, next.extentOffset);
+    } else {
+      // An external rewrite (format, minify, sort, file load) is a normal edit
+      // as far as the user is concerned, so keep the pre-replace state on the
+      // stack. Resetting the history here made Cmd+Z unable to undo a format.
+      pendingEditState = selectionState(previousText, previousSelection);
+      recordEdit(next.text, [next.baseOffset, next.extentOffset]);
+    }
   } else if (next.forceRender) {
     const selection = document.activeElement === editor
       ? currentSelection()
@@ -1693,6 +1716,21 @@ editor.addEventListener('keydown', event => {
       bridge('copyRequested', [readText().slice(start, end)]);
     }
     return;
+  }
+  if (modified && event.shiftKey && key === 'f') {
+    event.preventDefault(); bridge('commandRequested', ['format']); return;
+  }
+  if (modified && event.shiftKey && key === 'm') {
+    event.preventDefault(); bridge('commandRequested', ['compact']); return;
+  }
+  if (modified && event.shiftKey && key === 's') {
+    event.preventDefault(); bridge('commandRequested', ['sort']); return;
+  }
+  if (modified && !event.shiftKey && key === 's') {
+    event.preventDefault(); bridge('commandRequested', ['save']); return;
+  }
+  if (modified && !event.shiftKey && key === 'g') {
+    event.preventDefault(); bridge('commandRequested', ['goToLine']); return;
   }
   if (state.findEnabled && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'f') {
     event.preventDefault(); bridge('findRequested', []); return;

@@ -9,6 +9,7 @@ typedef ClipboardReader = Future<ClipboardData?> Function();
 Future<bool> importInitialClipboardJson({
   required JsonDocumentController controller,
   required int indentSize,
+  bool useTabs = false,
   required ClipboardReader readClipboard,
 }) async {
   // Opening a standalone JSON window often coincides with a clipboard tool
@@ -29,7 +30,11 @@ Future<bool> importInitialClipboardJson({
     try {
       final data = await readClipboard();
       if (data == null) continue;
-      return await controller.importClipboard(data.text ?? '', indentSize);
+      return await controller.importClipboard(
+        data.text ?? '',
+        indentSize,
+        useTabs: useTabs,
+      );
     } on PlatformException {
       // Continue while another desktop process owns the clipboard.
     }

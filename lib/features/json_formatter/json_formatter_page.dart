@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -5,6 +6,7 @@ import 'package:desktop_drop/desktop_drop.dart';
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:path/path.dart' as path;
 import 'package:re_editor/re_editor.dart';
@@ -43,6 +45,7 @@ class _JsonFormatterPageState extends State<JsonFormatterPage> {
   final _foldController = JsonFoldController();
   bool _syncing = false, _dragging = false;
   bool _findFieldSessionActive = false;
+  String? _lastCaretLabel;
 
   bool get _usesWebEditor =>
       (Platform.isMacOS || Platform.isWindows) &&
@@ -57,12 +60,14 @@ class _JsonFormatterPageState extends State<JsonFormatterPage> {
     _findController.findInputFocusNode.addListener(_onFindFieldFocusChanged);
     _findController.replaceInputFocusNode.addListener(_onFindFieldFocusChanged);
     _focusRestorer = JsonFocusRestorer(_findController, _editor);
+    _editor.addListener(_onEditorSelectionChanged);
     widget.controller.addListener(_syncFromDocument);
   }
 
   @override
   void dispose() {
     widget.controller.removeListener(_syncFromDocument);
+    _editor.removeListener(_onEditorSelectionChanged);
     _focusRestorer.dispose();
     _findController.removeListener(_onFindChanged);
     _findController.findInputFocusNode.removeListener(_onFindFieldFocusChanged);
@@ -87,6 +92,211 @@ class _JsonFormatterPageState extends State<JsonFormatterPage> {
 
   void _onEditorChanged() {
     if (!_syncing) widget.controller.userEdit(_editor.text);
+  }
+
+  int get _indentSize => widget.settings.value.indentSize;
+  bool get _useTabs => widget.settings.value.indentWithTabs;
+
+  String? get _caretLabel {
+    final lines = _editor.codeLines;
+    if (lines.isEmpty) return null;
+    final index = _editor.selection.baseIndex;
+    if (index < 0 || index >= lines.length) return null;
+    return '行 ${index + 1}，列 ${_editor.selection.baseOffset + 1}';
+  }
+
+  /// The status bar mirrors the caret, so a moved caret has to repaint it. The
+  /// label is compared first to keep a drag from rebuilding on every frame.
+  void _onEditorSelectionChanged() {
+    final next = _caretLabel;
+    if (next == _lastCaretLabel) return;
+    _lastCaretLabel = next;
+    if (!mounted) return;
+    // The code editor rebinds its controller while it builds, which notifies us
+    // mid-build. Repaint immediately outside a frame and at the end of the
+    // current one otherwise.
+    if (SchedulerBinding.instance.schedulerPhase ==
+        SchedulerPhase.persistentCallbacks) {
+      SchedulerBinding.instance.addPostFrameCallback((_) {
+        if (mounted) setState(() {});
+      });
+      return;
+    }
+    setState(() {});
+  }
+
+  Future<void> _handleCommand(JsonEditorCommand command) async {
+    switch (command) {
+      case JsonEditorCommand.open:
+        await _openFile();
+      case JsonEditorCommand.save:
+        await _saveFile();
+      case JsonEditorCommand.format:
+        await _transform(JsonTransformMode.format);
+      case JsonEditorCommand.compact:
+        await _transform(JsonTransformMode.compact);
+      case JsonEditorCommand.sort:
+        await _transform(JsonTransformMode.sort, successMessage: '已按键名排序');
+      case JsonEditorCommand.compactAndCopy:
+        await _compactAndCopy();
+      case JsonEditorCommand.copy:
+        await _copy();
+      case JsonEditorCommand.validate:
+        await _validate();
+      case JsonEditorCommand.escape:
+        await _escapeDocument();
+      case JsonEditorCommand.unescape:
+        await _unescapeDocument();
+      case JsonEditorCommand.goToLine:
+        await _goToLine();
+      case JsonEditorCommand.find:
+        _findController.findMode();
+      case JsonEditorCommand.collapseAll:
+        if (_usesWebEditor) {
+          DesktopWebTextEditor.collapseActiveJson();
+        } else {
+          _foldController.collapseAll();
+        }
+      case JsonEditorCommand.expandAll:
+        if (_usesWebEditor) {
+          DesktopWebTextEditor.expandActiveJson();
+        } else {
+          _foldController.expandAll();
+        }
+      case JsonEditorCommand.clear:
+        widget.controller.clear();
+    }
+  }
+
+  Future<void> _transform(
+    JsonTransformMode mode, {
+    String? successMessage,
+  }) async {
+    if (widget.controller.text.trim().isEmpty) {
+      _showMessage('请输入 JSON 内容');
+      return;
+    }
+    final applied = await widget.controller.transform(
+      mode,
+      _indentSize,
+      useTabs: _useTabs,
+    );
+    if (!mounted) return;
+    final message = applied ? successMessage : _issueMessage();
+    if (message != null) _showMessage(message);
+  }
+
+  Future<void> _validate() async {
+    if (widget.controller.text.trim().isEmpty) {
+      _showMessage('请输入 JSON 内容');
+      return;
+    }
+    await widget.controller.validate();
+    if (!mounted) return;
+    _showMessage(_issueMessage() ?? 'JSON 校验通过');
+  }
+
+  String? _issueMessage() {
+    final issue = widget.controller.issue;
+    if (issue == null) return null;
+    return '第 ${issue.line} 行，第 ${issue.column} 列：${issue.message}';
+  }
+
+  Future<void> _escapeDocument() async {
+    final next = await widget.controller.escapeDocument();
+    if (!mounted) return;
+    _showMessage(next == null ? '内容为空或无需转义' : '已转义为字符串字面量');
+  }
+
+  Future<void> _unescapeDocument() async {
+    final next = await widget.controller.unescapeDocument();
+    if (!mounted) return;
+    _showMessage(next == null ? '内容为空或无需去转义' : '已去转义');
+  }
+
+  void _jumpToError() {
+    final offset = widget.controller.errorOffset();
+    if (offset == null) return;
+    // Selecting the offending character is the in-editor marker: the caret
+    // lands on it and the view scrolls there.
+    _revealOffset(offset, endOffset: offset + 1);
+  }
+
+  Future<void> _goToLine() async {
+    final total = _editor.lineCount;
+    if (total <= 0) return;
+    final input = TextEditingController();
+    final target = await showDialog<int>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('跳转到行'),
+        content: TextField(
+          controller: input,
+          autofocus: true,
+          keyboardType: TextInputType.number,
+          decoration: InputDecoration(hintText: '1 - $total'),
+          onSubmitted: (value) =>
+              Navigator.pop(context, int.tryParse(value.trim())),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () =>
+                Navigator.pop(context, int.tryParse(input.text.trim())),
+            child: const Text('跳转'),
+          ),
+        ],
+      ),
+    );
+    input.dispose();
+    if (target == null) return;
+    _revealLine(target - 1);
+  }
+
+  void _revealLine(int lineIndex) {
+    final lines = _editor.codeLines;
+    if (lines.isEmpty) return;
+    final target = lineIndex.clamp(0, lines.length - 1);
+    final location = lines.lineIndex2Index(target);
+    if (location.index < 0 || location.index >= lines.length) return;
+    // A folded run reports the line as hidden; unfold it before scrolling.
+    if (lines[location.index].chunkParent) {
+      _editor.expandChunk(location.index);
+    }
+    _revealOffset(_lineStartOffset(target));
+  }
+
+  int _lineStartOffset(int lineIndex) {
+    final text = _editor.text;
+    if (lineIndex <= 0) return 0;
+    var offset = 0;
+    for (var line = 0; line < lineIndex; line++) {
+      final next = text.indexOf('\n', offset);
+      if (next < 0) return text.length;
+      offset = next + 1;
+    }
+    return offset;
+  }
+
+  /// Moves the caret to [offset] and scrolls it into view on either editor.
+  void _revealOffset(int offset, {int? endOffset}) {
+    final text = _editor.text;
+    final start = offset.clamp(0, text.length);
+    final end = (endOffset ?? offset).clamp(start, text.length);
+    final selection = _selectionFromOffset(start, end);
+    _editor.selection = selection;
+    _editor.makePositionCenterIfInvisible(selection.start);
+    if (_usesWebEditor) {
+      final native = _nativeSelection();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        DesktopWebTextEditor.revealActiveSelection(native);
+      });
+    }
+    if (mounted) setState(() {});
   }
 
   void _onNativeEditorChanged(String text) {
@@ -301,19 +511,25 @@ class _JsonFormatterPageState extends State<JsonFormatterPage> {
 
   Future<void> _copy() async {
     await Clipboard.setData(ClipboardData(text: widget.controller.text));
-    widget.controller.markSaved();
+    // Copying is not saving: the document stays flagged as having unsaved
+    // changes so closing the window still warns.
     if (mounted) _showMessage('已复制到剪贴板');
   }
 
   Future<void> _compactAndCopy() async {
-    final transformed = await widget.controller.transform(
+    final result = await widget.controller.previewTransform(
       JsonTransformMode.compact,
-      widget.settings.value.indentSize,
+      _indentSize,
+      useTabs: _useTabs,
     );
-    if (!transformed) return;
-    await Clipboard.setData(ClipboardData(text: widget.controller.text));
-    widget.controller.markSaved();
-    if (mounted) _showMessage('已压缩并复制');
+    if (!mounted) return;
+    final output = result?.output;
+    if (output == null) {
+      _showMessage(_issueMessage() ?? '请输入 JSON 内容');
+      return;
+    }
+    await Clipboard.setData(ClipboardData(text: output));
+    if (mounted) _showMessage('已复制压缩结果，编辑器内容保持不变');
   }
 
   void _showMessage(String message) {
@@ -336,6 +552,11 @@ class _JsonFormatterPageState extends State<JsonFormatterPage> {
     final shortcuts = buildJsonFormatterShortcuts(
       onFind: _findController.findMode,
       onReplace: _findController.replaceMode,
+      onSave: () => unawaited(_handleCommand(JsonEditorCommand.save)),
+      onFormat: () => unawaited(_handleCommand(JsonEditorCommand.format)),
+      onCompact: () => unawaited(_handleCommand(JsonEditorCommand.compact)),
+      onSort: () => unawaited(_handleCommand(JsonEditorCommand.sort)),
+      onGoToLine: () => unawaited(_handleCommand(JsonEditorCommand.goToLine)),
     );
     if (_findController.value != null) {
       shortcuts[const SingleActivator(LogicalKeyboardKey.escape)] =
@@ -358,7 +579,12 @@ class _JsonFormatterPageState extends State<JsonFormatterPage> {
           children: [
             _buildToolbar(),
             Expanded(child: _buildEditor(theme, isDark)),
-            JsonEditorStatusBar(controller: widget.controller),
+            JsonEditorStatusBar(
+              controller: widget.controller,
+              caretLabel: _caretLabel,
+              indentLabel: _useTabs ? 'Tab' : '$_indentSize 空格',
+              onJumpToError: _jumpToError,
+            ),
           ],
         ),
       ),
@@ -380,17 +606,7 @@ class _JsonFormatterPageState extends State<JsonFormatterPage> {
     return JsonEditorToolbar(
       controller: widget.controller,
       settings: widget.settings,
-      onOpen: _openFile,
-      onSave: _saveFile,
-      onCopy: _copy,
-      onCompactAndCopy: _compactAndCopy,
-      onFind: _findController.findMode,
-      onCollapseAll: _usesWebEditor
-          ? DesktopWebTextEditor.collapseActiveJson
-          : _foldController.collapseAll,
-      onExpandAll: _usesWebEditor
-          ? DesktopWebTextEditor.expandActiveJson
-          : _foldController.expandAll,
+      onCommand: (command) => unawaited(_handleCommand(command)),
       showFoldControls: true,
     );
   }
@@ -432,6 +648,10 @@ class _JsonFormatterPageState extends State<JsonFormatterPage> {
             onSelectionChanged: _onNativeSelectionChanged,
             onEditorPointerDown: _unfocusFindFields,
             onFind: _findController.findMode,
+            onCommand: (id) {
+              final command = JsonEditorCommand.fromId(id);
+              if (command != null) unawaited(_handleCommand(command));
+            },
             backgroundColor: theme.colorScheme.surfaceContainerLowest,
             textColor: theme.colorScheme.onSurface,
             isDark: isDark,

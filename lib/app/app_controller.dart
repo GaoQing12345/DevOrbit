@@ -164,7 +164,13 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> updateIndent(int indentSize) {
-    return settings.update(settings.value.copyWith(indentSize: indentSize));
+    return settings.update(
+      settings.value.copyWith(indentSize: indentSize, indentWithTabs: false),
+    );
+  }
+
+  Future<void> updateIndentWithTabs(bool enabled) {
+    return settings.update(settings.value.copyWith(indentWithTabs: enabled));
   }
 
   Future<void> updateTheme(ThemeMode themeMode) {

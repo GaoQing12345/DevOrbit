@@ -56,6 +56,67 @@ Future<void> waitForControllerText(
   fail('等待 JSON 转换完成超时');
 }
 
+Future<void> waitForClipboardText(
+  WidgetTester tester,
+  ClipboardState clipboard,
+  String expected,
+) async {
+  for (var attempt = 0; attempt < 30; attempt++) {
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 20)),
+    );
+    await tester.pump();
+    if (clipboard.text == expected) return;
+  }
+  fail('等待剪贴板写入超时');
+}
+
+/// Opens the toolbar's overflow menu and taps the item with [label].
+///
+/// The menu actions run through an isolate, so the wait uses `runAsync` to let
+/// that real work finish before the test continues.
+Future<void> tapMoreMenuItem(WidgetTester tester, String label) async {
+  await tester.tap(find.byTooltip('更多'));
+  await tester.pump();
+  await tester.pump(const Duration(milliseconds: 300));
+  await tester.tap(find.text(label));
+  // Advance the clock so the popup finishes closing: a half-closed route keeps
+  // its labels mounted and the next menu then finds two of them.
+  await tester.pump();
+  await tester.pump(const Duration(milliseconds: 400));
+  for (var attempt = 0; attempt < 20; attempt++) {
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 20)),
+    );
+    await tester.pump();
+  }
+}
+
+/// Pumps until a widget with exactly [text] is on screen.
+Future<void> waitForText(WidgetTester tester, String text) async {
+  await _waitFor(tester, find.text(text), text);
+}
+
+/// Pumps until a widget whose text contains [needle] is on screen.
+Future<void> waitForTextContaining(WidgetTester tester, String needle) async {
+  await _waitFor(tester, find.textContaining(needle), needle);
+}
+
+Future<void> _waitFor(
+  WidgetTester tester,
+  Finder finder,
+  String description,
+) async {
+  for (var attempt = 0; attempt < 40; attempt++) {
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 20)),
+    );
+    await tester.pump(const Duration(milliseconds: 20));
+    if (finder.evaluate().isNotEmpty) return;
+  }
+  fail('等待「$description」超时');
+}
+
 Future<void> waitForFoldChunks(WidgetTester tester, int count) async {
   for (var attempt = 0; attempt < 30; attempt++) {
     await tester.runAsync(

@@ -5,37 +5,55 @@ import 'package:path/path.dart' as path;
 
 import '../../core/settings/settings_store.dart';
 import 'json_document_controller.dart';
-import 'json_transformer.dart';
+
+/// Everything the formatter toolbar can ask the page to do.
+///
+/// A single command channel keeps the toolbar, the keyboard shortcuts and the
+/// WebView bridge pointing at one implementation of each action.
+enum JsonEditorCommand {
+  open,
+  save,
+  format,
+  compact,
+  compactAndCopy,
+  copy,
+  validate,
+  sort,
+  escape,
+  unescape,
+  goToLine,
+  find,
+  collapseAll,
+  expandAll,
+  clear;
+
+  /// Commands the WebView DOM can request over the JavaScript bridge.
+  static JsonEditorCommand? fromId(String id) => switch (id) {
+    'save' => JsonEditorCommand.save,
+    'format' => JsonEditorCommand.format,
+    'compact' => JsonEditorCommand.compact,
+    'sort' => JsonEditorCommand.sort,
+    'goToLine' => JsonEditorCommand.goToLine,
+    _ => null,
+  };
+}
 
 class JsonEditorToolbar extends StatelessWidget {
   const JsonEditorToolbar({
     super.key,
     required this.controller,
     required this.settings,
-    required this.onOpen,
-    required this.onSave,
-    required this.onCopy,
-    required this.onCompactAndCopy,
-    required this.onFind,
-    required this.onCollapseAll,
-    required this.onExpandAll,
+    required this.onCommand,
     this.showFoldControls = true,
   });
 
   final JsonDocumentController controller;
   final SettingsStore settings;
-  final VoidCallback onOpen;
-  final VoidCallback onSave;
-  final VoidCallback onCopy;
-  final VoidCallback onCompactAndCopy;
-  final VoidCallback onFind;
-  final VoidCallback onCollapseAll;
-  final VoidCallback onExpandAll;
+  final ValueChanged<JsonEditorCommand> onCommand;
   final bool showFoldControls;
 
   @override
   Widget build(BuildContext context) {
-    final indent = settings.value.indentSize;
     final scheme = Theme.of(context).colorScheme;
     final fileName = controller.filePath == null
         ? '未命名.json'
@@ -98,12 +116,12 @@ class JsonEditorToolbar extends StatelessWidget {
                   _ToolbarButton(
                     tooltip: '打开 JSON',
                     icon: Icons.folder_open_rounded,
-                    onPressed: onOpen,
+                    onPressed: () => onCommand(JsonEditorCommand.open),
                   ),
                   _ToolbarButton(
                     tooltip: '保存',
                     icon: Icons.save_outlined,
-                    onPressed: onSave,
+                    onPressed: () => onCommand(JsonEditorCommand.save),
                   ),
                 ],
               ),
@@ -113,19 +131,23 @@ class JsonEditorToolbar extends StatelessWidget {
                   _ToolbarButton(
                     tooltip: '格式化',
                     icon: Icons.format_indent_increase_rounded,
-                    onPressed: () {
-                      controller.transform(JsonTransformMode.format, indent);
-                    },
+                    onPressed: () => onCommand(JsonEditorCommand.format),
                   ),
                   _ToolbarButton(
-                    tooltip: '压缩并复制',
+                    tooltip: '压缩（原地）',
                     icon: Icons.compress_rounded,
-                    onPressed: onCompactAndCopy,
+                    onPressed: () => onCommand(JsonEditorCommand.compact),
+                  ),
+                  _ToolbarButton(
+                    tooltip: '压缩并复制（不改动编辑器内容）',
+                    icon: Icons.content_copy_outlined,
+                    onPressed: () =>
+                        onCommand(JsonEditorCommand.compactAndCopy),
                   ),
                   _ToolbarButton(
                     tooltip: '复制',
-                    icon: Icons.content_copy_rounded,
-                    onPressed: onCopy,
+                    icon: Icons.copy_all_rounded,
+                    onPressed: () => onCommand(JsonEditorCommand.copy),
                   ),
                 ],
               ),
@@ -136,12 +158,12 @@ class JsonEditorToolbar extends StatelessWidget {
                     _ToolbarButton(
                       tooltip: '折叠全部',
                       icon: Icons.unfold_less_rounded,
-                      onPressed: onCollapseAll,
+                      onPressed: () => onCommand(JsonEditorCommand.collapseAll),
                     ),
                     _ToolbarButton(
                       tooltip: '展开全部',
                       icon: Icons.unfold_more_rounded,
-                      onPressed: onExpandAll,
+                      onPressed: () => onCommand(JsonEditorCommand.expandAll),
                     ),
                   ],
                 ),
@@ -152,20 +174,91 @@ class JsonEditorToolbar extends StatelessWidget {
                   _ToolbarButton(
                     tooltip: '查找',
                     icon: Icons.search_rounded,
-                    onPressed: onFind,
+                    onPressed: () => onCommand(JsonEditorCommand.find),
                   ),
                 ],
               ),
               const SizedBox(width: 6),
-              _ToolbarButton(
-                tooltip: '清空',
-                icon: Icons.delete_outline_rounded,
-                onPressed: controller.clear,
-              ),
+              _ToolbarGroup(children: [_MoreMenu(onSelected: onCommand)]),
             ],
           ),
         ),
       ),
+    );
+  }
+}
+
+class _MoreMenu extends StatelessWidget {
+  const _MoreMenu({required this.onSelected});
+
+  final ValueChanged<JsonEditorCommand> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return SizedBox(
+      width: 40,
+      height: 40,
+      child: PopupMenuButton<JsonEditorCommand>(
+        tooltip: '更多',
+        position: PopupMenuPosition.under,
+        icon: const Icon(Icons.more_horiz_rounded, size: 20),
+        padding: EdgeInsets.zero,
+        iconColor: scheme.onSurfaceVariant,
+        onSelected: onSelected,
+        // Room for the Chinese labels; the default 48px squeezes them.
+        constraints: const BoxConstraints(minWidth: 208),
+        itemBuilder: (context) => const [
+          PopupMenuItem(
+            value: JsonEditorCommand.validate,
+            child: _MenuItem(icon: Icons.fact_check_outlined, label: '校验 JSON'),
+          ),
+          PopupMenuItem(
+            value: JsonEditorCommand.sort,
+            child: _MenuItem(icon: Icons.sort_by_alpha_rounded, label: '按键名排序'),
+          ),
+          PopupMenuDivider(),
+          PopupMenuItem(
+            value: JsonEditorCommand.unescape,
+            child: _MenuItem(icon: Icons.terminal_rounded, label: '去转义'),
+          ),
+          PopupMenuItem(
+            value: JsonEditorCommand.escape,
+            child: _MenuItem(icon: Icons.code_rounded, label: '转义为字符串'),
+          ),
+          PopupMenuDivider(),
+          PopupMenuItem(
+            value: JsonEditorCommand.goToLine,
+            child: _MenuItem(icon: Icons.my_location_rounded, label: '跳转到行'),
+          ),
+          PopupMenuItem(
+            value: JsonEditorCommand.clear,
+            child: _MenuItem(icon: Icons.delete_outline_rounded, label: '清空'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MenuItem extends StatelessWidget {
+  const _MenuItem({required this.icon, required this.label});
+
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Icon(
+          icon,
+          size: 17,
+          color: Theme.of(context).colorScheme.onSurfaceVariant,
+        ),
+        const SizedBox(width: 10),
+        Text(label),
+      ],
     );
   }
 }
@@ -193,9 +286,22 @@ class _ToolbarGroup extends StatelessWidget {
 }
 
 class JsonEditorStatusBar extends StatelessWidget {
-  const JsonEditorStatusBar({super.key, required this.controller});
+  const JsonEditorStatusBar({
+    super.key,
+    required this.controller,
+    this.caretLabel,
+    this.indentLabel,
+    this.onJumpToError,
+  });
 
   final JsonDocumentController controller;
+
+  /// Caret position such as `行 12，列 5`, or null while the editor has none.
+  final String? caretLabel;
+  final String? indentLabel;
+
+  /// Called when the error text is clicked, to reveal the offending character.
+  final VoidCallback? onJumpToError;
 
   @override
   Widget build(BuildContext context) {
@@ -215,6 +321,15 @@ class JsonEditorStatusBar extends StatelessWidget {
         : isValid
         ? theme.colorScheme.primary
         : theme.colorScheme.onSurfaceVariant;
+    final text = controller.text;
+    final lineCount = text.isEmpty ? 0 : '\n'.allMatches(text).length + 1;
+    final meta = [
+      if (controller.repaired) '已自动修复',
+      '$lineCount 行',
+      ?indentLabel,
+      ?caretLabel,
+      '${utf8.encode(text).length} B',
+    ].join(' · ');
     return DecoratedBox(
       decoration: BoxDecoration(
         color: theme.colorScheme.surfaceContainerLow,
@@ -237,23 +352,54 @@ class JsonEditorStatusBar extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  statusText,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: statusColor,
-                  ),
-                ),
-              ),
+              Expanded(child: _buildStatusText(theme, statusText, statusColor)),
+              const SizedBox(width: 12),
               Text(
-                '${utf8.encode(controller.text).length} B',
+                meta,
                 style: theme.textTheme.labelSmall?.copyWith(
                   color: theme.colorScheme.onSurfaceVariant,
                   fontFeatures: const [FontFeature.tabularFigures()],
                 ),
               ),
             ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStatusText(ThemeData theme, String statusText, Color color) {
+    final style = theme.textTheme.bodySmall?.copyWith(color: color);
+    final onJump = onJumpToError;
+    if (controller.status != JsonDocumentStatus.invalid || onJump == null) {
+      return Text(statusText, overflow: TextOverflow.ellipsis, style: style);
+    }
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Tooltip(
+        message: '点击跳转到出错位置',
+        child: InkWell(
+          onTap: onJump,
+          borderRadius: BorderRadius.circular(4),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 3),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Flexible(
+                  child: Text(
+                    statusText,
+                    overflow: TextOverflow.ellipsis,
+                    style: style?.copyWith(
+                      decoration: TextDecoration.underline,
+                      decorationColor: color,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 4),
+                Icon(Icons.my_location_rounded, size: 13, color: color),
+              ],
+            ),
           ),
         ),
       ),

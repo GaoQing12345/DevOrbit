@@ -27,12 +27,22 @@ Map<Type, Action<Intent>> buildJsonEditorActions({
   };
 }
 
+/// Formatter-wide shortcuts.
+///
+/// On macOS and Windows the editor is a WebView that owns the keyboard, so the
+/// same set is handled there in the DOM and forwarded through `onCommand`.
+/// These bindings keep the Flutter code editor path (and the tests) in parity.
 Map<ShortcutActivator, VoidCallback> buildJsonFormatterShortcuts({
   required VoidCallback onFind,
   required VoidCallback onReplace,
+  VoidCallback? onSave,
+  VoidCallback? onFormat,
+  VoidCallback? onCompact,
+  VoidCallback? onSort,
+  VoidCallback? onGoToLine,
 }) {
   final isMacOS = defaultTargetPlatform == TargetPlatform.macOS;
-  return {
+  final shortcuts = <ShortcutActivator, VoidCallback>{
     SingleActivator(LogicalKeyboardKey.keyF, meta: isMacOS, control: !isMacOS):
         onFind,
     SingleActivator(
@@ -41,4 +51,25 @@ Map<ShortcutActivator, VoidCallback> buildJsonFormatterShortcuts({
       control: !isMacOS,
     ): onReplace,
   };
+  void bind(
+    LogicalKeyboardKey key, {
+    bool shift = false,
+    required VoidCallback? action,
+  }) {
+    if (action == null) return;
+    shortcuts[SingleActivator(
+          key,
+          meta: isMacOS,
+          control: !isMacOS,
+          shift: shift,
+        )] =
+        action;
+  }
+
+  bind(LogicalKeyboardKey.keyS, action: onSave);
+  bind(LogicalKeyboardKey.keyS, shift: true, action: onSort);
+  bind(LogicalKeyboardKey.keyF, shift: true, action: onFormat);
+  bind(LogicalKeyboardKey.keyM, shift: true, action: onCompact);
+  bind(LogicalKeyboardKey.keyG, action: onGoToLine);
+  return shortcuts;
 }

@@ -66,15 +66,25 @@ class SettingsPage extends StatelessWidget {
               title: '编辑器',
               children: [
                 _SettingsRow(
-                  title: '缩进宽度',
-                  trailing: SegmentedButton<int>(
+                  title: '缩进',
+                  trailing: SegmentedButton<String>(
                     segments: const [
-                      ButtonSegment(value: 2, label: Text('2 空格')),
-                      ButtonSegment(value: 4, label: Text('4 空格')),
+                      ButtonSegment(value: '2', label: Text('2 空格')),
+                      ButtonSegment(value: '4', label: Text('4 空格')),
+                      ButtonSegment(value: '8', label: Text('8 空格')),
+                      ButtonSegment(value: 'tab', label: Text('Tab')),
                     ],
-                    selected: {value.indentSize},
+                    selected: {
+                      value.indentWithTabs ? 'tab' : '${value.indentSize}',
+                    },
                     onSelectionChanged: (selection) {
-                      controller.updateIndent(selection.first);
+                      final choice = selection.first;
+                      if (choice == 'tab') {
+                        controller.updateIndentWithTabs(true);
+                      } else {
+                        // Picking a width also switches back to spaces.
+                        controller.updateIndent(int.parse(choice));
+                      }
                     },
                   ),
                 ),

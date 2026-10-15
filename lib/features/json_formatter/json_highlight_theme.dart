@@ -28,7 +28,8 @@ CodeEditorStyle buildJsonEditorStyle({
     fontHeight: 1.55,
     fontFamily: 'Menlo',
     fontFamilyFallback: const ['Consolas', 'monospace'],
-    backgroundColor: backgroundColor ??
+    backgroundColor:
+        backgroundColor ??
         (isDark ? const Color(0xFF111715) : const Color(0xFFFBFCFC)),
     cursorLineColor: cursorLineColor,
     codeTheme: CodeHighlightTheme(

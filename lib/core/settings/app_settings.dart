@@ -9,6 +9,7 @@ class AppSettings {
   const AppSettings({
     required this.hotKey,
     this.indentSize = 2,
+    this.indentWithTabs = false,
     this.themeMode = ThemeMode.system,
     this.launchAtStartup = false,
     this.clipboardTraceEnabled = true,
@@ -29,6 +30,10 @@ class AppSettings {
 
   final HotKey hotKey;
   final int indentSize;
+
+  /// Indent with tab characters instead of [indentSize] spaces. [indentSize] is
+  /// then only the width the editor renders a tab at.
+  final bool indentWithTabs;
   final ThemeMode themeMode;
   final bool launchAtStartup;
   final bool clipboardTraceEnabled;
@@ -36,6 +41,7 @@ class AppSettings {
   AppSettings copyWith({
     HotKey? hotKey,
     int? indentSize,
+    bool? indentWithTabs,
     ThemeMode? themeMode,
     bool? launchAtStartup,
     bool? clipboardTraceEnabled,
@@ -43,6 +49,7 @@ class AppSettings {
     return AppSettings(
       hotKey: hotKey ?? this.hotKey,
       indentSize: indentSize ?? this.indentSize,
+      indentWithTabs: indentWithTabs ?? this.indentWithTabs,
       themeMode: themeMode ?? this.themeMode,
       launchAtStartup: launchAtStartup ?? this.launchAtStartup,
       clipboardTraceEnabled:
@@ -54,6 +61,7 @@ class AppSettings {
     return {
       'hotKey': jsonEncode(hotKey.toJson()),
       'indentSize': indentSize,
+      'indentWithTabs': indentWithTabs,
       'themeMode': themeMode.name,
       'launchAtStartup': launchAtStartup,
       'clipboardTraceEnabled': clipboardTraceEnabled,
@@ -66,7 +74,12 @@ class AppSettings {
       final hotKeyJson = jsonDecode(json['hotKey'] as String);
       return AppSettings(
         hotKey: HotKey.fromJson(hotKeyJson as Map<String, dynamic>),
-        indentSize: json['indentSize'] == 4 ? 4 : 2,
+        indentSize: switch (json['indentSize']) {
+          4 => 4,
+          8 => 8,
+          _ => 2,
+        },
+        indentWithTabs: json['indentWithTabs'] == true,
         themeMode: ThemeMode.values.firstWhere(
           (mode) => mode.name == json['themeMode'],
           orElse: () => ThemeMode.system,

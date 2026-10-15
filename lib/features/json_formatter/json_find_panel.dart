@@ -11,7 +11,7 @@ class JsonFindPanel extends StatelessWidget implements PreferredSizeWidget {
     required this.onPaste,
   });
 
-  static const _panelWidth = 510.0;
+  static const _panelWidth = 592.0;
   static const _rowHeight = 40.0;
 
   final CodeFindController controller;
@@ -111,6 +111,19 @@ class _FindRow extends StatelessWidget {
               style: Theme.of(context).textTheme.bodySmall,
             ),
           ),
+          _MatchOptionToggle(
+            tooltip: '区分大小写',
+            label: 'Aa',
+            selected: value.option.caseSensitive,
+            onPressed: controller.toggleCaseSensitive,
+          ),
+          _MatchOptionToggle(
+            tooltip: '正则表达式',
+            label: '.*',
+            selected: value.option.regex,
+            onPressed: controller.toggleRegex,
+          ),
+          const SizedBox(width: 2),
           _PanelIconButton(
             tooltip: '上一个',
             icon: Icons.keyboard_arrow_up_rounded,
@@ -219,6 +232,60 @@ class _PanelTextField extends StatelessWidget {
           const SingleActivator(LogicalKeyboardKey.keyV, meta: true): onPaste,
       },
       child: field,
+    );
+  }
+}
+
+/// Case-sensitivity and regex switches, which the shared find controller
+/// supports but the hand-built panel never exposed.
+class _MatchOptionToggle extends StatelessWidget {
+  const _MatchOptionToggle({
+    required this.tooltip,
+    required this.label,
+    required this.selected,
+    required this.onPressed,
+  });
+
+  final String tooltip;
+  final String label;
+  final bool selected;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Tooltip(
+      message: tooltip,
+      child: Semantics(
+        label: tooltip,
+        button: true,
+        selected: selected,
+        child: InkWell(
+          onTap: onPressed,
+          borderRadius: BorderRadius.circular(5),
+          child: Container(
+            width: 30,
+            height: 30,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: selected ? scheme.primaryContainer : null,
+              border: Border.all(
+                color: selected ? scheme.primary : scheme.outlineVariant,
+              ),
+              borderRadius: BorderRadius.circular(5),
+            ),
+            child: Text(
+              label,
+              style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                color: selected
+                    ? scheme.onPrimaryContainer
+                    : scheme.onSurfaceVariant,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
