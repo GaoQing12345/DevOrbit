@@ -77,7 +77,103 @@ void main() {
     expect(controller.status, TextCompareStatus.error);
     expect(controller.errorMessage, contains('10 MiB'));
   });
+
+  test('refreshes the diff by itself shortly after an edit', () async {
+    final controller = TextCompareController(service: _ImmediateService());
+    addTearDown(controller.dispose);
+
+    controller.updateLeft('old line');
+    controller.updateRight('new line');
+    expect(controller.result, isNull);
+
+    await Future<void>.delayed(_autoCompareWait);
+
+    expect(controller.status, TextCompareStatus.changed);
+    expect(controller.result?.modifiedCount, 1);
+  });
+
+  test('re-runs the comparison as soon as a rule is toggled', () async {
+    final controller = TextCompareController(service: _ImmediateService());
+    addTearDown(controller.dispose);
+
+    controller.updateLeft('  value  ');
+    controller.updateRight('value');
+    await Future<void>.delayed(_autoCompareWait);
+    expect(controller.status, TextCompareStatus.changed);
+
+    controller.updateIgnoreAllWhitespace(true);
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+
+    expect(controller.status, TextCompareStatus.unchanged);
+    expect(controller.canCopySummary, isTrue);
+  });
+
+  test('keeps the whitespace rules mutually exclusive', () {
+    final controller = TextCompareController(
+      service: _ImmediateService(),
+      autoCompare: false,
+    );
+    addTearDown(controller.dispose);
+
+    controller.updateIgnoreLeadingWhitespace(true);
+    controller.updateIgnoreTrailingWhitespace(true);
+    controller.updateIgnoreAllWhitespace(true);
+
+    expect(controller.options.ignoreAllWhitespace, isTrue);
+    expect(controller.options.ignoreLeadingWhitespace, isFalse);
+    expect(controller.options.ignoreTrailingWhitespace, isFalse);
+
+    controller.updateIgnoreTrailingWhitespace(true);
+
+    expect(controller.options.ignoreAllWhitespace, isFalse);
+    expect(controller.options.ignoreTrailingWhitespace, isTrue);
+  });
+
+  test('lists every active rule in the copied summary', () async {
+    final controller = TextCompareController(service: _ImmediateService());
+    addTearDown(controller.dispose);
+    controller.updateLeft('alpha\n');
+    controller.updateRight('ALPHA');
+    controller.updateIgnoreCase(true);
+    controller.updateIgnoreTrailingNewline(true);
+
+    await controller.compare();
+    final summary = controller.buildSummary();
+
+    expect(summary, contains('规则：忽略大小写、忽略末尾换行'));
+    expect(summary, contains('未发现差异'));
+  });
+
+  test('exposes the change blocks for the diff navigation', () async {
+    final controller = TextCompareController(
+      service: _ImmediateService(),
+      autoCompare: false,
+    );
+    addTearDown(controller.dispose);
+    controller.updateLeft('a\nb\nc');
+    controller.updateRight('a\nB\nc\nd');
+
+    await controller.compare();
+
+    expect(controller.hunks, hasLength(2));
+    expect(controller.hunks.first.leftIndex, 1);
+    expect(controller.hunks.last.added, 1);
+  });
+
+  test('cancels the pending automatic comparison when disposed', () async {
+    final service = _CountingService();
+    final controller = TextCompareController(service: service);
+    controller.updateLeft('left');
+    controller.updateRight('right');
+
+    controller.dispose();
+    await Future<void>.delayed(_autoCompareWait);
+
+    expect(service.calls, 0);
+  });
 }
+
+final _autoCompareWait = TextCompareController.autoCompareDelay * 2;
 
 class _ImmediateService implements TextCompareService {
   @override

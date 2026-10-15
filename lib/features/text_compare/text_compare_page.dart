@@ -67,6 +67,10 @@ class _TextComparePageState extends State<TextComparePage> {
   late final DesktopClipboardFocusRestorer _focusRestorer;
   bool _foldUnchanged = false;
   int _foldedLineCount = 0;
+  int _diffIndex = -1;
+  TextDiffResult? _syncedResult;
+  final _revealedLeftLines = <int>{};
+  final _revealedRightLines = <int>{};
   bool _syncingScroll = false;
   bool _highlightRepaintScheduled = false;
   late final TextEditingController _findInputController;
@@ -407,6 +411,90 @@ class _TextComparePageState extends State<TextComparePage> {
     return CodeLineSelection.collapsed(index: lineIndex, offset: lineOffset);
   }
 
+  void _goToNextDiff() => _selectDiff(_diffIndex + 1);
+
+  void _goToPreviousDiff() => _selectDiff(_diffIndex - 1);
+
+  /// Moves the viewport to the given change block, wrapping around at both
+  /// ends like the other comparers do. Only the scroll position moves; the
+  /// caret and the paste ownership stay where the user left them.
+  void _selectDiff(int index) {
+    final hunks = widget.controller.hunks;
+    if (hunks.isEmpty) return;
+    final next = index < 0
+        ? hunks.length - 1
+        : (index >= hunks.length ? 0 : index);
+    final result = widget.controller.result;
+    if (result == null) return;
+    if (mounted) setState(() => _diffIndex = next);
+    final hunk = hunks[next];
+    if (_foldUnchanged) {
+      if (result.leftLines.isNotEmpty) {
+        _revealedLeftLines.add(
+          _clampLine(hunk.leftIndex, result.leftLines.length),
+        );
+      }
+      if (result.rightLines.isNotEmpty) {
+        _revealedRightLines.add(
+          _clampLine(hunk.rightIndex, result.rightLines.length),
+        );
+      }
+    }
+    _revealLine(TextCompareSide.left, hunk.leftIndex);
+    _revealLine(TextCompareSide.right, hunk.rightIndex);
+  }
+
+  int _clampLine(int index, int lineCount) =>
+      index < 0 ? 0 : (index >= lineCount ? lineCount - 1 : index);
+
+  void _revealLine(TextCompareSide side, int lineIndex) {
+    final text = _findText(side);
+    if (_usesWebEditor) {
+      if (text.isEmpty) return;
+      final offset = _lineStartOffset(text, lineIndex).clamp(0, text.length);
+      final controller = _webControllerFor(side);
+      controller.selection = TextSelection.collapsed(offset: offset);
+      final selection = NativeTextSelection(
+        baseOffset: offset,
+        extentOffset: offset,
+      );
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _webEditorControllerFor(side).revealSelection(selection);
+      });
+      return;
+    }
+    final editor = _editorFor(side);
+    if (editor.codeLines.isEmpty || editor.lineCount == 0) return;
+    final target = _clampLine(lineIndex, editor.lineCount);
+    if (_foldUnchanged) _expandChunkContaining(editor, target);
+    final visible = editor.codeLines.lineIndex2Index(target);
+    if (visible.index < 0 || visible.index >= editor.codeLines.length) return;
+    editor.makePositionCenterIfInvisible(
+      CodeLinePosition(index: visible.index, offset: 0),
+    );
+  }
+
+  /// `lineIndex2Index` reports a positive chunk offset when the wanted line is
+  /// hidden inside a folded run, which is the signal to unfold that run.
+  void _expandChunkContaining(CodeLineEditingController editor, int lineIndex) {
+    final location = editor.codeLines.lineIndex2Index(lineIndex);
+    if (location.index < 0 || location.chunkIndex < 0) return;
+    if (location.index >= editor.codeLines.length) return;
+    if (!editor.codeLines[location.index].chunkParent) return;
+    editor.expandChunk(location.index);
+  }
+
+  int _lineStartOffset(String text, int lineIndex) {
+    if (lineIndex <= 0) return 0;
+    var offset = 0;
+    for (var line = 0; line < lineIndex; line++) {
+      final next = text.indexOf('\n', offset);
+      if (next < 0) return text.length;
+      offset = next + 1;
+    }
+    return offset;
+  }
+
   void _syncLeftScroll() {
     _syncVerticalScroll(
       source: _leftScrollController.verticalScroller,
@@ -465,6 +553,15 @@ class _TextComparePageState extends State<TextComparePage> {
     }
     if (_findVisible && textChanged) {
       _refreshFindMatches(resetIndex: true);
+    }
+    final nextResult = widget.controller.result;
+    if (!identical(nextResult, _syncedResult)) {
+      // A new result renumbers every diff, so the navigation cursor and the
+      // lines kept unfolded for it are stale.
+      _syncedResult = nextResult;
+      _diffIndex = -1;
+      _revealedLeftLines.clear();
+      _revealedRightLines.clear();
     }
     // Diff spans are derived from the controller result rather than editor
     // text. `setState` below lets the existing editors rebuild their spans;
@@ -623,8 +720,16 @@ class _TextComparePageState extends State<TextComparePage> {
       _setFoldedLineCount(0);
       return;
     }
-    final leftCount = _collapseUnchangedRuns(_leftEditor, result.leftLines);
-    final rightCount = _collapseUnchangedRuns(_rightEditor, result.rightLines);
+    final leftCount = _collapseUnchangedRuns(
+      _leftEditor,
+      result.leftLines,
+      _revealedLeftLines,
+    );
+    final rightCount = _collapseUnchangedRuns(
+      _rightEditor,
+      result.rightLines,
+      _revealedRightLines,
+    );
     _setFoldedLineCount(leftCount > rightCount ? leftCount : rightCount);
   }
 
@@ -644,6 +749,7 @@ class _TextComparePageState extends State<TextComparePage> {
   int _collapseUnchangedRuns(
     CodeLineEditingController editor,
     List<TextDiffLine> lines,
+    Set<int> keepVisible,
   ) {
     const contextLines = 2;
     final ranges = <({int start, int end})>[];
@@ -660,7 +766,8 @@ class _TextComparePageState extends State<TextComparePage> {
         // collapseChunk keeps the line at `end` visible, so this is the first
         // of the trailing context lines rather than the last hidden line.
         final end = runEnd - contextLines + 1;
-        if (end > start + 1) {
+        if (end > start + 1 &&
+            !_containsKeptLine(runStart, runEnd, keepVisible)) {
           ranges.add((start: start, end: end));
         }
         runStart = -1;
@@ -672,6 +779,16 @@ class _TextComparePageState extends State<TextComparePage> {
       foldedLineCount += range.end - range.start - 1;
     }
     return foldedLineCount;
+  }
+
+  /// A run the user just jumped into stays open so the difference it holds is
+  /// actually visible.
+  bool _containsKeptLine(int start, int end, Set<int> keepVisible) {
+    if (keepVisible.isEmpty) return false;
+    for (final line in keepVisible) {
+      if (line >= start && line <= end) return true;
+    }
+    return false;
   }
 
   Future<void> _openFile(TextCompareSide side) async {
@@ -809,6 +926,9 @@ class _TextComparePageState extends State<TextComparePage> {
             widget.controller.compare,
         const SingleActivator(LogicalKeyboardKey.enter, control: true):
             widget.controller.compare,
+        const SingleActivator(LogicalKeyboardKey.f7): _goToNextDiff,
+        const SingleActivator(LogicalKeyboardKey.f7, shift: true):
+            _goToPreviousDiff,
         const SingleActivator(LogicalKeyboardKey.keyF, meta: true): () =>
             _openFind(_activeEditorSide),
         const SingleActivator(LogicalKeyboardKey.keyF, control: true): () =>
@@ -916,7 +1036,12 @@ class _TextComparePageState extends State<TextComparePage> {
                       ),
                     ),
                   ),
-                  _CompareStatusBar(controller: widget.controller),
+                  _CompareStatusBar(
+                    controller: widget.controller,
+                    diffIndex: _diffIndex,
+                    onPreviousDiff: _goToPreviousDiff,
+                    onNextDiff: _goToNextDiff,
+                  ),
                 ],
               ),
               if (_findVisible)
@@ -1007,9 +1132,34 @@ class _CompareToolbar extends StatelessWidget {
               onChanged: controller.updateIgnoreCase,
             ),
             _OptionToggle(
+              label: '忽略行首空白',
+              tooltip: '每行开头的缩进差异不计入比对结果',
+              value: controller.options.ignoreLeadingWhitespace,
+              onChanged: controller.updateIgnoreLeadingWhitespace,
+            ),
+            _OptionToggle(
               label: '忽略行尾空白',
+              tooltip: '每行结尾的空格与制表符不计入比对结果',
               value: controller.options.ignoreTrailingWhitespace,
               onChanged: controller.updateIgnoreTrailingWhitespace,
+            ),
+            _OptionToggle(
+              label: '忽略所有空白',
+              tooltip: '连同行内的空格一起忽略，选中后行首/行尾规则自动取消',
+              value: controller.options.ignoreAllWhitespace,
+              onChanged: controller.updateIgnoreAllWhitespace,
+            ),
+            _OptionToggle(
+              label: '忽略空行',
+              tooltip: '空白行或只有空格的行不参与比对',
+              value: controller.options.ignoreBlankLines,
+              onChanged: controller.updateIgnoreBlankLines,
+            ),
+            _OptionToggle(
+              label: '忽略末尾换行',
+              tooltip: '文本结尾多一个或少一个换行不算差异',
+              value: controller.options.ignoreTrailingNewline,
+              onChanged: controller.updateIgnoreTrailingNewline,
             ),
             if (showFoldUnchanged)
               _OptionToggle(
@@ -1084,15 +1234,17 @@ class _OptionToggle extends StatelessWidget {
     required this.label,
     required this.value,
     required this.onChanged,
+    this.tooltip,
   });
 
   final String label;
   final bool value;
   final ValueChanged<bool> onChanged;
+  final String? tooltip;
 
   @override
   Widget build(BuildContext context) {
-    return Semantics(
+    final chip = Semantics(
       label: label,
       checked: value,
       child: FilterChip(
@@ -1102,6 +1254,9 @@ class _OptionToggle extends StatelessWidget {
         onSelected: onChanged,
       ),
     );
+    final description = tooltip;
+    if (description == null) return chip;
+    return Tooltip(message: description, child: chip);
   }
 }
 
@@ -1472,14 +1627,23 @@ class _TextPane extends StatelessWidget {
 }
 
 class _CompareStatusBar extends StatelessWidget {
-  const _CompareStatusBar({required this.controller});
+  const _CompareStatusBar({
+    required this.controller,
+    required this.diffIndex,
+    required this.onPreviousDiff,
+    required this.onNextDiff,
+  });
 
   final TextCompareController controller;
+  final int diffIndex;
+  final VoidCallback onPreviousDiff;
+  final VoidCallback onNextDiff;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final result = controller.result;
+    final hunks = controller.hunks;
     final text = switch (controller.status) {
       TextCompareStatus.idle => '准备就绪',
       TextCompareStatus.comparing => '正在比对文本',
@@ -1496,6 +1660,7 @@ class _CompareStatusBar extends StatelessWidget {
       TextCompareStatus.unchanged => const Color(0xFF2E9B63),
       _ => scheme.onSurfaceVariant,
     };
+    final rules = controller.options.ruleLabels;
     return Container(
       height: 38,
       padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -1523,14 +1688,122 @@ class _CompareStatusBar extends StatelessWidget {
               ).textTheme.labelMedium?.copyWith(color: color),
             ),
           ),
-          Text(
-            '上限 10 MiB / 侧',
-            style: Theme.of(
-              context,
-            ).textTheme.labelSmall?.copyWith(color: scheme.onSurfaceVariant),
+          if (rules.isNotEmpty) ...[
+            _StatusCaption(text: '规则：${rules.join('、')}'),
+            const SizedBox(width: 12),
+          ],
+          _StatusCaption(text: '上限 10 MiB / 侧'),
+          const SizedBox(width: 12),
+          _DiffNavigator(
+            hunks: controller.result == null ? 0 : hunks.length,
+            ready: controller.result != null,
+            diffIndex: diffIndex,
+            onPrevious: onPreviousDiff,
+            onNext: onNextDiff,
           ),
         ],
       ),
+    );
+  }
+}
+
+class _StatusCaption extends StatelessWidget {
+  const _StatusCaption({required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      text,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: Theme.of(context).textTheme.labelSmall?.copyWith(
+        color: Theme.of(context).colorScheme.onSurfaceVariant,
+      ),
+    );
+  }
+}
+
+/// Counter plus the previous/next difference buttons. Mirrors the `F7` /
+/// `Shift+F7` shortcuts that ship with every mainstream comparer.
+class _DiffNavigator extends StatelessWidget {
+  const _DiffNavigator({
+    required this.hunks,
+    required this.ready,
+    required this.diffIndex,
+    required this.onPrevious,
+    required this.onNext,
+  });
+
+  final int hunks;
+  final bool ready;
+  final int diffIndex;
+  final VoidCallback onPrevious;
+  final VoidCallback onNext;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final enabled = hunks > 0;
+    final String label;
+    if (!ready) {
+      label = '差异 –';
+    } else if (hunks == 0) {
+      label = '无差异';
+    } else {
+      label = diffIndex < 0 ? '差异 $hunks 处' : '差异 ${diffIndex + 1}/$hunks';
+    }
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        SizedBox(
+          width: 66,
+          child: Text(
+            label,
+            textAlign: TextAlign.end,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(context).textTheme.labelMedium?.copyWith(
+              color: enabled ? scheme.onSurface : scheme.onSurfaceVariant,
+            ),
+          ),
+        ),
+        _NavButton(
+          tooltip: '上一个差异 (⇧F7)',
+          icon: Icons.keyboard_arrow_up_rounded,
+          onPressed: enabled ? onPrevious : null,
+        ),
+        _NavButton(
+          tooltip: '下一个差异 (F7)',
+          icon: Icons.keyboard_arrow_down_rounded,
+          onPressed: enabled ? onNext : null,
+        ),
+      ],
+    );
+  }
+}
+
+class _NavButton extends StatelessWidget {
+  const _NavButton({
+    required this.tooltip,
+    required this.icon,
+    required this.onPressed,
+  });
+
+  final String tooltip;
+  final IconData icon;
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return IconButton(
+      tooltip: tooltip,
+      onPressed: onPressed,
+      icon: Icon(icon, size: 18),
+      padding: EdgeInsets.zero,
+      visualDensity: VisualDensity.compact,
+      constraints: const BoxConstraints.tightFor(width: 26, height: 26),
     );
   }
 }

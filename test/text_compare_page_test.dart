@@ -18,7 +18,10 @@ import 'support/json_formatter_fixture.dart';
 
 void main() {
   testWidgets('shows two editable panes and compare controls', (tester) async {
-    final controller = TextCompareController(service: _ImmediateService());
+    final controller = TextCompareController(
+      service: _ImmediateService(),
+      autoCompare: false,
+    );
     addTearDown(controller.dispose);
 
     await tester.pumpWidget(
@@ -37,9 +40,127 @@ void main() {
     expect(find.text('新文本'), findsOneWidget);
     expect(find.text('开始比对'), findsOneWidget);
     expect(find.text('忽略大小写'), findsOneWidget);
+    expect(find.text('忽略行首空白'), findsOneWidget);
     expect(find.text('忽略行尾空白'), findsOneWidget);
+    expect(find.text('忽略所有空白'), findsOneWidget);
+    expect(find.text('忽略空行'), findsOneWidget);
+    expect(find.text('忽略末尾换行'), findsOneWidget);
     expect(find.text('折叠未更改行'), findsOneWidget);
     expect(find.byType(CodeEditor), findsNWidgets(2));
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('refreshes the diff without pressing the compare button', (
+    tester,
+  ) async {
+    final controller = TextCompareController(service: _ImmediateService());
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 1100,
+            height: 720,
+            child: TextComparePage(controller: controller),
+          ),
+        ),
+      ),
+    );
+    controller.updateLeft('alpha\nold value');
+    controller.updateRight('alpha\nnew value');
+    await tester.pump();
+    await tester.pump(TextCompareController.autoCompareDelay * 2);
+    await tester.pump();
+
+    expect(find.text('新增 0 行 · 删除 0 行 · 修改 1 行'), findsOneWidget);
+    expect(find.text('差异 1 处'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('jumps between differences with F7 and the status bar', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1100, 720);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPhysicalSize);
+    final controller = TextCompareController(
+      service: _ImmediateService(),
+      autoCompare: false,
+    );
+    addTearDown(controller.dispose);
+    controller.updateLeft('a\nb\nc\nd\ne');
+    controller.updateRight('a\nB\nc\nd\nE');
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(body: TextComparePage(controller: controller)),
+      ),
+    );
+    await controller.compare();
+    await tester.pump();
+
+    expect(find.text('差异 2 处'), findsOneWidget);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.f7);
+    await tester.pump();
+    expect(find.text('差异 1/2'), findsOneWidget);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.f7);
+    await tester.pump();
+    expect(find.text('差异 2/2'), findsOneWidget);
+
+    // The last block wraps back to the first one, like WinMerge does.
+    await tester.sendKeyEvent(LogicalKeyboardKey.f7);
+    await tester.pump();
+    expect(find.text('差异 1/2'), findsOneWidget);
+
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.f7);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.pump();
+    expect(find.text('差异 2/2'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('上一个差异 (⇧F7)'));
+    await tester.pump();
+    expect(find.text('差异 1/2'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('shows the active rules next to the diff counters', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1100, 720);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPhysicalSize);
+    final controller = TextCompareController(
+      service: _ImmediateService(),
+      autoCompare: false,
+    );
+    addTearDown(controller.dispose);
+    controller.updateLeft('    alpha\n\tbeta');
+    controller.updateRight('alpha\nbeta');
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(body: TextComparePage(controller: controller)),
+      ),
+    );
+    await tester.pump();
+    await controller.compare();
+    await tester.pump();
+    expect(find.text('新增 0 行 · 删除 0 行 · 修改 2 行'), findsOneWidget);
+
+    await tester.tap(find.text('忽略行首空白'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 30));
+
+    expect(find.text('规则：忽略行首空白'), findsOneWidget);
+    expect(find.text('两侧文本一致'), findsOneWidget);
+    expect(find.text('无差异'), findsOneWidget);
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
@@ -48,7 +169,10 @@ void main() {
   ) async {
     debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
     addTearDown(() => debugDefaultTargetPlatformOverride = null);
-    final controller = TextCompareController(service: _ImmediateService());
+    final controller = TextCompareController(
+      service: _ImmediateService(),
+      autoCompare: false,
+    );
     addTearDown(controller.dispose);
     controller.updateLeft('one\ntwo\none');
     controller.updateRight('other');
@@ -92,7 +216,10 @@ void main() {
   ) async {
     debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
     addTearDown(() => debugDefaultTargetPlatformOverride = null);
-    final controller = TextCompareController(service: _ImmediateService());
+    final controller = TextCompareController(
+      service: _ImmediateService(),
+      autoCompare: false,
+    );
     addTearDown(controller.dispose);
     controller.updateLeft('same left same');
     controller.updateRight('same right');
@@ -153,7 +280,10 @@ void main() {
   testWidgets('closing find restores exactly one editor focus', (tester) async {
     debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
     addTearDown(() => debugDefaultTargetPlatformOverride = null);
-    final controller = TextCompareController(service: _ImmediateService());
+    final controller = TextCompareController(
+      service: _ImmediateService(),
+      autoCompare: false,
+    );
     addTearDown(controller.dispose);
     controller.updateLeft('needle left');
     controller.updateRight('right');
@@ -192,7 +322,10 @@ void main() {
   ) async {
     debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
     addTearDown(() => debugDefaultTargetPlatformOverride = null);
-    final controller = TextCompareController(service: _ImmediateService());
+    final controller = TextCompareController(
+      service: _ImmediateService(),
+      autoCompare: false,
+    );
     addTearDown(controller.dispose);
     controller.updateLeft('left');
     controller.updateRight('right');
@@ -246,7 +379,10 @@ void main() {
   testWidgets('find focus exit releases stale paste ownership', (tester) async {
     debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
     addTearDown(() => debugDefaultTargetPlatformOverride = null);
-    final controller = TextCompareController(service: _ImmediateService());
+    final controller = TextCompareController(
+      service: _ImmediateService(),
+      autoCompare: false,
+    );
     addTearDown(controller.dispose);
     controller.updateLeft('left');
     controller.updateRight('right');
@@ -283,7 +419,10 @@ void main() {
   ) async {
     debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
     addTearDown(() => debugDefaultTargetPlatformOverride = null);
-    final controller = TextCompareController(service: _ImmediateService());
+    final controller = TextCompareController(
+      service: _ImmediateService(),
+      autoCompare: false,
+    );
     addTearDown(controller.dispose);
     controller.updateLeft('left');
     controller.updateRight('needle right');
@@ -374,7 +513,10 @@ void main() {
     tester.view.physicalSize = const Size(820, 560);
     addTearDown(tester.view.resetDevicePixelRatio);
     addTearDown(tester.view.resetPhysicalSize);
-    final controller = TextCompareController(service: _ImmediateService());
+    final controller = TextCompareController(
+      service: _ImmediateService(),
+      autoCompare: false,
+    );
     addTearDown(controller.dispose);
     controller.updateLeft('alpha\nold value');
     controller.updateRight('alpha\nnew value\nadded');
@@ -399,7 +541,10 @@ void main() {
     tester.view.physicalSize = const Size(1100, 720);
     addTearDown(tester.view.resetDevicePixelRatio);
     addTearDown(tester.view.resetPhysicalSize);
-    final controller = TextCompareController(service: _ImmediateService());
+    final controller = TextCompareController(
+      service: _ImmediateService(),
+      autoCompare: false,
+    );
     addTearDown(controller.dispose);
     controller.updateLeft('alpha\nold value');
     controller.updateRight('alpha\nnew value');
@@ -431,7 +576,10 @@ void main() {
   ) async {
     debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
     addTearDown(() => debugDefaultTargetPlatformOverride = null);
-    final controller = TextCompareController(service: _ImmediateService());
+    final controller = TextCompareController(
+      service: _ImmediateService(),
+      autoCompare: false,
+    );
     addTearDown(controller.dispose);
     controller.updateLeft('abcdef');
     mockClipboard(tester, initialText: 'restored clipboard');
@@ -473,7 +621,10 @@ void main() {
   ) async {
     debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
     addTearDown(() => debugDefaultTargetPlatformOverride = null);
-    final controller = TextCompareController(service: _ImmediateService());
+    final controller = TextCompareController(
+      service: _ImmediateService(),
+      autoCompare: false,
+    );
     addTearDown(controller.dispose);
     controller.updateLeft('left text');
     controller.updateRight('right text');
@@ -527,7 +678,10 @@ void main() {
   testWidgets('folds unchanged runs and restores every line when disabled', (
     tester,
   ) async {
-    final controller = TextCompareController(service: _ImmediateService());
+    final controller = TextCompareController(
+      service: _ImmediateService(),
+      autoCompare: false,
+    );
     addTearDown(controller.dispose);
     controller.updateLeft(
       [for (var index = 0; index < 12; index++) 'line $index'].join('\n'),
@@ -575,7 +729,10 @@ void main() {
   testWidgets('keeps the two editors vertically aligned while scrolling', (
     tester,
   ) async {
-    final controller = TextCompareController(service: _ImmediateService());
+    final controller = TextCompareController(
+      service: _ImmediateService(),
+      autoCompare: false,
+    );
     addTearDown(controller.dispose);
     final text = [
       for (var index = 0; index < 80; index++) 'line $index',
