@@ -37,6 +37,30 @@ class _TextCompareFindMatch {
   final int end;
 }
 
+/// Vertical padding both editors are built with. re_editor counts it inside the
+/// scrollable content, which is what lets the line height be derived from the
+/// scroll metrics alone.
+const double _editorPaddingTop = 12;
+const double _editorPaddingBottom = 18;
+
+/// Translates between a pixel scroll offset and a line position for one pane.
+///
+/// [lineAt] keeps the fraction of a line, so two panes showing the same content
+/// land on exactly the same pixel and an aligned scroll does not drift.
+class _PaneScrollMetrics {
+  const _PaneScrollMetrics({
+    required this.lineHeight,
+    required this.topPadding,
+  });
+
+  final double lineHeight;
+  final double topPadding;
+
+  double lineAt(double offset) => (offset - topPadding) / lineHeight;
+
+  double offsetOf(double line) => line * lineHeight + topPadding;
+}
+
 class TextComparePage extends StatefulWidget {
   const TextComparePage({
     super.key,
@@ -72,6 +96,7 @@ class _TextComparePageState extends State<TextComparePage> {
   final _revealedLeftLines = <int>{};
   final _revealedRightLines = <int>{};
   bool _syncingScroll = false;
+  bool _syncScrollEnabled = true;
   bool _highlightRepaintScheduled = false;
   late final TextEditingController _findInputController;
   final _findFocusNode = FocusNode(debugLabel: 'text-compare-find');
@@ -495,32 +520,113 @@ class _TextComparePageState extends State<TextComparePage> {
     return offset;
   }
 
-  void _syncLeftScroll() {
-    _syncVerticalScroll(
-      source: _leftScrollController.verticalScroller,
-      target: _rightScrollController.verticalScroller,
-    );
-  }
+  void _syncLeftScroll() => _syncVerticalScroll(TextCompareSide.left);
 
-  void _syncRightScroll() {
-    _syncVerticalScroll(
-      source: _rightScrollController.verticalScroller,
-      target: _leftScrollController.verticalScroller,
-    );
-  }
+  void _syncRightScroll() => _syncVerticalScroll(TextCompareSide.right);
 
-  void _syncVerticalScroll({
-    required ScrollController source,
-    required ScrollController target,
-  }) {
-    if (_syncingScroll || !source.hasClients || !target.hasClients) return;
-    final nextOffset = source.offset
-        .clamp(0.0, target.position.maxScrollExtent)
-        .toDouble();
+  /// Keeps the two panes on the same content while either one scrolls.
+  ///
+  /// Both editors share one typography, so the line height is derived from the
+  /// pane's own scroll metrics instead of being hard-coded. The offset the
+  /// source sits at is turned into a line index, that line is paired with its
+  /// counterpart through the diff, and only then turned back into an offset —
+  /// so an insertion on one side no longer pushes the two panes apart.
+  void _syncVerticalScroll(TextCompareSide side) {
+    if (!_syncScrollEnabled || _syncingScroll) return;
+    final source = _scrollControllerFor(side).verticalScroller;
+    final target = _scrollControllerFor(side.opposite).verticalScroller;
+    if (!source.hasClients || !target.hasClients) return;
+    final sourceLines = _editorFor(side).codeLines.length;
+    final targetLines = _editorFor(side.opposite).codeLines.length;
+    if (sourceLines <= 0 || targetLines <= 0) return;
+    final sourceMetrics = _paneMetrics(source, sourceLines);
+    final targetMetrics = _paneMetrics(target, targetLines) ?? sourceMetrics;
+    if (sourceMetrics == null || targetMetrics == null) return;
+
+    final sourceLine = sourceMetrics.lineAt(source.offset);
+    final index = sourceLine.floor();
+    final map = side == TextCompareSide.left
+        ? widget.controller.result?.leftToRight
+        : widget.controller.result?.rightToLeft;
+    // Without a pairing the panes have nothing in common to align to, so the
+    // plain offset mirror is the best that can be done.
+    final paired = (map == null || index < 0 || index >= map.length)
+        ? index
+        : map[index];
+    if (paired < 0) return;
+    final targetLine = paired + (sourceLine - index);
+    final nextOffset = targetMetrics
+        .offsetOf(targetLine)
+        .clamp(0.0, target.position.maxScrollExtent);
     if ((target.offset - nextOffset).abs() < 0.5) return;
     _syncingScroll = true;
     target.jumpTo(nextOffset);
     _syncingScroll = false;
+  }
+
+  /// Lines both panes should agree on. Null while the target is not laid out or
+  /// fits without scrolling, where either its metrics or the scrolling itself
+  /// would be meaningless.
+  _PaneScrollMetrics? _paneMetrics(ScrollController scroller, int lineCount) {
+    if (lineCount <= 0 || !scroller.hasClients) return null;
+    final position = scroller.position;
+    // Below this the content is shorter than the viewport and the extent no
+    // longer describes the text.
+    if (position.maxScrollExtent <= 0) return null;
+    final content = position.maxScrollExtent + position.viewportDimension;
+    final usable = content - _editorPaddingTop - _editorPaddingBottom;
+    if (usable <= 0) return null;
+    return _PaneScrollMetrics(
+      lineHeight: usable / lineCount,
+      topPadding: _editorPaddingTop,
+    );
+  }
+
+  CodeScrollController _scrollControllerFor(TextCompareSide side) =>
+      side == TextCompareSide.left
+      ? _leftScrollController
+      : _rightScrollController;
+
+  /// Mirrors a scroll performed inside one of the WebView editors.
+  ///
+  /// The DOM reports the character offset at the top of the viewport; that
+  /// offset becomes a line, the line becomes its counterpart, and the
+  /// counterpart becomes the offset the other pane scrolls to.
+  void _webScrollChanged(TextCompareSide side, int topOffset) {
+    if (!_syncScrollEnabled) return;
+    final result = widget.controller.result;
+    if (result == null) return;
+    final map = side == TextCompareSide.left
+        ? result.leftToRight
+        : result.rightToLeft;
+    if (map.isEmpty) return;
+    final sourceText = _findText(side);
+    final targetText = _findText(side.opposite);
+    if (sourceText.isEmpty || targetText.isEmpty) return;
+    final index = _lineIndexAt(sourceText, topOffset);
+    if (index < 0 || index >= map.length) return;
+    final paired = map[index];
+    if (paired < 0) return;
+    _webEditorControllerFor(
+      side.opposite,
+    ).scrollOffsetToTop(_lineStartOffset(targetText, paired));
+  }
+
+  /// Index of the line that contains [offset].
+  ///
+  /// This runs once per scroll frame, so it jumps between newlines instead of
+  /// walking every character.
+  int _lineIndexAt(String text, int offset) {
+    final limit = offset.clamp(0, text.length);
+    var line = 0;
+    var index = 0;
+    while (index < limit) {
+      final next = text.indexOf('\n', index);
+      if (next < 0 || next >= limit) break;
+      line++;
+      index = next + 1;
+    }
+    return line;
   }
 
   void _syncFromController() {
@@ -700,6 +806,17 @@ class _TextComparePageState extends State<TextComparePage> {
     if (_foldUnchanged == value) return;
     setState(() => _foldUnchanged = value);
     _scheduleFoldingUpdate();
+  }
+
+  void _setSyncScroll(bool value) {
+    if (_syncScrollEnabled == value) return;
+    setState(() => _syncScrollEnabled = value);
+    if (!value) return;
+    // Turning it back on should line the panes up straight away, using the
+    // pane the user last interacted with as the reference.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _syncVerticalScroll(_activeEditorSide);
+    });
   }
 
   void _scheduleFoldingUpdate() {
@@ -954,6 +1071,8 @@ class _TextComparePageState extends State<TextComparePage> {
                     foldedLineCount: _foldedLineCount,
                     showFoldUnchanged: !_usesWebEditor,
                     onFoldUnchangedChanged: _setFoldUnchanged,
+                    syncScroll: _syncScrollEnabled,
+                    onSyncScrollChanged: _setSyncScroll,
                     onOpenLeft: () => _openFile(TextCompareSide.left),
                     onOpenRight: () => _openFile(TextCompareSide.right),
                     onCopySummary: _copySummary,
@@ -992,6 +1111,10 @@ class _TextComparePageState extends State<TextComparePage> {
                                   ),
                               onWebChanged: (value) =>
                                   _webChanged(TextCompareSide.left, value),
+                              onWebScrollChanged: (offset) => _webScrollChanged(
+                                TextCompareSide.left,
+                                offset,
+                              ),
                               onChanged: (_) => widget.controller.updateLeft(
                                 _leftEditor.text,
                               ),
@@ -1027,6 +1150,10 @@ class _TextComparePageState extends State<TextComparePage> {
                                   ),
                               onWebChanged: (value) =>
                                   _webChanged(TextCompareSide.right, value),
+                              onWebScrollChanged: (offset) => _webScrollChanged(
+                                TextCompareSide.right,
+                                offset,
+                              ),
                               onChanged: (_) => widget.controller.updateRight(
                                 _rightEditor.text,
                               ),
@@ -1081,6 +1208,8 @@ class _CompareToolbar extends StatelessWidget {
     required this.foldedLineCount,
     required this.showFoldUnchanged,
     required this.onFoldUnchangedChanged,
+    required this.syncScroll,
+    required this.onSyncScrollChanged,
     required this.onOpenLeft,
     required this.onOpenRight,
     required this.onCopySummary,
@@ -1091,6 +1220,8 @@ class _CompareToolbar extends StatelessWidget {
   final int foldedLineCount;
   final bool showFoldUnchanged;
   final ValueChanged<bool> onFoldUnchangedChanged;
+  final bool syncScroll;
+  final ValueChanged<bool> onSyncScrollChanged;
   final VoidCallback onOpenLeft;
   final VoidCallback onOpenRight;
   final VoidCallback onCopySummary;
@@ -1160,6 +1291,12 @@ class _CompareToolbar extends StatelessWidget {
               tooltip: '文本结尾多一个或少一个换行不算差异',
               value: controller.options.ignoreTrailingNewline,
               onChanged: controller.updateIgnoreTrailingNewline,
+            ),
+            _OptionToggle(
+              label: '同步滚动',
+              tooltip: '滚到某一侧时，另一侧跟着滚到对应的那一行',
+              value: syncScroll,
+              onChanged: onSyncScrollChanged,
             ),
             if (showFoldUnchanged)
               _OptionToggle(
@@ -1453,6 +1590,7 @@ class _TextPane extends StatelessWidget {
     required this.webHighlights,
     required this.onWebSelectionChanged,
     required this.onWebChanged,
+    required this.onWebScrollChanged,
   });
 
   final TextCompareSide side;
@@ -1472,6 +1610,7 @@ class _TextPane extends StatelessWidget {
   final List<DesktopTextHighlight> webHighlights;
   final ValueChanged<NativeTextSelection> onWebSelectionChanged;
   final ValueChanged<String> onWebChanged;
+  final ValueChanged<int> onWebScrollChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -1549,6 +1688,7 @@ class _TextPane extends StatelessWidget {
                       textColor: scheme.onSurface,
                       isDark: scheme.brightness == Brightness.dark,
                       placeholder: isLeft ? '输入或粘贴旧文本' : '输入或粘贴新文本',
+                      onScrollOffsetChanged: onWebScrollChanged,
                       debugLabel: isLeft
                           ? 'text-compare-left'
                           : 'text-compare-right',

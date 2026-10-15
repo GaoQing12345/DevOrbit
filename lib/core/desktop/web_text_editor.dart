@@ -26,6 +26,12 @@ class DesktopWebTextEditorController {
     _state?._revealSelection(selection);
   }
 
+  /// Scrolls so [offset] sits at the top of the viewport without moving the
+  /// caret. Used to keep two editors on the same line while scrolling.
+  void scrollOffsetToTop(int offset) {
+    _state?._scrollOffsetToTop(offset);
+  }
+
   void restoreFocus() {
     _state?._takeEditorFocus();
   }
@@ -82,6 +88,7 @@ class DesktopWebTextEditor extends StatefulWidget {
     this.onEditorPointerDown,
     this.onFind,
     this.onCommand,
+    this.onScrollOffsetChanged,
     this.backgroundColor,
     this.textColor,
     this.isDark = false,
@@ -111,6 +118,10 @@ class DesktopWebTextEditor extends StatefulWidget {
   /// Receives keyboard commands the DOM owns and cannot dispatch itself, such
   /// as `save`, `format`, `compact`, `sort` and `goToLine`.
   final ValueChanged<String>? onCommand;
+
+  /// Reports the character offset of the first visible position after the user
+  /// scrolls, so a second editor can be kept aligned with this one.
+  final ValueChanged<int>? onScrollOffsetChanged;
   final Color? backgroundColor;
   final Color? textColor;
   final bool isDark;
@@ -606,6 +617,15 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
       },
     );
     controller.addJavaScriptHandler(
+      handlerName: 'scrollChanged',
+      callback: (args) {
+        if (!_isVisible || _disposed) return null;
+        if (args.isEmpty) return null;
+        widget.onScrollOffsetChanged?.call(_asInt(args.first));
+        return null;
+      },
+    );
+    controller.addJavaScriptHandler(
       handlerName: 'copyRequested',
       callback: (args) async {
         if (args.isEmpty || args.first is! String) return null;
@@ -866,6 +886,17 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
     );
   }
 
+  void _scrollOffsetToTop(int offset) {
+    final controller = _controller;
+    if (_disposed || !_loaded || controller == null) return;
+    final safeOffset = offset.clamp(0, widget.text.length);
+    unawaited(
+      controller.evaluateJavascript(
+        source: 'window.devOrbitScrollToOffsetTop($safeOffset);',
+      ),
+    );
+  }
+
   void _syncState({bool forceRender = false}) {
     final controller = _controller;
     if (_disposed || !_loaded || controller == null) return;
@@ -1071,6 +1102,8 @@ let historyIndex = -1;
 let historyApplying = false;
 let restoreAfterWindowFocus = false;
 let collapsedFolds = [];
+let scrollReportScheduled = false;
+let scrollReportSuppressed = false;
 const bridge = (name, args) => {
   if (window.flutter_inappwebview) window.flutter_inappwebview.callHandler(name, ...args);
 };
@@ -1554,6 +1587,45 @@ window.devOrbitRevealSelection = (base, extent) => {
   }
   revealSelection(base, extent);
 };
+// Character offset of the first visible position. Hit-testing the top-left
+// corner works with soft wrapping, where `scrollTop / lineHeight` does not.
+function visibleTopOffset() {
+  const rect = editor.getBoundingClientRect();
+  const range = document.caretRangeFromPoint
+    ? document.caretRangeFromPoint(rect.left + 2, rect.top + 2)
+    : null;
+  if (!range || !editor.contains(range.startContainer)) return null;
+  return selectionOffset(editor, range.startContainer, range.startOffset);
+}
+function reportScroll() {
+  if (scrollReportSuppressed || scrollReportScheduled) return;
+  scrollReportScheduled = true;
+  requestAnimationFrame(() => {
+    scrollReportScheduled = false;
+    if (scrollReportSuppressed) return;
+    // Reporting a guessed zero would drag the other pane to the top.
+    const offset = visibleTopOffset();
+    if (offset === null) return;
+    bridge('scrollChanged', [offset]);
+  });
+}
+window.devOrbitScrollToOffsetTop = offset => {
+  const point = locate(editor, Math.max(0, offset));
+  const range = document.createRange();
+  range.setStart(point.node, point.offset);
+  range.setEnd(point.node, point.offset);
+  const rect = range.getBoundingClientRect();
+  const editorRect = editor.getBoundingClientRect();
+  // Nothing to do for an empty range that never got laid out.
+  if (rect.top === 0 && rect.bottom === 0) return;
+  // This scroll is driven from outside, so its echo must not travel back to
+  // the pane that asked for it.
+  scrollReportSuppressed = true;
+  editor.scrollTop += rect.top - editorRect.top;
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    scrollReportSuppressed = false;
+  }));
+};
 window.devOrbitFocus = () => {
   selectionFrozen = true;
   restoreSelection(lastSelection[0], lastSelection[1]);
@@ -1672,7 +1744,10 @@ editor.addEventListener('mousedown', () => {
   // test runs, so this bridge call is the only reliable activation signal.
   bridge('editorPointerDown', []);
 }, true);
-editor.addEventListener('scroll', () => { lineNumbers.scrollTop = editor.scrollTop; }, { passive: true });
+editor.addEventListener('scroll', () => {
+  lineNumbers.scrollTop = editor.scrollTop;
+  reportScroll();
+}, { passive: true });
 document.addEventListener('selectionchange', () => {
   if (selectionFrozen || composing || inputPending || document.activeElement !== editor) return;
   const selection = currentSelection();

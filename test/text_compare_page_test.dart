@@ -764,6 +764,127 @@ void main() {
     expect(rightScroll.offset, closeTo(180, 0.5));
     await tester.pumpWidget(const SizedBox.shrink());
   });
+
+  testWidgets('scrolls to the paired line instead of mirroring the pixel', (
+    tester,
+  ) async {
+    final controller = TextCompareController(
+      service: _ImmediateService(),
+      autoCompare: false,
+    );
+    addTearDown(controller.dispose);
+    controller.updateLeft(
+      [
+        for (var index = 0; index < 10; index++) 'head $index',
+        for (var index = 0; index < 50; index++) 'body $index',
+      ].join('\n'),
+    );
+    controller.updateRight(
+      [
+        for (var index = 0; index < 10; index++) 'head $index',
+        for (var index = 0; index < 3; index++) 'inserted $index',
+        for (var index = 0; index < 50; index++) 'body $index',
+      ].join('\n'),
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 1100,
+            height: 600,
+            child: TextComparePage(controller: controller),
+          ),
+        ),
+      ),
+    );
+    await controller.compare();
+    await tester.pump();
+
+    final editors = tester
+        .widgetList<CodeEditor>(find.byType(CodeEditor))
+        .toList(growable: false);
+    final leftScroll = editors.first.scrollController!.verticalScroller;
+    final rightScroll = editors.last.scrollController!.verticalScroller;
+    final leftLineHeight = _lineHeightIn(
+      leftScroll,
+      editors.first.controller!.codeLines.length,
+    );
+    final rightLineHeight = _lineHeightIn(
+      rightScroll,
+      editors.last.controller!.codeLines.length,
+    );
+
+    const startLine = 40;
+    leftScroll.jumpTo(startLine * leftLineHeight + _panePaddingTop);
+    await tester.pump();
+
+    // The three inserted lines sit above this one on the right, so the panes
+    // must not end up on the same pixel.
+    final expectedLine = controller.result!.leftToRight[startLine];
+    expect(expectedLine, greaterThan(startLine));
+    expect(
+      rightScroll.offset,
+      closeTo(expectedLine * rightLineHeight + _panePaddingTop, 0.5),
+    );
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('sync scroll can be switched off and realigns when switched on', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1400, 900);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPhysicalSize);
+    final controller = TextCompareController(
+      service: _ImmediateService(),
+      autoCompare: false,
+    );
+    addTearDown(controller.dispose);
+    final text = [
+      for (var index = 0; index < 80; index++) 'line $index',
+    ].join('\n');
+    controller.updateLeft(text);
+    controller.updateRight(text);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(body: TextComparePage(controller: controller)),
+      ),
+    );
+    await tester.pump();
+    final editors = tester
+        .widgetList<CodeEditor>(find.byType(CodeEditor))
+        .toList(growable: false);
+    final leftScroll = editors.first.scrollController!.verticalScroller;
+    final rightScroll = editors.last.scrollController!.verticalScroller;
+
+    await tester.tap(find.text('同步滚动'));
+    await tester.pump();
+    leftScroll.jumpTo(300);
+    await tester.pump();
+    expect(rightScroll.offset, 0);
+
+    await tester.tap(find.text('同步滚动'));
+    await tester.pump();
+    await tester.pump();
+    expect(rightScroll.offset, closeTo(300, 0.5));
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+}
+
+/// Vertical padding the panes are built with, mirroring the page.
+const double _panePaddingTop = 12;
+const double _panePaddingBottom = 18;
+
+/// Mirrors how the page derives a pane's line height: re_editor counts the
+/// editor padding inside its scrollable content, so the text height is the
+/// content height minus both paddings.
+double _lineHeightIn(ScrollController scroller, int lineCount) {
+  final position = scroller.position;
+  final content = position.maxScrollExtent + position.viewportDimension;
+  return (content - _panePaddingTop - _panePaddingBottom) / lineCount;
 }
 
 Future<void> _sendWindowEvent(String eventName) async {

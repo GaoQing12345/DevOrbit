@@ -271,4 +271,90 @@ void main() {
     expect(result.hunks.first.modified, 1);
     expect(result.hunks.last.leftIndex, 4);
   });
+
+  group('line pairing for the scroll sync', () {
+    test('maps every line one to one when the texts match', () {
+      final result = engine.compare(
+        left: 'a\nb\nc',
+        right: 'a\nb\nc',
+        options: const TextCompareOptions(),
+      );
+
+      expect(result.leftToRight, [0, 1, 2]);
+      expect(result.rightToLeft, [0, 1, 2]);
+    });
+
+    test('carries an inserted line into the pairing of the following lines', () {
+      final result = engine.compare(
+        left: 'a\nb\nc',
+        right: 'a\nnew1\nnew2\nb\nc',
+        options: const TextCompareOptions(),
+      );
+
+      expect(result.leftToRight, hasLength(3));
+      expect(result.rightToLeft, hasLength(5));
+      // `b` and `c` keep their own counterparts; the inserted lines borrow the
+      // line above them so both sequences stay monotonic.
+      expect(result.leftToRight[1], 3);
+      expect(result.leftToRight[2], 4);
+      expect(result.rightToLeft[3], 1);
+      expect(result.rightToLeft[4], 2);
+      expect(result.rightToLeft[1], result.rightToLeft[0]);
+      expect(result.rightToLeft[2], result.rightToLeft[1]);
+    });
+
+    test('keeps a removed line on the previous pair until the next one', () {
+      final result = engine.compare(
+        left: 'a\nb\nc\nd',
+        right: 'a\nd',
+        options: const TextCompareOptions(),
+      );
+
+      expect(result.rightToLeft, hasLength(2));
+      expect(result.rightToLeft[0], 0);
+      expect(result.rightToLeft[1], 3);
+      // `b` and `c` have no counterpart of their own, so they keep the line
+      // above them and the pane only moves once `d` is reached.
+      expect(result.leftToRight[1], 0);
+      expect(result.leftToRight[2], 0);
+      expect(result.leftToRight[3], 1);
+    });
+
+    test('pairs the lines of a rewrite position by position', () {
+      final result = engine.compare(
+        left: 'keep\nold one\nold two\ntail',
+        right: 'keep\nnew one\nnew two\ntail',
+        options: const TextCompareOptions(),
+      );
+
+      expect(result.leftToRight, [0, 1, 2, 3]);
+      expect(result.rightToLeft, [0, 1, 2, 3]);
+    });
+
+    test('leaves the pairing empty when one side has nothing to pair', () {
+      final result = engine.compare(
+        left: 'a\nb',
+        right: '',
+        options: const TextCompareOptions(),
+      );
+
+      expect(result.leftToRight, everyElement(-1));
+      expect(result.rightToLeft, isEmpty);
+    });
+
+    test('stays inside the other side for every index', () {
+      final result = engine.compare(
+        left: 'a\nb\nc\nd\ne\nf',
+        right: 'a\nX\nd\ne\nY\nZ\nf',
+        options: const TextCompareOptions(),
+      );
+
+      for (final index in result.leftToRight) {
+        expect(index, inInclusiveRange(0, result.rightToLeft.length - 1));
+      }
+      for (final index in result.rightToLeft) {
+        expect(index, inInclusiveRange(0, result.leftToRight.length - 1));
+      }
+    });
+  });
 }

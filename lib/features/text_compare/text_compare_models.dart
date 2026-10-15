@@ -1,4 +1,11 @@
-enum TextCompareSide { left, right }
+enum TextCompareSide {
+  left,
+  right;
+
+  TextCompareSide get opposite => this == TextCompareSide.left
+      ? TextCompareSide.right
+      : TextCompareSide.left;
+}
 
 enum TextCompareStatus { idle, comparing, unchanged, changed, stale, error }
 
@@ -166,6 +173,8 @@ class TextDiffResult {
     required this.removedCount,
     required this.modifiedCount,
     this.hunks = const [],
+    this.leftToRight = const [],
+    this.rightToLeft = const [],
   });
 
   final List<TextDiffLine> leftLines;
@@ -174,6 +183,18 @@ class TextDiffResult {
   final int removedCount;
   final int modifiedCount;
   final List<TextDiffHunk> hunks;
+
+  /// Line correspondence used to scroll both editors together.
+  ///
+  /// `leftToRight[i]` is the right-hand line that left line `i` was paired
+  /// with; [rightToLeft] is the mirror image. A line with no partner of its own
+  /// — a pure insertion or removal — borrows the nearest paired line, so both
+  /// sequences stay monotonic and any scroll position resolves. A `-1` entry
+  /// means that side has nothing to scroll to, which only happens when the
+  /// comparison found no pair at all. Both lists are empty before the first
+  /// comparison, and their lengths match the line counts of their own side.
+  final List<int> leftToRight;
+  final List<int> rightToLeft;
 
   bool get hasChanges =>
       addedCount > 0 || removedCount > 0 || modifiedCount > 0;

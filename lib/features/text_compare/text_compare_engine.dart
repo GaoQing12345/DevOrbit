@@ -77,6 +77,11 @@ class TextCompareEngine {
     );
 
     final hunks = <TextDiffHunk>[];
+    // Line pairing for the scroll sync. Every anchored or rewritten line gets
+    // an explicit entry; the gaps left by pure insertions and removals are
+    // filled in afterwards.
+    final leftToRight = List<int>.filled(leftLines.length, -1);
+    final rightToLeft = List<int>.filled(rightLines.length, -1);
     var addedCount = 0;
     var removedCount = 0;
     var modifiedCount = 0;
@@ -86,6 +91,11 @@ class TextCompareEngine {
       ...anchors,
       (leftIndex: leftLines.length, rightIndex: rightLines.length),
     ]) {
+      if (anchor.leftIndex < leftLines.length &&
+          anchor.rightIndex < rightLines.length) {
+        leftToRight[anchor.leftIndex] = anchor.rightIndex;
+        rightToLeft[anchor.rightIndex] = anchor.leftIndex;
+      }
       final deleted = _selectable(
         previousLeft + 1,
         anchor.leftIndex,
@@ -108,6 +118,10 @@ class TextCompareEngine {
         inserted: inserted,
         options: options,
       )) {
+        if (pair.leftIndex >= 0 && pair.rightIndex >= 0) {
+          leftToRight[pair.leftIndex] = pair.rightIndex;
+          rightToLeft[pair.rightIndex] = pair.leftIndex;
+        }
         if (pair.rightIndex < 0) {
           leftResult[pair.leftIndex] = TextDiffLine(
             lineNumber: pair.leftIndex + 1,
@@ -170,6 +184,9 @@ class TextCompareEngine {
       previousRight = anchor.rightIndex;
     }
 
+    _borrowNearestPair(leftToRight);
+    _borrowNearestPair(rightToLeft);
+
     return TextDiffResult(
       leftLines: leftResult,
       rightLines: rightResult,
@@ -177,7 +194,31 @@ class TextCompareEngine {
       removedCount: removedCount,
       modifiedCount: modifiedCount,
       hunks: hunks,
+      leftToRight: leftToRight,
+      rightToLeft: rightToLeft,
     );
+  }
+
+  /// Gives every unpaired line the nearest paired line, so a scroll position on
+  /// one side always resolves to a position on the other. A side with no pair
+  /// at all keeps its `-1` entries and simply does not sync.
+  void _borrowNearestPair(List<int> map) {
+    var previous = -1;
+    for (var index = 0; index < map.length; index++) {
+      if (map[index] >= 0) {
+        previous = map[index];
+      } else {
+        map[index] = previous;
+      }
+    }
+    var next = -1;
+    for (var index = map.length - 1; index >= 0; index--) {
+      if (map[index] >= 0) {
+        next = map[index];
+      } else {
+        map[index] = next;
+      }
+    }
   }
 
   List<({int leftIndex, int rightIndex})> _findAnchors(
