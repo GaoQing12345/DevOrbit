@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'dart:io';
 
 import 'package:file_selector/file_selector.dart';
@@ -11,23 +10,11 @@ import '../../core/desktop/desktop_clipboard_focus_restorer.dart';
 import '../../core/desktop/desktop_text_selection.dart';
 import '../../core/desktop/web_text_editor.dart';
 import 'text_compare_controller.dart';
-import 'text_compare_indicator.dart';
+import 'text_compare_find_panel.dart';
 import 'text_compare_models.dart';
-
-class _TextCompareChunkAnalyzer implements CodeChunkAnalyzer {
-  const _TextCompareChunkAnalyzer();
-
-  @override
-  List<CodeChunk> run(CodeLines codeLines) {
-    return [
-      for (var index = 0; index < codeLines.length; index++)
-        if (codeLines[index].chunkParent)
-          // A collapsed line is already a valid folded chunk. Reporting its
-          // hidden range again makes re_editor's async analyzer expand it.
-          CodeChunk(index, index + 1),
-    ];
-  }
-}
+import 'text_compare_pane.dart';
+import 'text_compare_status_bar.dart';
+import 'text_compare_toolbar.dart';
 
 class _TextCompareFindMatch {
   const _TextCompareFindMatch(this.side, this.start, this.end);
@@ -62,15 +49,9 @@ class _PaneScrollMetrics {
 }
 
 class TextComparePage extends StatefulWidget {
-  const TextComparePage({
-    super.key,
-    required this.controller,
-    this.debugUseWebEditor = false,
-  });
+  const TextComparePage({super.key, required this.controller});
 
   final TextCompareController controller;
-  @visibleForTesting
-  final bool debugUseWebEditor;
 
   @override
   State<TextComparePage> createState() => _TextComparePageState();
@@ -108,10 +89,9 @@ class _TextComparePageState extends State<TextComparePage> {
   bool _findSessionActive = false;
 
   bool get _usesWebEditor =>
-      widget.debugUseWebEditor ||
-      (!kIsWeb &&
-          (Platform.isMacOS || Platform.isWindows) &&
-          Platform.environment['FLUTTER_TEST'] != 'true');
+      !kIsWeb &&
+      Platform.isMacOS &&
+      Platform.environment['FLUTTER_TEST'] != 'true';
 
   @override
   void initState() {
@@ -1065,10 +1045,9 @@ class _TextComparePageState extends State<TextComparePage> {
             children: [
               Column(
                 children: [
-                  _CompareToolbar(
+                  CompareToolbar(
                     controller: widget.controller,
                     foldUnchanged: _foldUnchanged,
-                    foldedLineCount: _foldedLineCount,
                     showFoldUnchanged: !_usesWebEditor,
                     onFoldUnchangedChanged: _setFoldUnchanged,
                     syncScroll: _syncScrollEnabled,
@@ -1079,11 +1058,11 @@ class _TextComparePageState extends State<TextComparePage> {
                   ),
                   Expanded(
                     child: Padding(
-                      padding: const EdgeInsets.fromLTRB(18, 16, 18, 14),
+                      padding: const EdgeInsets.fromLTRB(12, 12, 12, 10),
                       child: Row(
                         children: [
                           Expanded(
-                            child: _TextPane(
+                            child: CompareTextPane(
                               side: TextCompareSide.left,
                               controller: widget.controller,
                               editor: _leftEditor,
@@ -1120,9 +1099,9 @@ class _TextComparePageState extends State<TextComparePage> {
                               ),
                             ),
                           ),
-                          const SizedBox(width: 14),
+                          const SizedBox(width: 10),
                           Expanded(
-                            child: _TextPane(
+                            child: CompareTextPane(
                               side: TextCompareSide.right,
                               controller: widget.controller,
                               editor: _rightEditor,
@@ -1163,9 +1142,11 @@ class _TextComparePageState extends State<TextComparePage> {
                       ),
                     ),
                   ),
-                  _CompareStatusBar(
+                  CompareStatusBar(
                     controller: widget.controller,
                     diffIndex: _diffIndex,
+                    foldUnchanged: _foldUnchanged,
+                    foldedLineCount: _foldedLineCount,
                     onPreviousDiff: _goToPreviousDiff,
                     onNextDiff: _goToNextDiff,
                   ),
@@ -1173,9 +1154,9 @@ class _TextComparePageState extends State<TextComparePage> {
               ),
               if (_findVisible)
                 Positioned(
-                  top: 66,
-                  right: 24,
-                  child: _TextCompareFindPanel(
+                  top: 54,
+                  right: 16,
+                  child: CompareFindPanel(
                     key: const ValueKey('text-compare-find-panel'),
                     controller: _findInputController,
                     focusNode: _findFocusNode,
@@ -1199,757 +1180,4 @@ class _TextComparePageState extends State<TextComparePage> {
       ),
     );
   }
-}
-
-class _CompareToolbar extends StatelessWidget {
-  const _CompareToolbar({
-    required this.controller,
-    required this.foldUnchanged,
-    required this.foldedLineCount,
-    required this.showFoldUnchanged,
-    required this.onFoldUnchangedChanged,
-    required this.syncScroll,
-    required this.onSyncScrollChanged,
-    required this.onOpenLeft,
-    required this.onOpenRight,
-    required this.onCopySummary,
-  });
-
-  final TextCompareController controller;
-  final bool foldUnchanged;
-  final int foldedLineCount;
-  final bool showFoldUnchanged;
-  final ValueChanged<bool> onFoldUnchangedChanged;
-  final bool syncScroll;
-  final ValueChanged<bool> onSyncScrollChanged;
-  final VoidCallback onOpenLeft;
-  final VoidCallback onOpenRight;
-  final VoidCallback onCopySummary;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: scheme.surfaceContainerLow,
-        boxShadow: [
-          BoxShadow(
-            color: scheme.primary.withAlpha(10),
-            blurRadius: 14,
-            offset: const Offset(0, 4),
-          ),
-        ],
-        border: Border(bottom: BorderSide(color: scheme.outlineVariant)),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-        child: Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          crossAxisAlignment: WrapCrossAlignment.center,
-          children: [
-            Text(
-              '文本比对',
-              style: Theme.of(
-                context,
-              ).textTheme.titleMedium?.copyWith(color: scheme.onSurface),
-            ),
-            const SizedBox(width: 4),
-            _FileButton(label: '左侧文件', onPressed: onOpenLeft),
-            _FileButton(label: '右侧文件', onPressed: onOpenRight),
-            _OptionToggle(
-              label: '忽略大小写',
-              value: controller.options.ignoreCase,
-              onChanged: controller.updateIgnoreCase,
-            ),
-            _OptionToggle(
-              label: '忽略行首空白',
-              tooltip: '每行开头的缩进差异不计入比对结果',
-              value: controller.options.ignoreLeadingWhitespace,
-              onChanged: controller.updateIgnoreLeadingWhitespace,
-            ),
-            _OptionToggle(
-              label: '忽略行尾空白',
-              tooltip: '每行结尾的空格与制表符不计入比对结果',
-              value: controller.options.ignoreTrailingWhitespace,
-              onChanged: controller.updateIgnoreTrailingWhitespace,
-            ),
-            _OptionToggle(
-              label: '忽略所有空白',
-              tooltip: '连同行内的空格一起忽略，选中后行首/行尾规则自动取消',
-              value: controller.options.ignoreAllWhitespace,
-              onChanged: controller.updateIgnoreAllWhitespace,
-            ),
-            _OptionToggle(
-              label: '忽略空行',
-              tooltip: '空白行或只有空格的行不参与比对',
-              value: controller.options.ignoreBlankLines,
-              onChanged: controller.updateIgnoreBlankLines,
-            ),
-            _OptionToggle(
-              label: '忽略末尾换行',
-              tooltip: '文本结尾多一个或少一个换行不算差异',
-              value: controller.options.ignoreTrailingNewline,
-              onChanged: controller.updateIgnoreTrailingNewline,
-            ),
-            _OptionToggle(
-              label: '同步滚动',
-              tooltip: '滚到某一侧时，另一侧跟着滚到对应的那一行',
-              value: syncScroll,
-              onChanged: onSyncScrollChanged,
-            ),
-            if (showFoldUnchanged)
-              _OptionToggle(
-                label: '折叠未更改行',
-                value: foldUnchanged,
-                onChanged: onFoldUnchangedChanged,
-              ),
-            if (showFoldUnchanged && foldUnchanged)
-              Text(
-                foldedLineCount > 0 ? '已折叠 $foldedLineCount 行' : '无可折叠行',
-                style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                  color: scheme.onSurfaceVariant,
-                ),
-              ),
-            const _DiffLegend(),
-            FilledButton.icon(
-              onPressed: controller.canCompare ? controller.compare : null,
-              icon: controller.isComparing
-                  ? const SizedBox.square(
-                      dimension: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.difference_rounded),
-              label: Text(controller.isComparing ? '比对中' : '开始比对'),
-            ),
-            _ToolbarAction(
-              tooltip: '交换左右文本',
-              icon: Icons.swap_horiz_rounded,
-              onPressed:
-                  controller.leftText.isEmpty && controller.rightText.isEmpty
-                  ? null
-                  : controller.swap,
-            ),
-            _ToolbarAction(
-              tooltip: '清空',
-              icon: Icons.delete_outline_rounded,
-              onPressed:
-                  controller.leftText.isEmpty && controller.rightText.isEmpty
-                  ? null
-                  : controller.clear,
-            ),
-            _ToolbarAction(
-              tooltip: '复制比对摘要',
-              icon: Icons.content_copy_rounded,
-              onPressed: controller.canCopySummary ? onCopySummary : null,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _FileButton extends StatelessWidget {
-  const _FileButton({required this.label, required this.onPressed});
-
-  final String label;
-  final VoidCallback onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    return OutlinedButton.icon(
-      onPressed: onPressed,
-      icon: const Icon(Icons.folder_open_rounded),
-      label: Text(label),
-    );
-  }
-}
-
-class _OptionToggle extends StatelessWidget {
-  const _OptionToggle({
-    required this.label,
-    required this.value,
-    required this.onChanged,
-    this.tooltip,
-  });
-
-  final String label;
-  final bool value;
-  final ValueChanged<bool> onChanged;
-  final String? tooltip;
-
-  @override
-  Widget build(BuildContext context) {
-    final chip = Semantics(
-      label: label,
-      checked: value,
-      child: FilterChip(
-        selected: value,
-        showCheckmark: true,
-        label: Text(label),
-        onSelected: onChanged,
-      ),
-    );
-    final description = tooltip;
-    if (description == null) return chip;
-    return Tooltip(message: description, child: chip);
-  }
-}
-
-class _ToolbarAction extends StatelessWidget {
-  const _ToolbarAction({
-    required this.tooltip,
-    required this.icon,
-    required this.onPressed,
-  });
-
-  final String tooltip;
-  final IconData icon;
-  final VoidCallback? onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    return IconButton(tooltip: tooltip, onPressed: onPressed, icon: Icon(icon));
-  }
-}
-
-class _DiffLegend extends StatelessWidget {
-  const _DiffLegend();
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        _LegendItem(color: scheme.error, label: '删除'),
-        const SizedBox(width: 7),
-        _LegendItem(color: const Color(0xFFD18A16), label: '修改'),
-        const SizedBox(width: 7),
-        _LegendItem(color: const Color(0xFF2E9B63), label: '新增'),
-      ],
-    );
-  }
-}
-
-class _LegendItem extends StatelessWidget {
-  const _LegendItem({required this.color, required this.label});
-
-  final Color color;
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          width: 7,
-          height: 7,
-          decoration: BoxDecoration(
-            color: color,
-            borderRadius: BorderRadius.circular(2),
-          ),
-        ),
-        const SizedBox(width: 4),
-        Text(
-          label,
-          style: Theme.of(context).textTheme.labelSmall?.copyWith(
-            color: Theme.of(context).colorScheme.onSurfaceVariant,
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _TextCompareFindPanel extends StatelessWidget {
-  const _TextCompareFindPanel({
-    super.key,
-    required this.controller,
-    required this.focusNode,
-    required this.inputKey,
-    required this.onFocus,
-    required this.matchSide,
-    required this.matchIndex,
-    required this.matchCount,
-    required this.onPrevious,
-    required this.onNext,
-    required this.onClose,
-  });
-
-  final TextEditingController controller;
-  final FocusNode focusNode;
-  final Key inputKey;
-  final VoidCallback onFocus;
-  final TextCompareSide? matchSide;
-  final int matchIndex;
-  final int matchCount;
-  final VoidCallback onPrevious;
-  final VoidCallback onNext;
-  final VoidCallback onClose;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final sideLabel = matchSide == TextCompareSide.left ? '左' : '右';
-    final resultText = matchIndex < 0 || matchCount == 0 || matchSide == null
-        ? '0/0'
-        : '$sideLabel ${matchIndex + 1}/$matchCount';
-    return Container(
-      width: 380,
-      height: 52,
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
-      decoration: BoxDecoration(
-        color: scheme.surfaceContainerLow,
-        border: Border.all(color: scheme.outlineVariant),
-        borderRadius: BorderRadius.circular(8),
-        boxShadow: [
-          BoxShadow(
-            color: scheme.shadow.withAlpha(28),
-            blurRadius: 18,
-            offset: const Offset(0, 6),
-          ),
-        ],
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            child: CallbackShortcuts(
-              bindings: {
-                const SingleActivator(LogicalKeyboardKey.arrowDown): onNext,
-                const SingleActivator(LogicalKeyboardKey.escape): onClose,
-              },
-              child: TextField(
-                key: inputKey,
-                controller: controller,
-                focusNode: focusNode,
-                onTap: onFocus,
-                maxLines: 1,
-                onEditingComplete: onNext,
-                style: Theme.of(context).textTheme.bodyMedium,
-                decoration: InputDecoration(
-                  hintText: '查找',
-                  isDense: true,
-                  filled: true,
-                  fillColor: scheme.surfaceContainer,
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 11,
-                    vertical: 9,
-                  ),
-                ),
-              ),
-            ),
-          ),
-          SizedBox(
-            width: 48,
-            child: Text(
-              resultText,
-              textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
-          ),
-          IconButton(
-            tooltip: '上一个',
-            onPressed: matchCount == 0 ? null : onPrevious,
-            icon: const Icon(Icons.keyboard_arrow_up_rounded),
-          ),
-          IconButton(
-            tooltip: '下一个',
-            onPressed: matchCount == 0 ? null : onNext,
-            icon: const Icon(Icons.keyboard_arrow_down_rounded),
-          ),
-          IconButton(
-            tooltip: '关闭查找',
-            onPressed: onClose,
-            icon: const Icon(Icons.close_rounded),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _TextPane extends StatelessWidget {
-  const _TextPane({
-    required this.side,
-    required this.controller,
-    required this.editor,
-    required this.scrollController,
-    required this.focusNode,
-    required this.emphasized,
-    required this.onPaste,
-    required this.onFind,
-    required this.onEditorPointerDown,
-    required this.onChanged,
-    required this.useWebEditor,
-    required this.webEditorController,
-    required this.webController,
-    required this.webSelection,
-    required this.webHighlights,
-    required this.onWebSelectionChanged,
-    required this.onWebChanged,
-    required this.onWebScrollChanged,
-  });
-
-  final TextCompareSide side;
-  final TextCompareController controller;
-  final CodeLineEditingController editor;
-  final CodeScrollController scrollController;
-  final FocusNode focusNode;
-  final bool emphasized;
-  final VoidCallback onPaste;
-  final VoidCallback onFind;
-  final VoidCallback onEditorPointerDown;
-  final ValueChanged<CodeLineEditingValue> onChanged;
-  final bool useWebEditor;
-  final DesktopWebTextEditorController webEditorController;
-  final TextEditingController webController;
-  final NativeTextSelection webSelection;
-  final List<DesktopTextHighlight> webHighlights;
-  final ValueChanged<NativeTextSelection> onWebSelectionChanged;
-  final ValueChanged<String> onWebChanged;
-  final ValueChanged<int> onWebScrollChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final isLeft = side == TextCompareSide.left;
-    final fileName = isLeft
-        ? controller.leftFileName
-        : controller.rightFileName;
-    final dirty = isLeft ? controller.leftDirty : controller.rightDirty;
-    final text = isLeft ? controller.leftText : controller.rightText;
-    final lines = isLeft
-        ? controller.result?.leftLines ?? const []
-        : controller.result?.rightLines ?? const [];
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: scheme.surfaceContainerLowest,
-        border: Border.all(
-          color: emphasized ? scheme.primary : scheme.outlineVariant,
-          width: emphasized ? 1.5 : 1,
-        ),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(11),
-        child: Column(
-          children: [
-            Container(
-              height: 52,
-              padding: const EdgeInsets.symmetric(horizontal: 13),
-              decoration: BoxDecoration(
-                color: scheme.surfaceContainerLow,
-                border: Border(
-                  bottom: BorderSide(color: scheme.outlineVariant),
-                ),
-              ),
-              child: Row(
-                children: [
-                  Icon(
-                    isLeft ? Icons.article_outlined : Icons.article_rounded,
-                    size: 18,
-                    color: scheme.primary,
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    isLeft ? '旧文本' : '新文本',
-                    style: Theme.of(context).textTheme.labelLarge,
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      '$fileName${dirty ? ' · 已修改' : ''}',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      textAlign: TextAlign.end,
-                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                        color: dirty ? scheme.primary : scheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            Expanded(
-              child: useWebEditor
-                  ? DesktopWebTextEditor(
-                      controller: webEditorController,
-                      text: webController.text,
-                      selection: webSelection,
-                      onChanged: onWebChanged,
-                      onSelectionChanged: onWebSelectionChanged,
-                      onEditorPointerDown: onEditorPointerDown,
-                      onFind: onFind,
-                      highlights: webHighlights,
-                      backgroundColor: scheme.surfaceContainerLowest,
-                      textColor: scheme.onSurface,
-                      isDark: scheme.brightness == Brightness.dark,
-                      placeholder: isLeft ? '输入或粘贴旧文本' : '输入或粘贴新文本',
-                      onScrollOffsetChanged: onWebScrollChanged,
-                      debugLabel: isLeft
-                          ? 'text-compare-left'
-                          : 'text-compare-right',
-                      autofocus: isLeft,
-                      padding: const EdgeInsets.fromLTRB(14, 12, 14, 18),
-                    )
-                  : CodeEditor(
-                      // Keep the editor state mounted while diff metadata changes.
-                      // Re-mounting CodeEditor resets its internal input connection
-                      // and can make the caret/focus look out of sync with the pane
-                      // that will receive the next paste.
-                      controller: editor,
-                      scrollController: scrollController,
-                      focusNode: focusNode,
-                      shortcutOverrideActions: {
-                        CodeShortcutPasteIntent:
-                            CallbackAction<CodeShortcutPasteIntent>(
-                              onInvoke: (_) => onPaste(),
-                            ),
-                      },
-                      autofocus: false,
-                      wordWrap: false,
-                      autocompleteSymbols: false,
-                      chunkAnalyzer: const _TextCompareChunkAnalyzer(),
-                      onChanged: onChanged,
-                      hint: isLeft ? '输入或粘贴旧文本' : '输入或粘贴新文本',
-                      padding: const EdgeInsets.fromLTRB(14, 12, 14, 18),
-                      style: CodeEditorStyle(
-                        fontSize: 14,
-                        fontHeight: 1.6,
-                        fontFamily: 'Menlo',
-                        fontFamilyFallback: const ['Consolas', 'monospace'],
-                        backgroundColor: scheme.surfaceContainerLowest,
-                        cursorColor: scheme.primary,
-                        cursorLineColor: scheme.primary.withAlpha(24),
-                      ),
-                      indicatorBuilder:
-                          (
-                            context,
-                            editingController,
-                            chunkController,
-                            notifier,
-                          ) {
-                            return TextCompareIndicator(
-                              controller: editingController,
-                              notifier: notifier,
-                              lines: lines,
-                            );
-                          },
-                      leadingDivider: Container(
-                        width: 1,
-                        color: scheme.outlineVariant,
-                      ),
-                    ),
-            ),
-            Container(
-              height: 36,
-              alignment: Alignment.centerRight,
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              decoration: BoxDecoration(
-                color: scheme.surfaceContainerLow,
-                border: Border(top: BorderSide(color: scheme.outlineVariant)),
-              ),
-              child: Text(
-                '${editor.lineCount} 行 · ${text.characters.length} 字符 · ${_formatBytes(utf8.encode(text).length)}',
-                style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                  color: scheme.onSurfaceVariant,
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _CompareStatusBar extends StatelessWidget {
-  const _CompareStatusBar({
-    required this.controller,
-    required this.diffIndex,
-    required this.onPreviousDiff,
-    required this.onNextDiff,
-  });
-
-  final TextCompareController controller;
-  final int diffIndex;
-  final VoidCallback onPreviousDiff;
-  final VoidCallback onNextDiff;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final result = controller.result;
-    final hunks = controller.hunks;
-    final text = switch (controller.status) {
-      TextCompareStatus.idle => '准备就绪',
-      TextCompareStatus.comparing => '正在比对文本',
-      TextCompareStatus.unchanged => '两侧文本一致',
-      TextCompareStatus.changed =>
-        '新增 ${result?.addedCount ?? 0} 行 · 删除 ${result?.removedCount ?? 0} 行 · 修改 ${result?.modifiedCount ?? 0} 行',
-      TextCompareStatus.stale => '内容已更改，请重新比对',
-      TextCompareStatus.error => controller.errorMessage ?? '比对失败',
-    };
-    final color = switch (controller.status) {
-      TextCompareStatus.error => scheme.error,
-      TextCompareStatus.changed ||
-      TextCompareStatus.stale => const Color(0xFFD18A16),
-      TextCompareStatus.unchanged => const Color(0xFF2E9B63),
-      _ => scheme.onSurfaceVariant,
-    };
-    final rules = controller.options.ruleLabels;
-    return Container(
-      height: 38,
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      decoration: BoxDecoration(
-        color: scheme.surfaceContainerLow,
-        border: Border(top: BorderSide(color: scheme.outlineVariant)),
-      ),
-      child: Row(
-        children: [
-          Icon(
-            controller.isComparing
-                ? Icons.sync_rounded
-                : Icons.info_outline_rounded,
-            size: 15,
-            color: color,
-          ),
-          const SizedBox(width: 7),
-          Expanded(
-            child: Text(
-              text,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: Theme.of(
-                context,
-              ).textTheme.labelMedium?.copyWith(color: color),
-            ),
-          ),
-          if (rules.isNotEmpty) ...[
-            _StatusCaption(text: '规则：${rules.join('、')}'),
-            const SizedBox(width: 12),
-          ],
-          _StatusCaption(text: '上限 10 MiB / 侧'),
-          const SizedBox(width: 12),
-          _DiffNavigator(
-            hunks: controller.result == null ? 0 : hunks.length,
-            ready: controller.result != null,
-            diffIndex: diffIndex,
-            onPrevious: onPreviousDiff,
-            onNext: onNextDiff,
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _StatusCaption extends StatelessWidget {
-  const _StatusCaption({required this.text});
-
-  final String text;
-
-  @override
-  Widget build(BuildContext context) {
-    return Text(
-      text,
-      maxLines: 1,
-      overflow: TextOverflow.ellipsis,
-      style: Theme.of(context).textTheme.labelSmall?.copyWith(
-        color: Theme.of(context).colorScheme.onSurfaceVariant,
-      ),
-    );
-  }
-}
-
-/// Counter plus the previous/next difference buttons. Mirrors the `F7` /
-/// `Shift+F7` shortcuts that ship with every mainstream comparer.
-class _DiffNavigator extends StatelessWidget {
-  const _DiffNavigator({
-    required this.hunks,
-    required this.ready,
-    required this.diffIndex,
-    required this.onPrevious,
-    required this.onNext,
-  });
-
-  final int hunks;
-  final bool ready;
-  final int diffIndex;
-  final VoidCallback onPrevious;
-  final VoidCallback onNext;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final enabled = hunks > 0;
-    final String label;
-    if (!ready) {
-      label = '差异 –';
-    } else if (hunks == 0) {
-      label = '无差异';
-    } else {
-      label = diffIndex < 0 ? '差异 $hunks 处' : '差异 ${diffIndex + 1}/$hunks';
-    }
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        SizedBox(
-          width: 66,
-          child: Text(
-            label,
-            textAlign: TextAlign.end,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: Theme.of(context).textTheme.labelMedium?.copyWith(
-              color: enabled ? scheme.onSurface : scheme.onSurfaceVariant,
-            ),
-          ),
-        ),
-        _NavButton(
-          tooltip: '上一个差异 (⇧F7)',
-          icon: Icons.keyboard_arrow_up_rounded,
-          onPressed: enabled ? onPrevious : null,
-        ),
-        _NavButton(
-          tooltip: '下一个差异 (F7)',
-          icon: Icons.keyboard_arrow_down_rounded,
-          onPressed: enabled ? onNext : null,
-        ),
-      ],
-    );
-  }
-}
-
-class _NavButton extends StatelessWidget {
-  const _NavButton({
-    required this.tooltip,
-    required this.icon,
-    required this.onPressed,
-  });
-
-  final String tooltip;
-  final IconData icon;
-  final VoidCallback? onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    return IconButton(
-      tooltip: tooltip,
-      onPressed: onPressed,
-      icon: Icon(icon, size: 18),
-      padding: EdgeInsets.zero,
-      visualDensity: VisualDensity.compact,
-      constraints: const BoxConstraints.tightFor(width: 26, height: 26),
-    );
-  }
-}
-
-String _formatBytes(int bytes) {
-  if (bytes < 1024) return '$bytes B';
-  if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KiB';
-  return '${(bytes / (1024 * 1024)).toStringAsFixed(2)} MiB';
 }

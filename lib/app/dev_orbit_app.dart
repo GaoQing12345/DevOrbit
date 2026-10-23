@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../core/desktop/desktop_window_shell.dart';
 import '../core/modules/tool_registry.dart';
+import '../core/settings/app_settings.dart';
 import '../core/settings/settings_store.dart';
 import '../features/launcher/radial_launcher.dart';
 import '../features/toolbox/toolbox_shell.dart';
@@ -27,12 +28,9 @@ class DevOrbitApp extends StatefulWidget {
 }
 
 class _DevOrbitAppState extends State<DevOrbitApp> {
-  late final Listenable _appListenable;
-
   @override
   void initState() {
     super.initState();
-    _appListenable = Listenable.merge([widget.controller, widget.settings]);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       widget.controller.afterFirstFrame(startHidden: widget.startHidden);
     });
@@ -40,25 +38,33 @@ class _DevOrbitAppState extends State<DevOrbitApp> {
 
   @override
   Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: _appListenable,
-      builder: (context, child) {
+    // Only the theme mode reaches MaterialApp, so settings changes rebuild the
+    // app shell while view-mode changes stay inside `home`.
+    return ValueListenableBuilder<AppSettings>(
+      valueListenable: widget.settings,
+      builder: (context, settings, child) {
         return MaterialApp(
           title: 'DevOrbit',
           debugShowCheckedModeBanner: false,
           theme: AppTheme.light(),
           darkTheme: AppTheme.dark(),
-          themeMode: widget.settings.value.themeMode,
-          home: DesktopEscapeCloseRegion(
+          themeMode: settings.themeMode,
+          home: child,
+        );
+      },
+      child: AnimatedBuilder(
+        animation: widget.controller,
+        builder: (context, _) {
+          return DesktopEscapeCloseRegion(
             onClose: widget.controller.hide,
             child: _AppViewport(
               controller: widget.controller,
               registry: widget.registry,
               settings: widget.settings,
             ),
-          ),
-        );
-      },
+          );
+        },
+      ),
     );
   }
 }

@@ -8,6 +8,7 @@ import '../../core/desktop/desktop_clipboard_focus_restorer.dart';
 import '../../core/desktop/desktop_text_selection.dart';
 import '../../core/desktop/desktop_window_shell.dart';
 import '../../core/desktop/web_text_editor.dart';
+import '../../core/widgets/mac_ui.dart';
 import 'translation_language.dart';
 import 'translator_controller.dart';
 
@@ -29,7 +30,7 @@ class _TranslatorPageState extends State<TranslatorPage> {
 
   bool get _usesWebEditor =>
       !kIsWeb &&
-      (Platform.isMacOS || Platform.isWindows) &&
+      Platform.isMacOS &&
       Platform.environment['FLUTTER_TEST'] != 'true';
 
   @override
@@ -100,7 +101,10 @@ class _TranslatorPageState extends State<TranslatorPage> {
     final selection = _sourceController.selection;
     return NativeTextSelection(
       baseOffset: selection.baseOffset.clamp(0, _sourceController.text.length),
-      extentOffset: selection.extentOffset.clamp(0, _sourceController.text.length),
+      extentOffset: selection.extentOffset.clamp(
+        0,
+        _sourceController.text.length,
+      ),
     );
   }
 
@@ -192,7 +196,7 @@ class _TranslatorPageState extends State<TranslatorPage> {
                 ),
                 Expanded(
                   child: Padding(
-                    padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
+                    padding: const EdgeInsets.fromLTRB(12, 12, 12, 10),
                     child: LayoutBuilder(
                       builder: (context, constraints) {
                         final horizontal = constraints.maxWidth >= 720;
@@ -208,48 +212,49 @@ class _TranslatorPageState extends State<TranslatorPage> {
                             footer: '${widget.controller.sourceText.length} 字符',
                             icon: Icons.edit_note_rounded,
                             emphasized: _sourceFocusNode.hasFocus,
-                              child: _usesWebEditor
-                                  ? DesktopWebTextEditor(
-                                      key: const ValueKey('translator-source'),
-                                      text: _sourceController.text,
-                                      selection: _nativeSelection(),
-                                      onChanged: _onWebChanged,
-                                      onSelectionChanged:
-                                          _onWebSelectionChanged,
-                                      backgroundColor: Theme.of(context)
-                                          .colorScheme
-                                          .surfaceContainerLowest,
-                                      textColor:
-                                          Theme.of(context).colorScheme.onSurface,
-                                      isDark: Theme.of(context).brightness ==
-                                          Brightness.dark,
-                                      placeholder: '输入或粘贴文本',
-                                      debugLabel: 'translator-source',
-                                      fontSize: 15,
-                                      padding: const EdgeInsets.all(18),
+                            child: _usesWebEditor
+                                ? DesktopWebTextEditor(
+                                    key: const ValueKey('translator-source'),
+                                    text: _sourceController.text,
+                                    selection: _nativeSelection(),
+                                    onChanged: _onWebChanged,
+                                    onSelectionChanged: _onWebSelectionChanged,
+                                    backgroundColor: Theme.of(
+                                      context,
+                                    ).colorScheme.surfaceContainerLowest,
+                                    textColor: Theme.of(
+                                      context,
+                                    ).colorScheme.onSurface,
+                                    isDark:
+                                        Theme.of(context).brightness ==
+                                        Brightness.dark,
+                                    placeholder: '输入或粘贴文本',
+                                    debugLabel: 'translator-source',
+                                    fontSize: 13,
+                                    padding: const EdgeInsets.all(14),
                                   )
-                                  : TextField(
-                                      key: const ValueKey('translator-source'),
-                                      controller: _sourceController,
-                                      focusNode: _sourceFocusNode,
-                                      autofocus: true,
-                                      expands: true,
-                                      maxLines: null,
-                                      minLines: null,
-                                      textAlignVertical: TextAlignVertical.top,
-                                      style: const TextStyle(
-                                        fontSize: 15,
-                                        height: 1.65,
-                                      ),
-                                      decoration: const InputDecoration(
-                                        hintText: '输入或粘贴文本',
-                                        border: InputBorder.none,
-                                        enabledBorder: InputBorder.none,
-                                        focusedBorder: InputBorder.none,
-                                        filled: false,
-                                        contentPadding: EdgeInsets.all(18),
-                                      ),
-                                      onChanged: widget.controller.updateSource,
+                                : TextField(
+                                    key: const ValueKey('translator-source'),
+                                    controller: _sourceController,
+                                    focusNode: _sourceFocusNode,
+                                    autofocus: true,
+                                    expands: true,
+                                    maxLines: null,
+                                    minLines: null,
+                                    textAlignVertical: TextAlignVertical.top,
+                                    style: const TextStyle(
+                                      fontSize: 13,
+                                      height: 1.6,
+                                    ),
+                                    decoration: const InputDecoration(
+                                      hintText: '输入或粘贴文本',
+                                      border: InputBorder.none,
+                                      enabledBorder: InputBorder.none,
+                                      focusedBorder: InputBorder.none,
+                                      filled: false,
+                                      contentPadding: EdgeInsets.all(14),
+                                    ),
+                                    onChanged: widget.controller.updateSource,
                                   ),
                           ),
                         );
@@ -321,124 +326,124 @@ class _Toolbar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Material(
-      color: scheme.surfaceContainerLow,
-      child: Container(
-        height: 72,
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-        decoration: BoxDecoration(
-          border: Border(bottom: BorderSide(color: scheme.outlineVariant)),
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    return MacToolbar(
+      leading: [
+        const _LanguageChip(label: '自动检测', icon: Icons.auto_awesome_rounded),
+        IconButton(
+          tooltip: '交换原文和译文',
+          onPressed:
+              controller.translatedText.isEmpty ||
+                  controller.detectedSourceLanguage == null
+              ? null
+              : controller.swap,
+          icon: const Icon(Icons.swap_horiz_rounded),
         ),
-        child: Row(
-          children: [
-            const _LanguageField(
-              label: '自动检测',
-              icon: Icons.auto_awesome_rounded,
-            ),
-            const SizedBox(width: 8),
-            IconButton(
-              tooltip: '交换原文和译文',
-              onPressed:
-                  controller.translatedText.isEmpty ||
-                      controller.detectedSourceLanguage == null
-                  ? null
-                  : controller.swap,
-              icon: const Icon(Icons.swap_horiz_rounded),
-            ),
-            const SizedBox(width: 8),
-            DropdownMenu<String>(
-              key: ValueKey(controller.targetLanguage),
-              width: 170,
-              initialSelection: controller.targetLanguage,
-              enableFilter: true,
-              label: const Text('翻译为'),
-              dropdownMenuEntries: [
-                for (final language in translationLanguages)
-                  DropdownMenuEntry(
-                    value: language.code,
-                    label: language.label,
-                  ),
-              ],
-              onSelected: (value) {
-                if (value != null) controller.updateTargetLanguage(value);
-              },
-            ),
-            const Spacer(),
-            if (controller.isTranslating)
-              OutlinedButton.icon(
-                onPressed: controller.cancel,
-                icon: const Icon(Icons.stop_rounded),
-                label: const Text('取消'),
-              )
-            else
-              FilledButton.icon(
-                onPressed: controller.sourceText.trim().isEmpty
-                    ? null
-                    : controller.translate,
-                icon: const Icon(Icons.translate_rounded),
-                label: const Text('翻译'),
-              ),
-            const SizedBox(width: 10),
-            Container(width: 1, height: 24, color: scheme.outlineVariant),
-            const SizedBox(width: 6),
-            IconButton(
-              tooltip: '清空',
-              onPressed:
-                  controller.sourceText.isEmpty &&
-                      controller.translatedText.isEmpty
-                  ? null
-                  : controller.clear,
-              icon: const Icon(Icons.delete_outline_rounded),
-            ),
-            IconButton(
-              tooltip: controller.hasApiKey
-                  ? '更改 DeepL API Key'
-                  : '配置 DeepL API Key',
-              onPressed: initialized ? onConfigureApiKey : null,
-              icon: Icon(
-                controller.hasApiKey
-                    ? Icons.key_rounded
-                    : Icons.key_off_rounded,
-              ),
-            ),
-          ],
+        Text(
+          '翻译为',
+          style: theme.textTheme.labelSmall?.copyWith(
+            color: scheme.onSurfaceVariant,
+          ),
         ),
-      ),
+        SizedBox(
+          width: 146,
+          child: DropdownMenu<String>(
+            key: ValueKey(controller.targetLanguage),
+            initialSelection: controller.targetLanguage,
+            enableFilter: true,
+            textStyle: theme.textTheme.bodyMedium,
+            inputDecorationTheme: InputDecorationTheme(
+              filled: true,
+              fillColor: scheme.surfaceContainerLowest,
+              isDense: true,
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 9,
+                vertical: 5,
+              ),
+              border: _popupBorder(scheme.outlineVariant),
+              enabledBorder: _popupBorder(scheme.outlineVariant),
+              focusedBorder: _popupBorder(scheme.primary),
+            ),
+            dropdownMenuEntries: [
+              for (final language in translationLanguages)
+                DropdownMenuEntry(value: language.code, label: language.label),
+            ],
+            onSelected: (value) {
+              if (value != null) controller.updateTargetLanguage(value);
+            },
+          ),
+        ),
+      ],
+      trailing: [
+        if (controller.isTranslating)
+          OutlinedButton.icon(
+            onPressed: controller.cancel,
+            icon: const Icon(Icons.stop_rounded, size: 14),
+            label: const Text('取消'),
+          )
+        else
+          FilledButton.icon(
+            onPressed: controller.sourceText.trim().isEmpty
+                ? null
+                : controller.translate,
+            icon: const Icon(Icons.translate_rounded, size: 14),
+            label: const Text('翻译'),
+          ),
+        IconButton(
+          tooltip: '清空',
+          onPressed:
+              controller.sourceText.isEmpty && controller.translatedText.isEmpty
+              ? null
+              : controller.clear,
+          icon: const Icon(Icons.delete_outline_rounded),
+        ),
+        IconButton(
+          tooltip: controller.hasApiKey
+              ? '更改 DeepL API Key'
+              : '配置 DeepL API Key',
+          onPressed: initialized ? onConfigureApiKey : null,
+          icon: Icon(
+            controller.hasApiKey ? Icons.key_rounded : Icons.key_off_rounded,
+          ),
+        ),
+      ],
+    );
+  }
+
+  OutlineInputBorder _popupBorder(Color color) {
+    return OutlineInputBorder(
+      borderRadius: BorderRadius.circular(6),
+      borderSide: BorderSide(color: color),
     );
   }
 }
 
-class _LanguageField extends StatelessWidget {
-  const _LanguageField({required this.label, required this.icon});
+/// Read-only pill showing the source language; DeepL detects it, so this is a
+/// label rather than a control.
+class _LanguageChip extends StatelessWidget {
+  const _LanguageChip({required this.label, required this.icon});
 
   final String label;
   final IconData icon;
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     return Container(
-      width: 132,
-      height: 48,
-      alignment: Alignment.centerLeft,
-      padding: const EdgeInsets.symmetric(horizontal: 12),
+      height: 28,
+      padding: const EdgeInsets.symmetric(horizontal: 9),
       decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surfaceContainer,
-        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+        color: theme.colorScheme.surfaceContainerLow,
         borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: theme.colorScheme.outlineVariant),
       ),
       child: Row(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 16, color: Theme.of(context).colorScheme.primary),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.labelLarge,
-            ),
-          ),
+          Icon(icon, size: 13, color: theme.colorScheme.onSurfaceVariant),
+          const SizedBox(width: 6),
+          Text(label, style: theme.textTheme.labelLarge),
         ],
       ),
     );
@@ -464,94 +469,22 @@ class _TranslationPane extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: scheme.surfaceContainerLow,
-        border: Border.all(
-          color: emphasized ? scheme.primary : scheme.outlineVariant,
-          width: emphasized ? 1.5 : 1,
-        ),
-        borderRadius: BorderRadius.circular(8),
-        boxShadow: [
-          BoxShadow(
-            color: scheme.shadow.withAlpha(18),
-            blurRadius: 18,
-            offset: const Offset(0, 5),
-          ),
-        ],
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(7),
-        child: Column(
-          children: [
-            SizedBox(
-              height: 48,
-              child: Padding(
-                padding: const EdgeInsets.only(left: 14, right: 7),
-                child: Row(
-                  children: [
-                    Container(
-                      width: 28,
-                      height: 28,
-                      alignment: Alignment.center,
-                      decoration: BoxDecoration(
-                        color: emphasized
-                            ? scheme.primaryContainer
-                            : scheme.surfaceContainer,
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: Icon(
-                        icon,
-                        size: 16,
-                        color: emphasized
-                            ? scheme.onPrimaryContainer
-                            : scheme.onSurfaceVariant,
-                      ),
-                    ),
-                    const SizedBox(width: 9),
-                    Expanded(
-                      child: Text(
-                        title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.labelLarge,
-                      ),
-                    ),
-                    ?trailing,
-                  ],
-                ),
+    final theme = Theme.of(context);
+    return MacPanel(
+      title: title,
+      icon: icon,
+      trailing: trailing,
+      emphasized: emphasized,
+      footer: footer.isEmpty
+          ? null
+          : Text(
+              footer,
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+                fontFeatures: const [FontFeature.tabularFigures()],
               ),
             ),
-            Divider(height: 1, color: scheme.outlineVariant),
-            Expanded(
-              child: ColoredBox(
-                color: scheme.surfaceContainerLowest,
-                child: child,
-              ),
-            ),
-            if (footer.isNotEmpty) ...[
-              Divider(height: 1, color: scheme.outlineVariant),
-              SizedBox(
-                height: 32,
-                child: Align(
-                  alignment: Alignment.centerRight,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    child: Text(
-                      footer,
-                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                        color: scheme.onSurfaceVariant,
-                        fontFeatures: const [FontFeature.tabularFigures()],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ],
-        ),
-      ),
+      child: child,
     );
   }
 }
@@ -574,12 +507,12 @@ class _TranslationResult extends StatelessWidget {
     }
     return SelectionArea(
       child: SingleChildScrollView(
-        padding: const EdgeInsets.all(18),
+        padding: const EdgeInsets.all(14),
         child: SizedBox(
           width: double.infinity,
           child: Text(
             controller.translatedText,
-            style: const TextStyle(fontSize: 15, height: 1.65),
+            style: const TextStyle(fontSize: 13, height: 1.6),
           ),
         ),
       ),
@@ -595,25 +528,19 @@ class _CenteredState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = Theme.of(context).colorScheme.onSurfaceVariant;
+    final theme = Theme.of(context);
+    final color = theme.colorScheme.onSurfaceVariant;
     return Center(
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
-        decoration: BoxDecoration(
-          color: Theme.of(context).colorScheme.surfaceContainerLow,
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            IconTheme(
-              data: IconThemeData(color: color),
-              child: icon,
-            ),
-            const SizedBox(height: 8),
-            Text(text, style: TextStyle(color: color)),
-          ],
-        ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          IconTheme(
+            data: IconThemeData(color: color.withAlpha(170)),
+            child: icon,
+          ),
+          const SizedBox(height: 8),
+          Text(text, style: theme.textTheme.bodyMedium?.copyWith(color: color)),
+        ],
       ),
     );
   }
@@ -626,27 +553,27 @@ class _TranslationSkeleton extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return Padding(
-      padding: const EdgeInsets.all(18),
+      padding: const EdgeInsets.all(14),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const SizedBox.square(
-            dimension: 18,
+            dimension: 14,
             child: CircularProgressIndicator(strokeWidth: 2),
           ),
-          const SizedBox(height: 22),
+          const SizedBox(height: 18),
           for (final width in [0.88, 0.72, 0.81, 0.56]) ...[
             FractionallySizedBox(
               widthFactor: width,
               child: Container(
-                height: 10,
+                height: 8,
                 decoration: BoxDecoration(
-                  color: scheme.surfaceContainerHighest,
-                  borderRadius: BorderRadius.circular(3),
+                  color: scheme.surfaceContainerHigh,
+                  borderRadius: BorderRadius.circular(4),
                 ),
               ),
             ),
-            const SizedBox(height: 13),
+            const SizedBox(height: 11),
           ],
         ],
       ),
@@ -661,46 +588,34 @@ class _StatusBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Container(
-      height: 36,
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      decoration: BoxDecoration(
-        color: scheme.surfaceContainerLow,
-        border: Border(top: BorderSide(color: scheme.outlineVariant)),
-      ),
-      child: Row(
-        children: [
-          Icon(
-            controller.errorMessage == null
-                ? controller.hasApiKey
-                      ? Icons.lock_outline_rounded
-                      : Icons.key_off_rounded
-                : Icons.error_outline_rounded,
-            size: 16,
-            color: controller.errorMessage == null
-                ? scheme.onSurfaceVariant
-                : scheme.error,
-          ),
-          const SizedBox(width: 7),
-          Expanded(
-            child: Text(
-              controller.errorMessage ??
-                  (controller.hasApiKey
-                      ? 'DeepL API Free'
-                      : '尚未配置 DeepL API Key'),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: controller.errorMessage == null
-                    ? scheme.onSurfaceVariant
-                    : scheme.error,
-              ),
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final hasError = controller.errorMessage != null;
+    return MacStatusBar(
+      leading: [
+        Icon(
+          hasError
+              ? Icons.error_outline_rounded
+              : controller.hasApiKey
+              ? Icons.lock_outline_rounded
+              : Icons.key_off_rounded,
+          size: 13,
+          color: hasError ? scheme.error : scheme.onSurfaceVariant,
+        ),
+        Expanded(
+          child: Text(
+            controller.errorMessage ??
+                (controller.hasApiKey
+                    ? 'DeepL API Free'
+                    : '尚未配置 DeepL API Key'),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.labelSmall?.copyWith(
+              color: hasError ? scheme.error : scheme.onSurfaceVariant,
             ),
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }

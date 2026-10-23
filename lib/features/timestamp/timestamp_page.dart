@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 import '../../core/desktop/desktop_clipboard_focus_restorer.dart';
 import '../../core/desktop/desktop_text_selection.dart';
 import '../../core/desktop/web_text_editor.dart';
+import '../../core/widgets/mac_ui.dart';
 import 'timestamp_converter.dart';
 
 class TimestampPage extends StatefulWidget {
@@ -32,7 +33,7 @@ class _TimestampPageState extends State<TimestampPage> {
 
   bool get _usesWebEditor =>
       !kIsWeb &&
-      (Platform.isMacOS || Platform.isWindows) &&
+      Platform.isMacOS &&
       Platform.environment['FLUTTER_TEST'] != 'true';
 
   DateTime _readNow() => (widget.now ?? DateTime.now)().toLocal();
@@ -206,11 +207,11 @@ class _TimestampPageState extends State<TimestampPage> {
       child: Material(
         color: Theme.of(context).colorScheme.surfaceContainerLowest,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(18, 18, 18, 16),
+          padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
           child: Column(
             children: [
               _CurrentTimeSection(now: _readNow, onCopy: _copyValue),
-              const SizedBox(height: 14),
+              const SizedBox(height: 10),
               Expanded(
                 child: LayoutBuilder(
                   builder: (context, constraints) {
@@ -248,7 +249,7 @@ class _TimestampPageState extends State<TimestampPage> {
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
                           Expanded(child: timestampPanel),
-                          const SizedBox(width: 14),
+                          const SizedBox(width: 10),
                           Expanded(child: dateTimePanel),
                         ],
                       );
@@ -256,7 +257,7 @@ class _TimestampPageState extends State<TimestampPage> {
                     return ListView(
                       children: [
                         timestampPanel,
-                        const SizedBox(height: 14),
+                        const SizedBox(height: 10),
                         dateTimePanel,
                       ],
                     );
@@ -310,58 +311,52 @@ class _CurrentTimeSectionState extends State<_CurrentTimeSection> {
     final dateTime = TimestampConverter.formatDateTime(_now);
     final seconds = current.seconds.toString();
     final milliseconds = current.milliseconds.toString();
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(18, 15, 12, 14),
-      decoration: BoxDecoration(
-        color: scheme.surfaceContainerLow,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: scheme.outlineVariant),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+    return MacPanel(
+      expand: false,
+      padding: const EdgeInsets.fromLTRB(14, 8, 8, 8),
+      child: Wrap(
+        spacing: 20,
+        runSpacing: 6,
+        crossAxisAlignment: WrapCrossAlignment.center,
         children: [
-          Text(
-            '当前本地时间',
-            style: theme.textTheme.labelMedium?.copyWith(
-              color: scheme.onSurfaceVariant,
-            ),
-          ),
-          const SizedBox(height: 5),
-          Row(
+          Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Expanded(
-                child: SelectableText(
-                  dateTime,
-                  style: theme.textTheme.headlineSmall?.copyWith(
-                    fontWeight: FontWeight.w600,
-                    fontFeatures: const [FontFeature.tabularFigures()],
-                  ),
+              Text(
+                '当前本地时间',
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: scheme.onSurfaceVariant,
                 ),
               ),
-              IconButton(
-                tooltip: '复制本地时间',
-                onPressed: () => widget.onCopy(dateTime, '本地时间'),
-                icon: const Icon(Icons.copy_rounded),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  SelectableText(
+                    dateTime,
+                    style: theme.textTheme.titleLarge?.copyWith(
+                      fontFeatures: const [FontFeature.tabularFigures()],
+                    ),
+                  ),
+                  const SizedBox(width: 2),
+                  IconButton(
+                    tooltip: '复制本地时间',
+                    onPressed: () => widget.onCopy(dateTime, '本地时间'),
+                    icon: const Icon(Icons.copy_rounded, size: 13),
+                  ),
+                ],
               ),
             ],
           ),
-          const SizedBox(height: 8),
-          Wrap(
-            spacing: 24,
-            runSpacing: 8,
-            children: [
-              _InlineValue(
-                label: '秒',
-                value: seconds,
-                onCopy: () => widget.onCopy(seconds, '秒级时间戳'),
-              ),
-              _InlineValue(
-                label: '毫秒',
-                value: milliseconds,
-                onCopy: () => widget.onCopy(milliseconds, '毫秒级时间戳'),
-              ),
-            ],
+          _InlineValue(
+            label: '秒',
+            value: seconds,
+            onCopy: () => widget.onCopy(seconds, '秒级时间戳'),
+          ),
+          _InlineValue(
+            label: '毫秒',
+            value: milliseconds,
+            onCopy: () => widget.onCopy(milliseconds, '毫秒级时间戳'),
           ),
         ],
       ),
@@ -387,11 +382,12 @@ class _InlineValue extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         Text(
-          '$label  ',
-          style: theme.textTheme.labelMedium?.copyWith(
+          label,
+          style: theme.textTheme.labelSmall?.copyWith(
             color: theme.colorScheme.onSurfaceVariant,
           ),
         ),
+        const SizedBox(width: 6),
         SelectableText(
           value,
           style: theme.textTheme.bodyMedium?.copyWith(
@@ -399,10 +395,9 @@ class _InlineValue extends StatelessWidget {
           ),
         ),
         IconButton(
-          tooltip: '复制$label级时间戳',
+          tooltip: '复制$label时间戳',
           onPressed: onCopy,
-          icon: const Icon(Icons.copy_rounded, size: 17),
-          constraints: const BoxConstraints.tightFor(width: 32, height: 32),
+          icon: const Icon(Icons.copy_rounded, size: 13),
         ),
       ],
     );
@@ -439,9 +434,11 @@ class _TimestampToDateTimePanel extends StatelessWidget {
     final result = conversion == null
         ? null
         : TimestampConverter.formatDateTime(conversion!.dateTime);
-    return _ToolPanel(
-      icon: Icons.numbers_rounded,
+    return MacPanel(
       title: '时间戳转日期',
+      icon: Icons.numbers_rounded,
+      expand: false,
+      padding: const EdgeInsets.all(14),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -449,7 +446,7 @@ class _TimestampToDateTimePanel extends StatelessWidget {
             children: [
               if (useWebEditor)
                 SizedBox(
-                  height: 58,
+                  height: 46,
                   child: DesktopWebTextEditor(
                     key: const ValueKey('timestamp-input'),
                     text: controller.text,
@@ -459,13 +456,14 @@ class _TimestampToDateTimePanel extends StatelessWidget {
                     singleLine: true,
                     placeholder: '1710000000 或 1710000000000',
                     debugLabel: 'timestamp-input',
+                    fontSize: 13,
                     backgroundColor: Theme.of(
                       context,
                     ).colorScheme.surfaceContainerLowest,
                     textColor: Theme.of(context).colorScheme.onSurface,
                     isDark: Theme.of(context).brightness == Brightness.dark,
                     autofocus: true,
-                    padding: const EdgeInsets.fromLTRB(14, 18, 52, 10),
+                    padding: const EdgeInsets.fromLTRB(12, 13, 44, 7),
                   ),
                 )
               else
@@ -480,13 +478,12 @@ class _TimestampToDateTimePanel extends StatelessWidget {
                         editableTextState: editableTextState,
                       ),
                   decoration: InputDecoration(
-                    labelText: '时间戳',
                     hintText: '1710000000 或 1710000000000',
                     errorText: error,
                     suffixIcon: IconButton(
                       tooltip: '粘贴',
                       onPressed: onPaste,
-                      icon: const Icon(Icons.content_paste_rounded),
+                      icon: const Icon(Icons.content_paste_rounded, size: 13),
                     ),
                   ),
                 ),
@@ -497,20 +494,22 @@ class _TimestampToDateTimePanel extends StatelessWidget {
                   child: IconButton(
                     tooltip: '粘贴',
                     onPressed: onPaste,
-                    icon: const Icon(Icons.content_paste_rounded),
+                    icon: const Icon(Icons.content_paste_rounded, size: 13),
                   ),
                 ),
             ],
           ),
           if (error != null && useWebEditor)
             Padding(
-              padding: const EdgeInsets.only(top: 4, left: 14),
+              padding: const EdgeInsets.only(top: 4, left: 2),
               child: Text(
                 error!,
-                style: TextStyle(color: Theme.of(context).colorScheme.error),
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: Theme.of(context).colorScheme.error,
+                ),
               ),
             ),
-          const SizedBox(height: 18),
+          const SizedBox(height: 14),
           _ResultBlock(
             label: conversion == null
                 ? '本地时间'
@@ -553,15 +552,23 @@ class _DateTimeToTimestampPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     final seconds = conversion?.seconds.toString();
     final milliseconds = conversion?.milliseconds.toString();
-    return _ToolPanel(
-      icon: Icons.calendar_month_rounded,
+    return MacPanel(
       title: '日期转时间戳',
-      trailing: OutlinedButton.icon(
+      icon: Icons.calendar_month_rounded,
+      expand: false,
+      padding: const EdgeInsets.all(14),
+      trailing: TextButton.icon(
         onPressed: onUseCurrentTime,
-        icon: const Icon(Icons.schedule_rounded, size: 17),
+        icon: const Icon(Icons.schedule_rounded, size: 13),
         label: const Text('使用当前时间'),
+        style: TextButton.styleFrom(
+          minimumSize: const Size(0, 22),
+          padding: const EdgeInsets.symmetric(horizontal: 7),
+          textStyle: theme.textTheme.labelMedium,
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -570,7 +577,7 @@ class _DateTimeToTimestampPanel extends StatelessWidget {
             children: [
               if (useWebEditor)
                 SizedBox(
-                  height: 58,
+                  height: 46,
                   child: DesktopWebTextEditor(
                     key: const ValueKey('datetime-input'),
                     text: controller.text,
@@ -580,13 +587,14 @@ class _DateTimeToTimestampPanel extends StatelessWidget {
                     singleLine: true,
                     placeholder: '2026-08-17 14:30:00',
                     debugLabel: 'datetime-input',
+                    fontSize: 13,
                     backgroundColor: Theme.of(
                       context,
                     ).colorScheme.surfaceContainerLowest,
                     textColor: Theme.of(context).colorScheme.onSurface,
                     isDark: Theme.of(context).brightness == Brightness.dark,
                     autofocus: false,
-                    padding: const EdgeInsets.fromLTRB(14, 18, 52, 10),
+                    padding: const EdgeInsets.fromLTRB(12, 13, 44, 7),
                   ),
                 )
               else
@@ -600,13 +608,12 @@ class _DateTimeToTimestampPanel extends StatelessWidget {
                         editableTextState: editableTextState,
                       ),
                   decoration: InputDecoration(
-                    labelText: '本地日期时间',
                     hintText: '2026-08-17 14:30:00',
                     errorText: error,
                     suffixIcon: IconButton(
                       tooltip: '粘贴',
                       onPressed: onPaste,
-                      icon: const Icon(Icons.content_paste_rounded),
+                      icon: const Icon(Icons.content_paste_rounded, size: 13),
                     ),
                   ),
                 ),
@@ -617,20 +624,22 @@ class _DateTimeToTimestampPanel extends StatelessWidget {
                   child: IconButton(
                     tooltip: '粘贴',
                     onPressed: onPaste,
-                    icon: const Icon(Icons.content_paste_rounded),
+                    icon: const Icon(Icons.content_paste_rounded, size: 13),
                   ),
                 ),
             ],
           ),
           if (error != null && useWebEditor)
             Padding(
-              padding: const EdgeInsets.only(top: 4, left: 14),
+              padding: const EdgeInsets.only(top: 4, left: 2),
               child: Text(
                 error!,
-                style: TextStyle(color: Theme.of(context).colorScheme.error),
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: Theme.of(context).colorScheme.error,
+                ),
               ),
             ),
-          const SizedBox(height: 18),
+          const SizedBox(height: 14),
           _ResultBlock(
             label: '秒级时间戳',
             value: seconds,
@@ -644,50 +653,6 @@ class _DateTimeToTimestampPanel extends StatelessWidget {
                 ? null
                 : () => onCopy(milliseconds, '毫秒级时间戳'),
           ),
-        ],
-      ),
-    );
-  }
-}
-
-class _ToolPanel extends StatelessWidget {
-  const _ToolPanel({
-    required this.icon,
-    required this.title,
-    required this.child,
-    this.trailing,
-  });
-
-  final IconData icon;
-  final String title;
-  final Widget child;
-  final Widget? trailing;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
-    return Container(
-      constraints: const BoxConstraints(minHeight: 286),
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: scheme.surfaceContainerLow,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: scheme.outlineVariant),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(icon, color: scheme.primary),
-              const SizedBox(width: 9),
-              Expanded(child: Text(title, style: theme.textTheme.titleMedium)),
-              ?trailing,
-            ],
-          ),
-          const SizedBox(height: 20),
-          child,
         ],
       ),
     );
@@ -709,48 +674,38 @@ class _ResultBlock extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
-    return Container(
-      width: double.infinity,
-      constraints: const BoxConstraints(minHeight: 70),
-      padding: const EdgeInsets.fromLTRB(13, 9, 6, 9),
-      decoration: BoxDecoration(
-        color: scheme.surfaceContainer,
-        borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: scheme.outlineVariant),
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Text(
-                  label,
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    color: scheme.onSurfaceVariant,
-                  ),
+    return Row(
+      children: [
+        Expanded(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                label,
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: scheme.onSurfaceVariant,
                 ),
-                const SizedBox(height: 5),
-                SelectableText(
-                  value ?? '—',
-                  style: theme.textTheme.bodyLarge?.copyWith(
-                    color: value == null
-                        ? scheme.onSurfaceVariant
-                        : scheme.onSurface,
-                    fontFeatures: const [FontFeature.tabularFigures()],
-                  ),
+              ),
+              const SizedBox(height: 2),
+              SelectableText(
+                value ?? '—',
+                style: theme.textTheme.bodyLarge?.copyWith(
+                  color: value == null
+                      ? scheme.onSurfaceVariant
+                      : scheme.onSurface,
+                  fontFeatures: const [FontFeature.tabularFigures()],
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
-          IconButton(
-            tooltip: '复制',
-            onPressed: onCopy,
-            icon: const Icon(Icons.copy_rounded),
-          ),
-        ],
-      ),
+        ),
+        IconButton(
+          tooltip: '复制',
+          onPressed: onCopy,
+          icon: const Icon(Icons.copy_rounded, size: 13),
+        ),
+      ],
     );
   }
 }

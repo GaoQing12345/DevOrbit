@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:hotkey_manager/hotkey_manager.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 
 import '../../app/app_controller.dart';
 import '../../core/settings/app_settings.dart';
 import '../../core/settings/settings_store.dart';
+import '../../core/widgets/mac_ui.dart';
 
 class SettingsPage extends StatelessWidget {
   const SettingsPage({
@@ -20,21 +22,20 @@ class SettingsPage extends StatelessWidget {
     return ValueListenableBuilder<AppSettings>(
       valueListenable: settings,
       builder: (context, value, child) {
-        return ListView(
-          padding: const EdgeInsets.fromLTRB(32, 28, 32, 40),
+        return MacPageScaffold(
+          title: '设置',
           children: [
-            Text('设置', style: Theme.of(context).textTheme.headlineMedium),
-            const SizedBox(height: 24),
-            _SettingsSection(
+            MacGroup(
               title: '启动',
               children: [
-                _SettingsRow(
+                MacRow(
                   title: '全局快捷键',
+                  description: '在任何应用中唤出工具轮盘',
                   trailing: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       HotKeyVirtualView(hotKey: value.hotKey),
-                      const SizedBox(width: 12),
+                      const SizedBox(width: 8),
                       OutlinedButton(
                         onPressed: () => _recordHotKey(context, value.hotKey),
                         child: const Text('更改'),
@@ -43,35 +44,37 @@ class SettingsPage extends StatelessWidget {
                   ),
                 ),
                 if (controller.hotKeyError != null)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 8),
-                    child: Text(
-                      controller.hotKeyError!,
-                      style: TextStyle(
-                        color: Theme.of(context).colorScheme.error,
-                      ),
+                  MacRow(
+                    title: '快捷键无效',
+                    description: controller.hotKeyError,
+                    trailing: Icon(
+                      Icons.error_outline_rounded,
+                      size: 15,
+                      color: Theme.of(context).colorScheme.error,
                     ),
                   ),
-                _SettingsRow(
+                MacRow(
                   title: '开机启动',
-                  trailing: Switch(
+                  description: '登录 macOS 后自动在菜单栏运行',
+                  trailing: _MacSwitch(
                     value: value.launchAtStartup,
                     onChanged: controller.updateLaunchAtStartup,
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 28),
-            _SettingsSection(
+            const SizedBox(height: 20),
+            MacGroup(
               title: '编辑器',
               children: [
-                _SettingsRow(
+                MacRow(
                   title: '缩进',
                   trailing: SegmentedButton<String>(
+                    showSelectedIcon: false,
                     segments: const [
-                      ButtonSegment(value: '2', label: Text('2 空格')),
-                      ButtonSegment(value: '4', label: Text('4 空格')),
-                      ButtonSegment(value: '8', label: Text('8 空格')),
+                      ButtonSegment(value: '2', label: Text('2')),
+                      ButtonSegment(value: '4', label: Text('4')),
+                      ButtonSegment(value: '8', label: Text('8')),
                       ButtonSegment(value: 'tab', label: Text('Tab')),
                     ],
                     selected: {
@@ -90,25 +93,29 @@ class SettingsPage extends StatelessWidget {
                 ),
               ],
             ),
-            const SizedBox(height: 28),
-            _SettingsSection(
+            const SizedBox(height: 20),
+            MacGroup(
               title: '外观',
               children: [
-                _SettingsRow(
+                MacRow(
                   title: '主题',
                   trailing: SegmentedButton<ThemeMode>(
+                    showSelectedIcon: false,
                     segments: const [
                       ButtonSegment(
                         value: ThemeMode.system,
-                        icon: Icon(Icons.brightness_auto_rounded),
+                        icon: Icon(Icons.brightness_auto_rounded, size: 14),
+                        tooltip: '跟随系统',
                       ),
                       ButtonSegment(
                         value: ThemeMode.light,
-                        icon: Icon(Icons.light_mode_outlined),
+                        icon: Icon(Icons.light_mode_outlined, size: 14),
+                        tooltip: '浅色',
                       ),
                       ButtonSegment(
                         value: ThemeMode.dark,
-                        icon: Icon(Icons.dark_mode_outlined),
+                        icon: Icon(Icons.dark_mode_outlined, size: 14),
+                        tooltip: '深色',
                       ),
                     ],
                     selected: {value.themeMode},
@@ -119,24 +126,29 @@ class SettingsPage extends StatelessWidget {
                 ),
               ],
             ),
-            const SizedBox(height: 28),
-            _SettingsSection(
+            const SizedBox(height: 20),
+            MacGroup(
               title: '诊断',
               children: [
-                _SettingsRow(
+                MacRow(
                   title: '剪贴板诊断日志',
-                  trailing: Switch(
+                  description: '排查粘贴问题时记录事件到控制台',
+                  trailing: _MacSwitch(
                     value: value.clipboardTraceEnabled,
                     onChanged: controller.updateClipboardTrace,
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 28),
-            const _SettingsSection(
+            const SizedBox(height: 20),
+            MacGroup(
               title: '关于',
               children: [
-                _SettingsRow(title: 'DevOrbit', trailing: Text('0.1.0')),
+                MacRow(
+                  title: 'DevOrbit',
+                  description: '面向开发者的 macOS 工具箱',
+                  trailing: _VersionLabel(),
+                ),
               ],
             ),
           ],
@@ -151,6 +163,24 @@ class SettingsPage extends StatelessWidget {
       builder: (context) => _HotKeyDialog(current: current),
     );
     if (hotKey != null) await controller.updateHotKey(hotKey);
+  }
+}
+
+/// macOS switch geometry is 38x22; Material's is 52x32, which reads as a web
+/// control. Scaling keeps the Material state animations but matches the size.
+class _MacSwitch extends StatelessWidget {
+  const _MacSwitch({required this.value, required this.onChanged});
+
+  final bool value;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Transform.scale(
+      scale: 0.74,
+      alignment: Alignment.centerRight,
+      child: Switch(value: value, onChanged: onChanged),
+    );
   }
 }
 
@@ -178,22 +208,22 @@ class _HotKeyDialogState extends State<_HotKeyDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return AlertDialog(
       title: const Text('设置全局快捷键'),
       content: SizedBox(
-        width: 340,
+        width: 320,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Container(
-              height: 64,
+              height: 62,
               alignment: Alignment.center,
               decoration: BoxDecoration(
-                border: Border.all(
-                  color: Theme.of(context).colorScheme.outline,
-                ),
-                borderRadius: BorderRadius.circular(6),
+                color: scheme.surfaceContainerLow,
+                border: Border.all(color: scheme.outlineVariant),
+                borderRadius: BorderRadius.circular(8),
               ),
               child: HotKeyRecorder(
                 initalHotKey: widget.current,
@@ -208,15 +238,16 @@ class _HotKeyDialogState extends State<_HotKeyDialog> {
               ),
             ),
             if (_error != null) ...[
-              const SizedBox(height: 10),
+              const SizedBox(height: 8),
               Text(
                 _error!,
-                style: TextStyle(color: Theme.of(context).colorScheme.error),
+                style: TextStyle(color: scheme.error, fontSize: 12),
               ),
             ],
           ],
         ),
       ),
+      actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
       actions: [
         TextButton(
           onPressed: () => Navigator.pop(context),
@@ -228,60 +259,30 @@ class _HotKeyDialogState extends State<_HotKeyDialog> {
   }
 }
 
-class _SettingsSection extends StatelessWidget {
-  const _SettingsSection({required this.title, required this.children});
+/// Shows the version the bundle was built with instead of a hard-coded string
+/// that goes stale on the first release bump.
+class _VersionLabel extends StatelessWidget {
+  const _VersionLabel();
 
-  final String title;
-  final List<Widget> children;
+  // The bundle version cannot change while the process runs.
+  static final Future<PackageInfo> _info = PackageInfo.fromPlatform();
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(title, style: Theme.of(context).textTheme.titleMedium),
-        const SizedBox(height: 10),
-        DecoratedBox(
-          decoration: BoxDecoration(
-            border: Border.all(
-              color: Theme.of(context).colorScheme.outlineVariant,
-            ),
-            borderRadius: BorderRadius.circular(6),
-          ),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 18),
-            child: Column(
-              children: [
-                for (var index = 0; index < children.length; index++) ...[
-                  children[index],
-                  if (index < children.length - 1) const Divider(height: 1),
-                ],
-              ],
-            ),
-          ),
-        ),
-      ],
+    final style = Theme.of(context).textTheme.bodySmall?.copyWith(
+      color: Theme.of(context).colorScheme.onSurfaceVariant,
     );
-  }
-}
-
-class _SettingsRow extends StatelessWidget {
-  const _SettingsRow({required this.title, required this.trailing});
-
-  final String title;
-  final Widget trailing;
-
-  @override
-  Widget build(BuildContext context) {
-    return ConstrainedBox(
-      constraints: const BoxConstraints(minHeight: 64),
-      child: Row(
-        children: [
-          Expanded(child: Text(title)),
-          const SizedBox(width: 24),
-          trailing,
-        ],
-      ),
+    return FutureBuilder<PackageInfo>(
+      future: _info,
+      builder: (context, snapshot) {
+        final info = snapshot.data;
+        if (info == null) return Text('—', style: style);
+        final build = info.buildNumber;
+        return Text(
+          build.isEmpty ? info.version : '${info.version}+$build',
+          style: style,
+        );
+      },
     );
   }
 }

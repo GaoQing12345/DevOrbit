@@ -10,14 +10,13 @@ import 'package:hotkey_manager/hotkey_manager.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
-  testWidgets('Windows controls minimize and hide without quitting', (
-    tester,
-  ) async {
+  testWidgets('toolbox navigation opens the settings section', (tester) async {
     SharedPreferences.setMockInitialValues({});
     final settings = await SettingsStore.load();
+    final registry = ToolRegistry(const []);
     final shell = _FakeDesktopShell();
     final controller = AppController(
-      registry: ToolRegistry(const []),
+      registry: registry,
       settings: settings,
       shell: shell,
       standaloneLauncher: _NoopStandaloneLauncher(),
@@ -29,29 +28,27 @@ void main() {
         home: Scaffold(
           body: ToolboxShell(
             controller: controller,
-            registry: ToolRegistry(const []),
+            registry: registry,
             settings: settings,
-            showWindowControls: true,
           ),
         ),
       ),
     );
 
-    await tester.tap(find.byTooltip('最小化'));
-    await tester.tap(find.byTooltip('关闭到后台'));
+    expect(find.text('DevOrbit'), findsOneWidget);
+    expect(find.text('工具箱'), findsWidgets);
+
+    await tester.tap(find.text('设置'));
     await tester.pump();
 
-    expect(shell.minimizeCount, 1);
-    expect(shell.hideCount, 1);
+    expect(controller.section, ToolboxSection.settings);
+    expect(shell.hideCount, 0);
     expect(shell.quitCount, 0);
     await tester.binding.setSurfaceSize(null);
   });
 }
 
 class _NoopStandaloneLauncher implements StandaloneToolWindowLauncher {
-  @override
-  Future<void> warmUp() async {}
-
   @override
   Future<void> closeAllTools() async {}
 

@@ -60,30 +60,30 @@ class JsonEditorToolbar extends StatelessWidget {
         : path.basename(controller.filePath!);
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: scheme.surfaceContainerLow,
+        color: scheme.surfaceContainerLowest,
         border: Border(bottom: BorderSide(color: scheme.outlineVariant)),
       ),
       child: SizedBox(
-        height: 68,
+        height: 46,
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
+          padding: const EdgeInsets.symmetric(horizontal: 12),
           child: Row(
             children: [
               Container(
-                width: 34,
-                height: 34,
+                width: 24,
+                height: 24,
                 alignment: Alignment.center,
                 decoration: BoxDecoration(
-                  color: scheme.primaryContainer,
-                  borderRadius: BorderRadius.circular(7),
+                  color: scheme.primary.withAlpha(28),
+                  borderRadius: BorderRadius.circular(5),
                 ),
                 child: Icon(
                   Icons.data_object_rounded,
-                  size: 19,
-                  color: scheme.onPrimaryContainer,
+                  size: 14,
+                  color: scheme.primary,
                 ),
               ),
-              const SizedBox(width: 10),
+              const SizedBox(width: 8),
               ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 154),
                 child: Column(
@@ -270,17 +270,14 @@ class _ToolbarGroup extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: scheme.surfaceContainer,
-        border: Border.all(color: scheme.outlineVariant),
-        borderRadius: BorderRadius.circular(7),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(2),
-        child: Row(mainAxisSize: MainAxisSize.min, children: children),
-      ),
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        for (var index = 0; index < children.length; index++) ...[
+          if (index > 0) const SizedBox(width: 1),
+          children[index],
+        ],
+      ],
     );
   }
 }
@@ -332,15 +329,15 @@ class JsonEditorStatusBar extends StatelessWidget {
     ].join(' · ');
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceContainerLow,
+        color: theme.colorScheme.surfaceContainerLowest,
         border: Border(
           top: BorderSide(color: theme.colorScheme.outlineVariant),
         ),
       ),
       child: SizedBox(
-        height: 36,
+        height: 28,
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
+          padding: const EdgeInsets.symmetric(horizontal: 12),
           child: Row(
             children: [
               Container(
@@ -423,9 +420,9 @@ class _ToolbarButton extends StatelessWidget {
     return IconButton(
       tooltip: tooltip,
       onPressed: onPressed,
-      icon: Icon(icon, size: 20),
+      icon: Icon(icon, size: 16),
       padding: EdgeInsets.zero,
-      constraints: const BoxConstraints.tightFor(width: 40, height: 40),
+      constraints: const BoxConstraints.tightFor(width: 26, height: 26),
       style: IconButton.styleFrom(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(5)),
       ),

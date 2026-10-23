@@ -47,25 +47,9 @@ void main() {
     await disposeEditor(tester);
   });
 
-  testWidgets('Control+F opens find for the whole formatter window', (
+  testWidgets('Command+F opens find for the whole formatter window', (
     tester,
   ) async {
-    debugDefaultTargetPlatformOverride = TargetPlatform.windows;
-    addTearDown(() => debugDefaultTargetPlatformOverride = null);
-    final fixture = await JsonFormatterFixture.create();
-    await tester.pumpWidget(fixture.widget);
-
-    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
-    await tester.sendKeyEvent(LogicalKeyboardKey.keyF);
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
-    await tester.pump();
-
-    expect(find.byKey(const ValueKey('json-find-input')), findsOneWidget);
-    await disposeEditor(tester);
-    debugDefaultTargetPlatformOverride = null;
-  });
-
-  testWidgets('Command+F opens find on macOS', (tester) async {
     debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
     addTearDown(() => debugDefaultTargetPlatformOverride = null);
     final fixture = await JsonFormatterFixture.create();
@@ -77,22 +61,6 @@ void main() {
     await tester.pump();
 
     expect(find.byKey(const ValueKey('json-find-input')), findsOneWidget);
-    await disposeEditor(tester);
-    debugDefaultTargetPlatformOverride = null;
-  });
-
-  testWidgets('Control+H opens replace on Windows', (tester) async {
-    debugDefaultTargetPlatformOverride = TargetPlatform.windows;
-    addTearDown(() => debugDefaultTargetPlatformOverride = null);
-    final fixture = await JsonFormatterFixture.create();
-    await tester.pumpWidget(fixture.widget);
-
-    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
-    await tester.sendKeyEvent(LogicalKeyboardKey.keyH);
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
-    await tester.pump();
-
-    expect(find.byKey(const ValueKey('json-replace-input')), findsOneWidget);
     await disposeEditor(tester);
     debugDefaultTargetPlatformOverride = null;
   });

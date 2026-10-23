@@ -1,13 +1,12 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 
 import '../../app/app_controller.dart';
 import '../../core/modules/tool_registry.dart';
 import '../../core/settings/settings_store.dart';
+import '../../core/widgets/mac_ui.dart';
+import '../../core/widgets/lazy_indexed_stack.dart';
 import '../settings/settings_page.dart';
 import 'toolbox_home.dart';
-import 'windows_toolbox_title_bar.dart';
 
 class ToolboxShell extends StatelessWidget {
   const ToolboxShell({
@@ -15,69 +14,36 @@ class ToolboxShell extends StatelessWidget {
     required this.controller,
     required this.registry,
     required this.settings,
-    this.showWindowControls,
   });
 
   final AppController controller;
   final ToolRegistry registry;
   final SettingsStore settings;
-  final bool? showWindowControls;
 
   @override
   Widget build(BuildContext context) {
-    final content = _buildContent(context);
-    if (!(showWindowControls ?? Platform.isWindows)) return content;
-    return Column(
-      children: [
-        WindowsToolboxTitleBar(controller: controller),
-        Expanded(child: content),
-      ],
-    );
-  }
-
-  Widget _buildContent(BuildContext context) {
     final selectedIndex = _selectedIndex();
-    return ColoredBox(
-      color: Theme.of(context).colorScheme.surface,
-      child: Row(
-        children: [
-          _Sidebar(
-            controller: controller,
-            registry: registry,
-            selectedIndex: selectedIndex,
-          ),
-          VerticalDivider(width: 1, color: Theme.of(context).dividerColor),
-          Expanded(
-            child: IndexedStack(
+    return Row(
+      children: [
+        _Sidebar(
+          controller: controller,
+          registry: registry,
+          selectedIndex: selectedIndex,
+        ),
+        Expanded(
+          child: ColoredBox(
+            color: Theme.of(context).colorScheme.surfaceContainerLowest,
+            child: LazyIndexedStack(
               index: selectedIndex,
               children: [
-                Visibility(
-                  visible: selectedIndex == 0,
-                  maintainState: true,
-                  child: ToolboxHome(
-                    controller: controller,
-                    registry: registry,
-                  ),
-                ),
-                Visibility(
-                  visible: selectedIndex == 1,
-                  maintainState: true,
-                  child: SettingsPage(
-                    controller: controller,
-                    settings: settings,
-                  ),
-                ),
-                for (var index = 0; index < registry.modules.length; index++)
-                  Visibility(
-                    visible: selectedIndex == index + 2,
-                    maintainState: true,
-                    child: registry.modules[index].buildPage(),
-                  ),
+                ToolboxHome(controller: controller, registry: registry),
+                SettingsPage(controller: controller, settings: settings),
+                for (final module in registry.modules) module.buildPage(),
               ],
             ),
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 
@@ -110,69 +76,74 @@ class _Sidebar extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return SizedBox(
-      width: 232,
+      width: 214,
       child: ColoredBox(
-        color: scheme.surfaceContainerLow,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(14, 18, 14, 14),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Padding(
-                padding: EdgeInsets.fromLTRB(10, 4, 10, 24),
-                child: Row(
-                  children: [
-                    _OrbitMark(),
-                    SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        'DevOrbit',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 19,
-                          fontWeight: FontWeight.w700,
-                        ),
+        color: scheme.surfaceContainer,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(15, 13, 12, 9),
+              child: Row(
+                children: [
+                  const OrbitMark(size: 17),
+                  const SizedBox(width: 7),
+                  Text(
+                    'DevOrbit',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                ],
+              ),
+            ),
+            Expanded(
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(8, 0, 8, 10),
+                children: [
+                  _SidebarRow(
+                    icon: Icons.grid_view_rounded,
+                    label: '工具箱',
+                    selected: selectedIndex == 0,
+                    onTap: controller.showToolbox,
+                  ),
+                  const SizedBox(height: 12),
+                  const _SidebarHeading('工具'),
+                  for (var index = 0; index < registry.modules.length; index++)
+                    _SidebarRow(
+                      icon: registry.modules[index].descriptor.icon,
+                      label: registry.modules[index].descriptor.title,
+                      selected: selectedIndex == index + 2,
+                      onTap: () => controller.openTool(
+                        registry.modules[index].descriptor.id,
                       ),
                     ),
-                  ],
-                ),
+                ],
               ),
-              _NavItem(
-                icon: Icons.grid_view_rounded,
-                label: '工具箱',
-                selected: selectedIndex == 0,
-                onTap: controller.showToolbox,
-              ),
-              const SizedBox(height: 6),
-              for (var index = 0; index < registry.modules.length; index++) ...[
-                _NavItem(
-                  icon: registry.modules[index].descriptor.icon,
-                  label: registry.modules[index].descriptor.title,
-                  selected: selectedIndex == index + 2,
-                  onTap: () => controller.openTool(
-                    registry.modules[index].descriptor.id,
-                  ),
-                ),
-                const SizedBox(height: 6),
-              ],
-              const Spacer(),
-              _NavItem(
+            ),
+            Container(
+              height: 1,
+              margin: const EdgeInsets.symmetric(horizontal: 12),
+              color: scheme.outlineVariant.withAlpha(150),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(8, 6, 8, 8),
+              child: _SidebarRow(
                 icon: Icons.settings_outlined,
                 label: '设置',
                 selected: selectedIndex == 1,
                 onTap: controller.showSettings,
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
   }
 }
 
-class _NavItem extends StatelessWidget {
-  const _NavItem({
+/// A 28pt-high source-list row: accent fill when selected, grey wash on hover.
+/// macOS has no ripple, so the press state is a flat darker fill.
+class _SidebarRow extends StatefulWidget {
+  const _SidebarRow({
     required this.icon,
     required this.label,
     required this.selected,
@@ -185,30 +156,70 @@ class _NavItem extends StatelessWidget {
   final VoidCallback onTap;
 
   @override
+  State<_SidebarRow> createState() => _SidebarRowState();
+}
+
+class _SidebarRowState extends State<_SidebarRow> {
+  bool _hovered = false;
+  bool _pressed = false;
+
+  @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    return Material(
-      color: selected ? scheme.primaryContainer : Colors.transparent,
-      borderRadius: BorderRadius.circular(10),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(10),
-        onTap: onTap,
-        child: SizedBox(
-          height: 46,
-          child: Row(
-            children: [
-              const SizedBox(width: 13),
-              Icon(icon, size: 19),
-              const SizedBox(width: 13),
-              Expanded(
-                child: Text(
-                  label,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+    final theme = Theme.of(context);
+    final selected = widget.selected;
+    final foreground = selected
+        ? scheme.onPrimary
+        : (theme.brightness == Brightness.dark
+              ? scheme.onSurface
+              : const Color(0xFF3A3A3C));
+    final background = selected
+        ? (_pressed ? scheme.primary.withAlpha(220) : scheme.primary)
+        : (_pressed
+              ? scheme.onSurface.withAlpha(30)
+              : (_hovered
+                    ? scheme.onSurface.withAlpha(18)
+                    : Colors.transparent));
+
+    return Semantics(
+      button: true,
+      selected: selected,
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        onEnter: (_) => setState(() => _hovered = true),
+        onExit: (_) => setState(() => _hovered = false),
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTapDown: (_) => setState(() => _pressed = true),
+          onTapUp: (_) => setState(() => _pressed = false),
+          onTapCancel: () => setState(() => _pressed = false),
+          onTap: widget.onTap,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 80),
+            height: 28,
+            margin: const EdgeInsets.symmetric(vertical: 1),
+            decoration: BoxDecoration(
+              color: background,
+              borderRadius: BorderRadius.circular(5),
+            ),
+            padding: const EdgeInsets.symmetric(horizontal: 7),
+            child: Row(
+              children: [
+                Icon(widget.icon, size: 15, color: foreground),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    widget.label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: foreground,
+                      fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+                    ),
+                  ),
                 ),
-              ),
-              const SizedBox(width: 8),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -216,33 +227,22 @@ class _NavItem extends StatelessWidget {
   }
 }
 
-class _OrbitMark extends StatelessWidget {
-  const _OrbitMark();
+class _SidebarHeading extends StatelessWidget {
+  const _SidebarHeading(this.label);
+
+  final String label;
 
   @override
   Widget build(BuildContext context) {
-    final accent = Theme.of(context).colorScheme.primary;
-    return SizedBox.square(
-      dimension: 28,
-      child: Stack(
-        alignment: Alignment.center,
-        children: [
-          Container(
-            width: 24,
-            height: 12,
-            decoration: BoxDecoration(
-              border: Border.all(color: accent, width: 2),
-              borderRadius: BorderRadius.circular(12),
-            ),
-          ),
-          DecoratedBox(
-            decoration: BoxDecoration(
-              color: accent,
-              shape: BoxShape.circle,
-            ),
-            child: SizedBox.square(dimension: 7),
-          ),
-        ],
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(8, 4, 8, 4),
+      child: Text(
+        label,
+        style: theme.textTheme.labelSmall?.copyWith(
+          color: theme.colorScheme.onSurfaceVariant,
+          fontWeight: FontWeight.w600,
+        ),
       ),
     );
   }

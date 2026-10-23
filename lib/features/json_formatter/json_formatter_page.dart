@@ -48,7 +48,7 @@ class _JsonFormatterPageState extends State<JsonFormatterPage> {
   String? _lastCaretLabel;
 
   bool get _usesWebEditor =>
-      (Platform.isMacOS || Platform.isWindows) &&
+      Platform.isMacOS &&
       !kIsWeb &&
       Platform.environment['FLUTTER_TEST'] != 'true';
   @override
@@ -613,9 +613,9 @@ class _JsonFormatterPageState extends State<JsonFormatterPage> {
 
   Widget _buildEditor(ThemeData theme, bool isDark) {
     return Container(
-      margin: const EdgeInsets.fromLTRB(16, 16, 16, 14),
+      margin: const EdgeInsets.fromLTRB(12, 12, 12, 10),
       decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceContainerLow,
+        color: theme.colorScheme.surfaceContainerLowest,
         border: Border.all(
           color: _dragging
               ? theme.colorScheme.primary
@@ -623,13 +623,6 @@ class _JsonFormatterPageState extends State<JsonFormatterPage> {
           width: _dragging ? 2 : 1,
         ),
         borderRadius: BorderRadius.circular(8),
-        boxShadow: [
-          BoxShadow(
-            color: theme.colorScheme.shadow.withAlpha(isDark ? 52 : 16),
-            blurRadius: 18,
-            offset: const Offset(0, 5),
-          ),
-        ],
       ),
       clipBehavior: Clip.antiAlias,
       child: _buildCodeEditor(theme, isDark),

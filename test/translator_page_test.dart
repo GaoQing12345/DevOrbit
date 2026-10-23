@@ -171,7 +171,7 @@ void main() {
   testWidgets('QuickClipboard inserts into the previous translation cursor', (
     tester,
   ) async {
-    debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+    debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
     addTearDown(() => debugDefaultTargetPlatformOverride = null);
     final controller = TranslatorController(
       client: _NoopClient(),
@@ -199,9 +199,9 @@ void main() {
     await tester.pump();
     nativeClipboard.pendingPasteText = 'QuickClipboard';
     await _sendWindowEvent('focus');
-    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
     await tester.sendKeyEvent(LogicalKeyboardKey.keyV);
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
     await tester.pump();
 
     expect(field.controller!.text, 'abQuickClipboardcd');

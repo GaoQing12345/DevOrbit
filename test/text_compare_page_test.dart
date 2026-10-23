@@ -1,10 +1,10 @@
 import 'dart:ui' as ui;
 
-import 'package:dev_orbit/core/desktop/web_text_editor.dart';
 import 'package:dev_orbit/features/text_compare/text_compare_controller.dart';
 import 'package:dev_orbit/features/text_compare/text_compare_engine.dart';
 import 'package:dev_orbit/features/text_compare/text_compare_models.dart';
 import 'package:dev_orbit/features/text_compare/text_compare_page.dart';
+import 'package:dev_orbit/features/text_compare/text_compare_pane.dart';
 import 'package:dev_orbit/features/text_compare/text_compare_service.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -15,6 +15,21 @@ import 'package:re_editor/re_editor.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'support/json_formatter_fixture.dart';
+
+/// The diff rules live in a pop-up menu (macOS idiom), so every option
+/// interaction first opens it.
+Future<void> openCompareOptions(WidgetTester tester) async {
+  await tester.tap(find.text('选项'));
+  await tester.pump();
+  await tester.pump(const Duration(milliseconds: 400));
+}
+
+Future<void> tapCompareOption(WidgetTester tester, String label) async {
+  await openCompareOptions(tester);
+  await tester.tap(find.text(label).last);
+  await tester.pump();
+  await tester.pump(const Duration(milliseconds: 400));
+}
 
 void main() {
   testWidgets('shows two editable panes and compare controls', (tester) async {
@@ -39,6 +54,7 @@ void main() {
     expect(find.text('旧文本'), findsOneWidget);
     expect(find.text('新文本'), findsOneWidget);
     expect(find.text('开始比对'), findsOneWidget);
+    await openCompareOptions(tester);
     expect(find.text('忽略大小写'), findsOneWidget);
     expect(find.text('忽略行首空白'), findsOneWidget);
     expect(find.text('忽略行尾空白'), findsOneWidget);
@@ -154,8 +170,7 @@ void main() {
     await tester.pump();
     expect(find.text('新增 0 行 · 删除 0 行 · 修改 2 行'), findsOneWidget);
 
-    await tester.tap(find.text('忽略行首空白'));
-    await tester.pump();
+    await tapCompareOption(tester, '忽略行首空白');
     await tester.pump(const Duration(milliseconds: 30));
 
     expect(find.text('规则：忽略行首空白'), findsOneWidget);
@@ -259,9 +274,7 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pump();
     expect(input, findsNothing);
-    final panes = find.byWidgetPredicate(
-      (widget) => widget.runtimeType.toString() == '_TextPane',
-    );
+    final panes = find.byType(CompareTextPane);
     final dynamic rightPane = tester.widget(panes.last);
     rightPane.onFind();
     await tester.pump();
@@ -344,9 +357,7 @@ void main() {
     await tester.enterText(input, 'needle');
     await tester.pump();
     final field = tester.widget<TextField>(input);
-    final panes = find.byWidgetPredicate(
-      (widget) => widget.runtimeType.toString() == '_TextPane',
-    );
+    final panes = find.byType(CompareTextPane);
     final dynamic rightPane = tester.widget(panes.last);
 
     rightPane.onEditorPointerDown();
@@ -410,98 +421,6 @@ void main() {
     await tester.pump(const Duration(milliseconds: 80));
 
     expect(field.controller!.text, 'needle');
-    debugDefaultTargetPlatformOverride = null;
-    await tester.pumpWidget(const SizedBox.shrink());
-  });
-
-  testWidgets('closing find claims the target editor before WebView load', (
-    tester,
-  ) async {
-    debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
-    addTearDown(() => debugDefaultTargetPlatformOverride = null);
-    final controller = TextCompareController(
-      service: _ImmediateService(),
-      autoCompare: false,
-    );
-    addTearDown(controller.dispose);
-    controller.updateLeft('left');
-    controller.updateRight('needle right');
-
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(
-          body: TextComparePage(
-            controller: controller,
-            debugUseWebEditor: true,
-          ),
-        ),
-      ),
-    );
-    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
-    await tester.sendKeyEvent(LogicalKeyboardKey.keyF);
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
-    await tester.pump();
-    final input = find.byKey(const ValueKey('text-compare-find-input'));
-    await tester.enterText(input, 'needle');
-    await tester.pump();
-
-    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
-    await tester.pump();
-
-    expect(DesktopWebTextEditor.debugActiveEditorLabel, 'text-compare-right');
-    debugDefaultTargetPlatformOverride = null;
-    await tester.pumpWidget(const SizedBox.shrink());
-  });
-
-  testWidgets('find suspension cancels delayed WebView autofocus', (
-    tester,
-  ) async {
-    debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
-    addTearDown(() => debugDefaultTargetPlatformOverride = null);
-    final editorController = DesktopWebTextEditorController();
-
-    await tester.pumpWidget(
-      MaterialApp(
-        home: DesktopWebTextEditor(
-          controller: editorController,
-          text: '',
-          onChanged: (_) {},
-          debugLabel: 'delayed-autofocus-editor',
-        ),
-      ),
-    );
-    editorController.debugScheduleAutofocus();
-    DesktopWebTextEditor.suspendActiveEditorFocus();
-    await tester.pump(const Duration(milliseconds: 80));
-
-    expect(DesktopWebTextEditor.debugActiveEditorLabel, isNull);
-    debugDefaultTargetPlatformOverride = null;
-    await tester.pumpWidget(const SizedBox.shrink());
-  });
-
-  testWidgets('find suspension keeps the active WebView session suspended', (
-    tester,
-  ) async {
-    debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
-    addTearDown(() => debugDefaultTargetPlatformOverride = null);
-    final editorController = DesktopWebTextEditorController();
-
-    await tester.pumpWidget(
-      MaterialApp(
-        home: DesktopWebTextEditor(
-          controller: editorController,
-          text: '',
-          onChanged: (_) {},
-          debugLabel: 'same-delayed-autofocus-editor',
-        ),
-      ),
-    );
-    editorController.restoreFocus();
-    editorController.debugScheduleAutofocus();
-    DesktopWebTextEditor.suspendActiveEditorFocus();
-    await tester.pump(const Duration(milliseconds: 80));
-
-    expect(DesktopWebTextEditor.debugActiveEditorSession, isFalse);
     debugDefaultTargetPlatformOverride = null;
     await tester.pumpWidget(const SizedBox.shrink());
   });
@@ -704,8 +623,7 @@ void main() {
         .toList(growable: false);
     expect(editors.first.controller!.codeLines.length, 12);
 
-    await tester.tap(find.text('折叠未更改行'));
-    await tester.pump();
+    await tapCompareOption(tester, '折叠未更改行');
     await tester.pump();
     await tester.pump(const Duration(seconds: 1));
 
@@ -718,9 +636,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 300));
     expect(editors.first.controller!.codeLines.length, lessThan(12));
 
-    await tester.tap(find.text('折叠未更改行'));
-    await tester.pump();
-    await tester.pump();
+    await tapCompareOption(tester, '折叠未更改行');
 
     expect(editors.first.controller!.codeLines.length, 12);
     await tester.pumpWidget(const SizedBox.shrink());
@@ -815,7 +731,9 @@ void main() {
       editors.last.controller!.codeLines.length,
     );
 
-    const startLine = 40;
+    // Stay clear of the last screenful: the right pane clamps at its maximum
+    // scroll extent, which would hide the line pairing being verified here.
+    const startLine = 25;
     leftScroll.jumpTo(startLine * leftLineHeight + _panePaddingTop);
     await tester.pump();
 
@@ -860,14 +778,12 @@ void main() {
     final leftScroll = editors.first.scrollController!.verticalScroller;
     final rightScroll = editors.last.scrollController!.verticalScroller;
 
-    await tester.tap(find.text('同步滚动'));
-    await tester.pump();
+    await tapCompareOption(tester, '同步滚动');
     leftScroll.jumpTo(300);
     await tester.pump();
     expect(rightScroll.offset, 0);
 
-    await tester.tap(find.text('同步滚动'));
-    await tester.pump();
+    await tapCompareOption(tester, '同步滚动');
     await tester.pump();
     expect(rightScroll.offset, closeTo(300, 0.5));
     await tester.pumpWidget(const SizedBox.shrink());

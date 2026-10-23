@@ -111,7 +111,7 @@ void main() {
   testWidgets('QuickClipboard inserts at the previous timestamp cursor', (
     tester,
   ) async {
-    debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+    debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
     addTearDown(() => debugDefaultTargetPlatformOverride = null);
     mockClipboard(tester, initialText: 'restored clipboard');
     final nativeClipboard = mockClipboardRevision(tester);
@@ -133,9 +133,9 @@ void main() {
     await tester.pump();
     nativeClipboard.pendingPasteText = '56';
     await _sendWindowEvent('focus');
-    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
     await tester.sendKeyEvent(LogicalKeyboardKey.keyV);
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
     await tester.pump();
 
     expect(field.controller!.text, '125634');

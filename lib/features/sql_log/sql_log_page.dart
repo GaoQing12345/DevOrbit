@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -6,7 +7,9 @@ import 'package:flutter/services.dart';
 
 import '../../core/desktop/desktop_clipboard_focus_restorer.dart';
 import '../../core/desktop/desktop_text_selection.dart';
+import '../../app/app_theme.dart';
 import '../../core/desktop/web_text_editor.dart';
+import '../../core/widgets/mac_ui.dart';
 import 'sql_log_controller.dart';
 import 'sql_log_converter.dart';
 
@@ -28,7 +31,7 @@ class _SqlLogPageState extends State<SqlLogPage> {
 
   bool get _usesWebEditor =>
       !kIsWeb &&
-      (Platform.isMacOS || Platform.isWindows) &&
+      Platform.isMacOS &&
       Platform.environment['FLUTTER_TEST'] != 'true';
 
   @override
@@ -75,7 +78,10 @@ class _SqlLogPageState extends State<SqlLogPage> {
     final selection = _inputController.selection;
     return NativeTextSelection(
       baseOffset: selection.baseOffset.clamp(0, _inputController.text.length),
-      extentOffset: selection.extentOffset.clamp(0, _inputController.text.length),
+      extentOffset: selection.extentOffset.clamp(
+        0,
+        _inputController.text.length,
+      ),
     );
   }
 
@@ -94,7 +100,10 @@ class _SqlLogPageState extends State<SqlLogPage> {
       text: text,
       selection: _inputController.selection.copyWith(
         baseOffset: _inputController.selection.baseOffset.clamp(0, text.length),
-        extentOffset: _inputController.selection.extentOffset.clamp(0, text.length),
+        extentOffset: _inputController.selection.extentOffset.clamp(
+          0,
+          text.length,
+        ),
       ),
     );
     _controller.updateSource(text);
@@ -163,7 +172,7 @@ class _SqlLogPageState extends State<SqlLogPage> {
               dialect: _controller.dialect,
               canCopy: result.output.isNotEmpty,
               onDialectChanged: _controller.setDialect,
-              onConvert: _controller.convertNow,
+              onConvert: () => unawaited(_controller.convertNow()),
               onCopy: _copyOutput,
               onClear: _controller.clear,
             ),
@@ -175,16 +184,16 @@ class _SqlLogPageState extends State<SqlLogPage> {
               _WarningBanner(messages: result.allWarnings),
             Expanded(
               child: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+                padding: const EdgeInsets.all(12),
                 child: LayoutBuilder(
                   builder: (context, constraints) {
-                    final input = _EditorPanel(
+                    final input = MacPanel(
                       title: 'MyBatis 日志',
                       icon: Icons.article_outlined,
                       trailing: IconButton(
                         tooltip: '粘贴',
                         onPressed: _paste,
-                        icon: const Icon(Icons.content_paste_rounded, size: 19),
+                        icon: const Icon(Icons.content_paste_rounded),
                       ),
                       child: _usesWebEditor
                           ? DesktopWebTextEditor(
@@ -193,42 +202,46 @@ class _SqlLogPageState extends State<SqlLogPage> {
                               selection: _nativeSelection(),
                               onChanged: _onWebChanged,
                               onSelectionChanged: _onWebSelectionChanged,
-                              backgroundColor: Theme.of(context)
-                                  .colorScheme
-                                  .surfaceContainerLowest,
-                              textColor: Theme.of(context).colorScheme.onSurface,
+                              backgroundColor: Theme.of(
+                                context,
+                              ).colorScheme.surfaceContainerLowest,
+                              textColor: Theme.of(
+                                context,
+                              ).colorScheme.onSurface,
                               isDark:
-                                  Theme.of(context).brightness == Brightness.dark,
+                                  Theme.of(context).brightness ==
+                                  Brightness.dark,
                               placeholder: '粘贴 MyBatis SQL 日志',
                               syntax: WebEditorSyntax.plain,
                               debugLabel: 'sql-log-input',
                             )
                           : TextField(
-                        key: const ValueKey('sql-log-input'),
-                        controller: _inputController,
-                        focusNode: _inputFocusNode,
-                        autofocus: true,
-                        expands: true,
-                        minLines: null,
-                        maxLines: null,
-                        keyboardType: TextInputType.multiline,
-                        textAlignVertical: TextAlignVertical.top,
-                        onChanged: _controller.updateSource,
-                        contextMenuBuilder: (context, editableTextState) =>
-                            AdaptiveTextSelectionToolbar.editableText(
-                              editableTextState: editableTextState,
+                              key: const ValueKey('sql-log-input'),
+                              controller: _inputController,
+                              focusNode: _inputFocusNode,
+                              autofocus: true,
+                              expands: true,
+                              minLines: null,
+                              maxLines: null,
+                              keyboardType: TextInputType.multiline,
+                              textAlignVertical: TextAlignVertical.top,
+                              onChanged: _controller.updateSource,
+                              contextMenuBuilder:
+                                  (context, editableTextState) =>
+                                      AdaptiveTextSelectionToolbar.editableText(
+                                        editableTextState: editableTextState,
+                                      ),
+                              style: _editorTextStyle(context),
+                              decoration: _editorDecoration(context),
                             ),
-                        style: _editorTextStyle(context),
-                        decoration: _editorDecoration(context),
-                      ),
                     );
-                    final output = _EditorPanel(
+                    final output = MacPanel(
                       title: '格式化 SQL',
                       icon: Icons.data_object_rounded,
                       trailing: IconButton(
                         tooltip: '复制全部 SQL',
                         onPressed: result.output.isEmpty ? null : _copyOutput,
-                        icon: const Icon(Icons.copy_rounded, size: 19),
+                        icon: const Icon(Icons.copy_rounded),
                       ),
                       child: _SqlOutputList(
                         key: const ValueKey('sql-log-output'),
@@ -242,7 +255,7 @@ class _SqlLogPageState extends State<SqlLogPage> {
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
                           Expanded(child: input),
-                          const SizedBox(width: 12),
+                          const SizedBox(width: 10),
                           Expanded(child: output),
                         ],
                       );
@@ -251,7 +264,7 @@ class _SqlLogPageState extends State<SqlLogPage> {
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
                         Expanded(child: input),
-                        const SizedBox(height: 12),
+                        const SizedBox(height: 10),
                         Expanded(child: output),
                       ],
                     );
@@ -304,60 +317,91 @@ class _Toolbar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Container(
-      constraints: const BoxConstraints(minHeight: 58),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      decoration: BoxDecoration(
-        color: scheme.surfaceContainerLow,
-        border: Border(bottom: BorderSide(color: scheme.outlineVariant)),
-      ),
-      child: Row(
-        children: [
-          Icon(Icons.storage_rounded, size: 21, color: scheme.primary),
-          const SizedBox(width: 10),
-          Text(
-            'SQL 日志还原',
-            style: Theme.of(
-              context,
-            ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
-          ),
-          const Spacer(),
-          SizedBox(
-            width: 142,
-            child: DropdownButtonHideUnderline(
-              child: DropdownButton<SqlLogDialect>(
-                value: dialect,
-                isExpanded: true,
-                borderRadius: BorderRadius.circular(6),
-                onChanged: (value) {
-                  if (value != null) onDialectChanged(value);
-                },
-                items: [
-                  for (final value in SqlLogDialect.values)
-                    DropdownMenuItem(value: value, child: Text(value.label)),
-                ],
-              ),
+    return MacToolbar(
+      leading: [
+        const MacToolbarTitle('SQL 日志还原', icon: Icons.storage_rounded),
+        _DialectPopup(value: dialect, onChanged: onDialectChanged),
+      ],
+      trailing: [
+        FilledButton.icon(
+          onPressed: onConvert,
+          icon: const Icon(Icons.play_arrow_rounded, size: 14),
+          label: const Text('转换'),
+        ),
+        IconButton(
+          tooltip: '复制全部 SQL',
+          onPressed: canCopy ? onCopy : null,
+          icon: const Icon(Icons.copy_rounded),
+        ),
+        IconButton(
+          tooltip: '清空',
+          onPressed: onClear,
+          icon: const Icon(Icons.delete_outline_rounded),
+        ),
+      ],
+    );
+  }
+}
+
+/// Pop-up button for the SQL dialect, sized like a macOS pop-up.
+class _DialectPopup extends StatelessWidget {
+  const _DialectPopup({required this.value, required this.onChanged});
+
+  final SqlLogDialect value;
+  final ValueChanged<SqlLogDialect> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    return PopupMenuButton<SqlLogDialect>(
+      tooltip: 'SQL 方言',
+      position: PopupMenuPosition.under,
+      initialValue: value,
+      onSelected: onChanged,
+      itemBuilder: (context) => [
+        for (final option in SqlLogDialect.values)
+          PopupMenuItem<SqlLogDialect>(
+            value: option,
+            height: 28,
+            child: Row(
+              children: [
+                SizedBox(
+                  width: 16,
+                  child: option == value
+                      ? Icon(
+                          Icons.check_rounded,
+                          size: 13,
+                          color: scheme.primary,
+                        )
+                      : null,
+                ),
+                const SizedBox(width: 6),
+                Text(option.label),
+              ],
             ),
           ),
-          const SizedBox(width: 8),
-          FilledButton.icon(
-            onPressed: onConvert,
-            icon: const Icon(Icons.play_arrow_rounded, size: 19),
-            label: const Text('转换'),
-          ),
-          const SizedBox(width: 6),
-          IconButton(
-            tooltip: '复制全部 SQL',
-            onPressed: canCopy ? onCopy : null,
-            icon: const Icon(Icons.copy_rounded, size: 19),
-          ),
-          IconButton(
-            tooltip: '清空',
-            onPressed: onClear,
-            icon: const Icon(Icons.delete_outline_rounded, size: 20),
-          ),
-        ],
+      ],
+      child: Container(
+        height: 26,
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        decoration: BoxDecoration(
+          color: scheme.surfaceContainerLowest,
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(color: scheme.outlineVariant),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(value.label, style: theme.textTheme.labelLarge),
+            const SizedBox(width: 6),
+            Icon(
+              Icons.unfold_more_rounded,
+              size: 13,
+              color: scheme.onSurfaceVariant,
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -383,28 +427,27 @@ class _StatusBar extends StatelessWidget {
     final status = result.statements.isEmpty
         ? (hasInput ? '未识别 SQL' : '未输入日志')
         : '已识别 ${result.statements.length} 条 SQL';
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 7),
-      color: scheme.surfaceContainerLowest,
-      child: Wrap(
-        spacing: 18,
-        runSpacing: 4,
-        children: [
-          _StatusItem(icon: Icons.check_circle_outline_rounded, text: status),
-          if (placeholderCount > 0)
-            _StatusItem(
-              icon: Icons.find_replace_rounded,
-              text: '已替换 $substitutedCount / $placeholderCount 个参数',
-            ),
-          if (result.warningCount > 0)
-            _StatusItem(
-              icon: Icons.warning_amber_rounded,
-              text: '${result.warningCount} 条提示',
-              color: scheme.tertiary,
-            ),
-        ],
-      ),
+    return MacStatusBar(
+      leading: [
+        Expanded(
+          child: _StatusItem(
+            icon: Icons.check_circle_outline_rounded,
+            text: status,
+            color: result.statements.isEmpty && hasInput ? scheme.error : null,
+          ),
+        ),
+        if (placeholderCount > 0)
+          _StatusItem(
+            icon: Icons.find_replace_rounded,
+            text: '已替换 $substitutedCount / $placeholderCount 个参数',
+          ),
+        if (result.warningCount > 0)
+          _StatusItem(
+            icon: Icons.warning_amber_rounded,
+            text: '${result.warningCount} 条提示',
+            color: AppTheme.warning,
+          ),
+      ],
     );
   }
 }
@@ -418,17 +461,20 @@ class _StatusItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final foreground = color ?? Theme.of(context).colorScheme.onSurfaceVariant;
+    final theme = Theme.of(context);
+    final foreground = color ?? theme.colorScheme.onSurfaceVariant;
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Icon(icon, size: 15, color: foreground),
+        Icon(icon, size: 12, color: foreground),
         const SizedBox(width: 5),
-        Text(
-          text,
-          style: Theme.of(
-            context,
-          ).textTheme.labelMedium?.copyWith(color: foreground),
+        Flexible(
+          child: Text(
+            text,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.labelSmall?.copyWith(color: foreground),
+          ),
         ),
       ],
     );
@@ -442,29 +488,32 @@ class _WarningBanner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final visible = messages.take(2).join('\n');
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final visible = messages.take(2).join('；');
     final remaining = messages.length - 2;
     return Container(
       width: double.infinity,
-      margin: const EdgeInsets.symmetric(horizontal: 16),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+      padding: const EdgeInsets.fromLTRB(14, 6, 14, 6),
       decoration: BoxDecoration(
-        color: scheme.tertiaryContainer.withAlpha(110),
-        border: Border.all(color: scheme.tertiary.withAlpha(100)),
-        borderRadius: BorderRadius.circular(6),
+        color: AppTheme.warning.withAlpha(18),
+        border: Border(bottom: BorderSide(color: scheme.outlineVariant)),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(Icons.warning_amber_rounded, size: 18, color: scheme.tertiary),
-          const SizedBox(width: 8),
+          const Icon(
+            Icons.warning_amber_rounded,
+            size: 13,
+            color: AppTheme.warning,
+          ),
+          const SizedBox(width: 7),
           Expanded(
             child: Text(
-              remaining > 0 ? '$visible\n另有 $remaining 条提示' : visible,
-              maxLines: 3,
+              remaining > 0 ? '$visible；另有 $remaining 条提示' : visible,
+              maxLines: 2,
               overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.bodySmall,
+              style: theme.textTheme.bodySmall,
             ),
           ),
         ],
@@ -487,22 +536,23 @@ class _SqlOutputList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
     if (statements.isEmpty) {
       return Center(
         child: Text(
           '转换后的 SQL 会显示在这里',
-          style: Theme.of(
-            context,
-          ).textTheme.bodyMedium?.copyWith(color: scheme.onSurfaceVariant),
+          style: theme.textTheme.bodyMedium?.copyWith(
+            color: scheme.onSurfaceVariant,
+          ),
         ),
       );
     }
 
     return ListView.separated(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(10),
       itemCount: statements.length,
-      separatorBuilder: (_, _) => const SizedBox(height: 12),
+      separatorBuilder: (_, _) => const SizedBox(height: 10),
       itemBuilder: (context, index) {
         final statement = statements[index];
         return Container(
@@ -511,61 +561,52 @@ class _SqlOutputList extends StatelessWidget {
           decoration: BoxDecoration(
             color: scheme.surfaceContainerLowest,
             border: Border.all(color: scheme.outlineVariant),
-            borderRadius: BorderRadius.circular(5),
+            borderRadius: BorderRadius.circular(8),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Container(
-                constraints: const BoxConstraints(minHeight: 38),
-                padding: const EdgeInsets.only(left: 12, right: 4),
+                height: 30,
+                padding: const EdgeInsets.only(left: 10, right: 2),
                 color: scheme.surfaceContainerLow,
                 child: Row(
                   children: [
-                    Container(
-                      width: 24,
-                      height: 24,
-                      alignment: Alignment.center,
-                      decoration: BoxDecoration(
-                        color: scheme.primaryContainer,
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                      child: Text(
-                        '${index + 1}',
-                        style: Theme.of(context).textTheme.labelMedium
-                            ?.copyWith(
-                              color: scheme.onPrimaryContainer,
-                              fontWeight: FontWeight.w700,
-                            ),
+                    Text(
+                      '${index + 1}',
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: scheme.onSurfaceVariant,
+                        fontFeatures: const [FontFeature.tabularFigures()],
                       ),
                     ),
-                    const SizedBox(width: 9),
+                    const SizedBox(width: 8),
                     Text(
                       'SQL ${index + 1}',
-                      style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                      style: theme.textTheme.labelLarge?.copyWith(
                         fontWeight: FontWeight.w600,
                       ),
                     ),
-                    const SizedBox(width: 12),
+                    const SizedBox(width: 10),
                     Expanded(
                       child: Text(
                         '参数 ${statement.substitutedCount} / ${statement.placeholderCount}',
                         overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.labelMedium
-                            ?.copyWith(color: scheme.onSurfaceVariant),
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: scheme.onSurfaceVariant,
+                        ),
                       ),
                     ),
                     IconButton(
                       tooltip: '复制此 SQL',
                       onPressed: () => onCopy(index, statement.formattedSql),
-                      icon: const Icon(Icons.copy_rounded, size: 17),
+                      icon: const Icon(Icons.copy_rounded, size: 13),
                     ),
                   ],
                 ),
               ),
               Divider(height: 1, color: scheme.outlineVariant),
               Padding(
-                padding: const EdgeInsets.all(14),
+                padding: const EdgeInsets.all(12),
                 child: SelectableText(
                   statement.formattedSql,
                   key: ValueKey('sql-output-block-text-$index'),
@@ -576,59 +617,6 @@ class _SqlOutputList extends StatelessWidget {
           ),
         );
       },
-    );
-  }
-}
-
-class _EditorPanel extends StatelessWidget {
-  const _EditorPanel({
-    required this.title,
-    required this.icon,
-    required this.trailing,
-    required this.child,
-  });
-
-  final String title;
-  final IconData icon;
-  final Widget trailing;
-  final Widget child;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Container(
-      clipBehavior: Clip.antiAlias,
-      decoration: BoxDecoration(
-        border: Border.all(color: scheme.outlineVariant),
-        borderRadius: BorderRadius.circular(7),
-      ),
-      child: Column(
-        children: [
-          SizedBox(
-            height: 44,
-            child: ColoredBox(
-              color: scheme.surfaceContainerLow,
-              child: Row(
-                children: [
-                  const SizedBox(width: 12),
-                  Icon(icon, size: 18, color: scheme.onSurfaceVariant),
-                  const SizedBox(width: 7),
-                  Expanded(
-                    child: Text(
-                      title,
-                      style: Theme.of(context).textTheme.labelLarge,
-                    ),
-                  ),
-                  trailing,
-                  const SizedBox(width: 2),
-                ],
-              ),
-            ),
-          ),
-          Divider(height: 1, color: scheme.outlineVariant),
-          Expanded(child: child),
-        ],
-      ),
     );
   }
 }

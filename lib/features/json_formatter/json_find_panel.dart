@@ -1,4 +1,3 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:re_editor/re_editor.dart';
@@ -227,9 +226,7 @@ class _PanelTextField extends StatelessWidget {
     if (onPaste == null) return field;
     return CallbackShortcuts(
       bindings: {
-        const SingleActivator(LogicalKeyboardKey.keyV, control: true): onPaste,
-        if (defaultTargetPlatform == TargetPlatform.macOS)
-          const SingleActivator(LogicalKeyboardKey.keyV, meta: true): onPaste,
+        const SingleActivator(LogicalKeyboardKey.keyV, meta: true): onPaste,
       },
       child: field,
     );

@@ -7,11 +7,14 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:window_manager/window_manager.dart';
 
+import 'support/inline_sql_log_conversion_service.dart';
 import 'support/json_formatter_fixture.dart';
 
 void main() {
   testWidgets('converts pasted log and shows formatted output', (tester) async {
-    final controller = SqlLogController();
+    final controller = SqlLogController(
+      conversion: const InlineSqlLogConversionService(),
+    );
     addTearDown(controller.dispose);
     await tester.binding.setSurfaceSize(const Size(1040, 680));
     addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -40,7 +43,9 @@ void main() {
   testWidgets('shows multiple SQL statements as distinct blocks', (
     tester,
   ) async {
-    final controller = SqlLogController();
+    final controller = SqlLogController(
+      conversion: const InlineSqlLogConversionService(),
+    );
     addTearDown(controller.dispose);
     await tester.binding.setSurfaceSize(const Size(1040, 680));
     addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -51,6 +56,7 @@ void main() {
       'Parameters: alice(String)',
       immediate: true,
     );
+    await controller.convertNow();
 
     await tester.pumpWidget(
       MaterialApp(
@@ -86,7 +92,7 @@ void main() {
   testWidgets('QuickClipboard inserts at the previous log cursor', (
     tester,
   ) async {
-    debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+    debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
     addTearDown(() => debugDefaultTargetPlatformOverride = null);
     mockClipboard(tester, initialText: 'restored clipboard');
     final nativeClipboard = mockClipboardRevision(tester);
@@ -106,9 +112,9 @@ void main() {
     await tester.pump();
     nativeClipboard.pendingPasteText = ' inserted ';
     await _sendWindowEvent('focus');
-    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
     await tester.sendKeyEvent(LogicalKeyboardKey.keyV);
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
     await tester.pump();
 
     expect(field.controller!.text, 'before inserted after');
