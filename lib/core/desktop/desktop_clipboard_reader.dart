@@ -169,58 +169,27 @@ class DesktopClipboardReader {
   }
 
   Future<String?> readSystemText() async {
-    // Windows clipboard providers may keep the clipboard open briefly while
-    // they publish several formats (or restore the previous value after a
-    // synthetic paste). A single Clipboard.getData call is therefore not
-    // reliable enough for desktop tools. Retry both null results and transient
-    // platform failures, but keep the first successful value unchanged.
-    // On macOS the native paste monitor already captures iCopy's synthetic
-    // Command+V synchronously. Retrying a normal system read here only keeps
-    // the paste operation alive for roughly half a second and makes a small
-    // pasteboard race visible as UI lag. The retry sequence is needed for
-    // Windows clipboard providers, which publish the selected item in stages.
-    final retryDelays = defaultTargetPlatform == TargetPlatform.windows
-        ? const [
-            Duration.zero,
-            Duration(milliseconds: 8),
-            Duration(milliseconds: 16),
-            Duration(milliseconds: 32),
-            Duration(milliseconds: 64),
-            Duration(milliseconds: 128),
-            Duration(milliseconds: 256),
-          ]
-        : const [Duration.zero];
-    for (final delay in retryDelays) {
-      if (delay > Duration.zero) {
-        await Future<void>.delayed(delay);
-      }
-      try {
-        final text = (await Clipboard.getData(Clipboard.kTextPlain))?.text;
-        DesktopClipboardDiagnostics.write('system_read', {
-          'delay_ms': delay.inMilliseconds,
-          'available': text != null,
-          'length': text?.length,
-        });
-        if (text != null) return text;
-      } on PlatformException catch (error) {
-        DesktopClipboardDiagnostics.write('system_read_error', {
-          'delay_ms': delay.inMilliseconds,
-          'type': error.code,
-          'message': error.message,
-        });
-        // The clipboard can be temporarily owned by another process. Continue
-        // with the next attempt instead of turning a timing race into a paste
-        // failure.
-      }
+    // The native paste monitor already captures a synthetic Command+V
+    // synchronously, so one system read is enough. Retrying here would only
+    // keep the paste operation alive for roughly half a second and turn a small
+    // pasteboard race into visible UI lag.
+    try {
+      final text = (await Clipboard.getData(Clipboard.kTextPlain))?.text;
+      DesktopClipboardDiagnostics.write('system_read', {
+        'available': text != null,
+        'length': text?.length,
+      });
+      return text;
+    } on PlatformException catch (error) {
+      DesktopClipboardDiagnostics.write('system_read_error', {
+        'type': error.code,
+        'message': error.message,
+      });
+      return null;
     }
-    return null;
   }
 
-  bool get _usesNativeCapture {
-    final platform = defaultTargetPlatform;
-    return platform == TargetPlatform.macOS ||
-        platform == TargetPlatform.windows;
-  }
+  bool get _usesNativeCapture => defaultTargetPlatform == TargetPlatform.macOS;
 
   static void _installPasteRequestHandler() {
     if (_pasteRequestHandlerInstalled) return;
@@ -316,16 +285,6 @@ class DesktopClipboardReader {
       SelectionChangedCause.keyboard,
     );
     return true;
-  }
-
-  /// Dispatches a captured paste through the same path the native runner uses.
-  ///
-  /// Tests use this to cover the routing decisions without a native pasteboard.
-  @visibleForTesting
-  static void debugDeliverPasteRequest({int? sessionId, String? text}) {
-    final request = DesktopPasteRequest(sessionId: sessionId, text: text);
-    _pasteRequests.add(request);
-    _deliverUnhandledPaste(request);
   }
 
   Future<void> _invokeVoid(String method, {int? sessionId}) async {

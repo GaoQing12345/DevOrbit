@@ -10,7 +10,7 @@ Future<bool> importSqlLogClipboard({
 }) async {
   try {
     final text = (await readClipboard())?.text;
-    return text != null && controller.importRecognizedLog(text);
+    return text != null && await controller.importRecognizedLog(text);
   } on PlatformException {
     return false;
   }

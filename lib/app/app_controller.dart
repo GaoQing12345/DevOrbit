@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:hotkey_manager/hotkey_manager.dart';
@@ -39,7 +38,6 @@ class AppController extends ChangeNotifier {
   String? get hotKeyError => _hotKeyError;
 
   Future<void> initialize() async {
-    unawaited(standaloneLauncher.warmUp());
     _hotKeyError = await shell.initialize(
       DesktopShellCallbacks(
         onToggleRadial: toggleRadial,
@@ -63,9 +61,8 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> toggleRadial() async {
-    // Window style changes on Windows can emit a transient blur before the
-    // radial window has finished showing. Ignore re-entrant hotkeys until the
-    // current show/hide operation has reached a stable state.
+    // Ignore re-entrant hotkeys until the current show/hide operation has
+    // reached a stable state.
     if (_radialTransitioning) return;
     _radialTransitioning = true;
     try {
@@ -75,13 +72,6 @@ class AppController extends ChangeNotifier {
       }
       _mode = AppViewMode.radial;
       notifyListeners();
-      // Only Windows needs to wait for the transparent radial frame before
-      // showing its HWND. Waiting here on a hidden macOS window can leave a
-      // global-hotkey invocation pending without ever presenting the radial.
-      if (Platform.isWindows &&
-          Platform.environment['FLUTTER_TEST'] != 'true') {
-        await WidgetsBinding.instance.endOfFrame;
-      }
       if (_mode != AppViewMode.radial) return;
       await shell.showRadial();
     } finally {

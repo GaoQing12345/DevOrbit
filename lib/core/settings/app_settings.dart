@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -12,7 +11,7 @@ class AppSettings {
     this.indentWithTabs = false,
     this.themeMode = ThemeMode.system,
     this.launchAtStartup = false,
-    this.clipboardTraceEnabled = true,
+    this.clipboardTraceEnabled = false,
   });
 
   factory AppSettings.defaults() {
@@ -20,10 +19,7 @@ class AppSettings {
       hotKey: HotKey(
         identifier: 'dev-orbit-launcher',
         key: PhysicalKeyboardKey.space,
-        modifiers: [
-          Platform.isMacOS ? HotKeyModifier.meta : HotKeyModifier.control,
-          HotKeyModifier.shift,
-        ],
+        modifiers: [HotKeyModifier.meta, HotKeyModifier.shift],
       ),
     );
   }
@@ -36,6 +32,9 @@ class AppSettings {
   final bool indentWithTabs;
   final ThemeMode themeMode;
   final bool launchAtStartup;
+
+  /// Clipboard diagnostics are opt-in: the trace writes a line (and flushes) for
+  /// every clipboard event, so it stays off unless the user turns it on.
   final bool clipboardTraceEnabled;
 
   AppSettings copyWith({
@@ -85,7 +84,7 @@ class AppSettings {
           orElse: () => ThemeMode.system,
         ),
         launchAtStartup: json['launchAtStartup'] == true,
-        clipboardTraceEnabled: json['clipboardTraceEnabled'] != false,
+        clipboardTraceEnabled: json['clipboardTraceEnabled'] == true,
       );
     } catch (_) {
       return defaults;

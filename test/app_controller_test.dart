@@ -92,14 +92,6 @@ void main() {
     },
   );
 
-  test('warms standalone tools while the desktop shell initializes', () async {
-    final fixture = await _ControllerFixture.create();
-
-    await fixture.controller.initialize();
-
-    expect(fixture.launcher.warmUpCount, 1);
-  });
-
   test('background startup hides without re-reading window bounds', () async {
     final fixture = await _ControllerFixture.create();
 
@@ -268,10 +260,6 @@ class _FakeStandaloneLauncher implements StandaloneToolWindowLauncher {
   final Future<void> Function()? onCloseAll;
   final List<String> openedToolIds = [];
   int closeAllCount = 0;
-  int warmUpCount = 0;
-
-  @override
-  Future<void> warmUp() async => warmUpCount++;
 
   @override
   Future<void> closeAllTools() async {

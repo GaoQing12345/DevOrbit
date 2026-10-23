@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:dev_orbit/core/desktop/desktop_cursor_locator.dart';
 import 'package:dev_orbit/core/desktop/desktop_shell.dart';
 import 'package:dev_orbit/core/desktop/desktop_window_effects.dart';
@@ -63,40 +65,64 @@ void main() {
     },
   );
 
-  for (final platform in [
-    (name: 'Windows', isWindows: true),
-    (name: 'macOS', isWindows: false),
-  ]) {
-    test(
-      '${platform.name} restores normal window state after radial hides',
-      () async {
-        final shell = NativeDesktopShell(
-          windowEffects: _RecordingWindowEffects(events),
-          cursorLocator: const _FixedCursorLocator(),
-          isWindows: platform.isWindows,
-          isMacOS: !platform.isWindows,
-        );
-        await shell.showRadial();
-        events.clear();
-
-        await shell.hideRadial();
-
-        expect(events, [
-          'hide',
-          'setMaximumSize:10000.0x10000.0',
-          'setMinimumSize:760.0x520.0',
-          'setResizable:true',
-          'setAlwaysOnTop:false',
-          'setSkipTaskbar:false',
-          platform.isWindows
-              ? 'setTitleBarStyle:hidden:false'
-              : 'setTitleBarStyle:normal:true',
-          'radialMode:false',
-          'setHasShadow:true',
-        ]);
-      },
+  test('radial window styles are applied concurrently', () async {
+    const styleCalls = {
+      'setMinimumSize',
+      'setMaximumSize',
+      'setResizable',
+      'setAlwaysOnTop',
+      'setSkipTaskbar',
+      'setBackgroundColor',
+      'setTitleBarStyle',
+      'setHasShadow',
+    };
+    final issued = Completer<void>();
+    var seen = 0;
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(windowChannel, (call) async {
+          if (styleCalls.contains(call.method)) {
+            seen++;
+            if (seen == styleCalls.length) issued.complete();
+            // A serialized implementation would await the first reply forever,
+            // because no further call can be issued while it waits.
+            await issued.future;
+          }
+          return call.method == 'isVisible' || call.method == 'isMinimized'
+              ? false
+              : null;
+        });
+    final shell = NativeDesktopShell(
+      windowEffects: _RecordingWindowEffects(events),
+      cursorLocator: const _FixedCursorLocator(),
     );
-  }
+
+    await shell.showRadial().timeout(const Duration(seconds: 2));
+
+    expect(seen, styleCalls.length);
+  });
+
+  test('restores normal window state after the radial hides', () async {
+    final shell = NativeDesktopShell(
+      windowEffects: _RecordingWindowEffects(events),
+      cursorLocator: const _FixedCursorLocator(),
+    );
+    await shell.showRadial();
+    events.clear();
+
+    await shell.hideRadial();
+
+    expect(events, [
+      'hide',
+      'setMaximumSize:10000.0x10000.0',
+      'setMinimumSize:760.0x520.0',
+      'setResizable:true',
+      'setAlwaysOnTop:false',
+      'setSkipTaskbar:false',
+      'setTitleBarStyle:normal:true',
+      'radialMode:false',
+      'setHasShadow:true',
+    ]);
+  });
 }
 
 String _describeWindowCall(MethodCall call) {

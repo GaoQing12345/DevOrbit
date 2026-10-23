@@ -35,44 +35,9 @@ class DesktopWebTextEditorController {
   void restoreFocus() {
     _state?._takeEditorFocus();
   }
-
-  @visibleForTesting
-  void debugScheduleAutofocus() {
-    _state?._scheduleAutofocus();
-  }
-
-  /// Simulates the DOM activation signal a real mouse click on the platform
-  /// view sends through the JavaScript bridge.
-  @visibleForTesting
-  void debugHandleEditorActivation() {
-    _state?._handleEditorActivation(userInitiated: true);
-  }
-
-  /// Simulates the DOM `focus` event. WebKit emits it both for a real click and
-  /// when the native view becomes first responder after an app switch, so it
-  /// must not be treated as a user interaction with the editor.
-  @visibleForTesting
-  void debugHandleEditorFocusEvent() {
-    _state?._handleEditorActivation(userInitiated: false);
-  }
-
-  @visibleForTesting
-  void debugSimulateWindowBlur() {
-    _state?.onWindowBlur();
-  }
-
-  @visibleForTesting
-  void debugSimulateWindowFocus() {
-    _state?.onWindowFocus();
-  }
-
-  @visibleForTesting
-  void debugSimulateAppInactive() {
-    _state?._onAppInactive();
-  }
 }
 
-/// A single browser-backed editing surface shared by macOS and Windows.
+/// A single browser-backed editing surface for the macOS tool windows.
 ///
 /// The DOM is authoritative for input, selection, undo, IME and clipboard
 /// commands. Flutter keeps a document snapshot for business actions, while
@@ -137,14 +102,6 @@ class DesktopWebTextEditor extends StatefulWidget {
 
   static bool get hasActiveEditor => _DesktopWebTextEditorState.hasActiveEditor;
 
-  @visibleForTesting
-  static String? get debugActiveEditorLabel =>
-      _DesktopWebTextEditorState._activeEditor?.widget.debugLabel;
-
-  @visibleForTesting
-  static bool get debugActiveEditorSession =>
-      _DesktopWebTextEditorState._activeEditor?._editorSessionActive ?? false;
-
   static void restoreActiveEditorFocus() {
     _DesktopWebTextEditorState.restoreActiveEditorFocus();
   }
@@ -161,12 +118,6 @@ class DesktopWebTextEditor extends StatefulWidget {
   /// and must keep it across window and application activation.
   static bool get flutterFieldOwnsEditing =>
       _DesktopWebTextEditorState.flutterFieldOwnsEditing;
-
-  /// Whether the active editor is armed to reclaim the caret as soon as the
-  /// window is key again.
-  @visibleForTesting
-  static bool get debugEditorArmedForWindowRestore =>
-      _DesktopWebTextEditorState.debugEditorArmedForWindowRestore;
 
   static void addEditingOwnershipListener(VoidCallback listener) {
     _DesktopWebTextEditorState.addEditingOwnershipListener(listener);
@@ -251,6 +202,10 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
   bool _restoreFocusOnWindowFocus = false;
   bool _editorSessionActive = false;
   NativeTextSelection? _lastWebSelection;
+
+  /// The last text the DOM reported or accepted. Used to skip echoing an
+  /// unchanged document back into the WebView on every rebuild.
+  String? _lastDomText;
   late final AppLifecycleListener _lifecycle;
 
   /// Whether a WebView editor owns the editing session that should survive a
@@ -266,13 +221,6 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
         editor._editorSessionActive &&
         editor._restoreFocusOnWindowFocus;
   }
-
-  /// Whether an editor is armed to reclaim the caret as soon as the window is
-  /// key again. Exposed so the regression suite can prove an app switch does
-  /// not arm it while an overlay field owns the caret.
-  @visibleForTesting
-  static bool get debugEditorArmedForWindowRestore =>
-      _activeEditor?._restoreFocusOnWindowFocus ?? false;
 
   static void revealActiveSelection(NativeTextSelection selection) {
     _activeEditor?._revealSelection(selection);
@@ -529,7 +477,7 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
 
   bool get _supported =>
       !kIsWeb &&
-      (Platform.isMacOS || Platform.isWindows) &&
+      Platform.isMacOS &&
       Platform.environment['FLUTTER_TEST'] != 'true';
 
   @override
@@ -578,10 +526,11 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
         );
         _lastWebSelection = selection;
         _traceSelection('web_input_selection', selection);
+        _lastDomText = args[0] as String;
         // Consumers such as the JSON formatter clamp selections against
         // their current text length. Sending the selection before the new
         // text can turn a valid caret into 0,0.
-        widget.onChanged(args[0] as String);
+        widget.onChanged(_lastDomText!);
         widget.onSelectionChanged?.call(selection);
         return null;
       },
@@ -698,7 +647,6 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
     // embedding configurations. Treat it as a redundant activation so the
     // behaviour is identical wherever it does fire.
     _handleEditorActivation(userInitiated: true);
-    if (Platform.isWindows) unawaited(_claimNativeEditorFocus());
   }
 
   int _asInt(Object? value) => value is num ? value.toInt() : 0;
@@ -714,6 +662,9 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
 
   void _onLoadStop(InAppWebViewController controller, WebUri? url) {
     _loaded = true;
+    // A reload always starts from an empty DOM, so the first sync has to carry
+    // the whole document even if its content did not change on the Dart side.
+    _lastDomText = null;
     _syncState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       unawaited(_registerNativeEditorView());
@@ -821,19 +772,6 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
     }
   }
 
-  Future<void> _claimNativeEditorFocus() async {
-    if (!_supported || !Platform.isWindows) return;
-    try {
-      await _focusChannel.invokeMethod<void>('claimEditorFocus', {
-        'editorKey': widget.debugLabel,
-      });
-    } on MissingPluginException {
-      // The method is only available in the Windows runner.
-    } on PlatformException {
-      // The DOM still owns the selection if native focus cannot be adjusted.
-    }
-  }
-
   /// Clears a Flutter-field suspension. A real editor interaction always wins
   /// over a previous find session: the suspension must never become sticky, or
   /// clicking back into the editor could no longer restore its caret and the
@@ -906,8 +844,12 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
           baseOffset: widget.text.length,
           extentOffset: widget.text.length,
         );
+    final pushedText = webEditorTextPush(
+      text: widget.text,
+      domText: _lastDomText,
+    );
     final payload = jsonEncode({
-      'text': widget.text,
+      'text': pushedText,
       'baseOffset': selection.baseOffset,
       'extentOffset': selection.extentOffset,
       // A selection just reported by the DOM is only a Flutter-side mirror.
@@ -948,6 +890,7 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
       ),
     });
     controller.evaluateJavascript(source: 'window.devOrbitSetState($payload);');
+    if (pushedText != null) _lastDomText = pushedText;
   }
 
   String _cssColor(Color color) =>
@@ -995,6 +938,17 @@ class _DesktopWebTextEditorState extends State<DesktopWebTextEditor>
       ),
     );
   }
+}
+
+/// Text to include in the next `devOrbitSetState` call.
+///
+/// The DOM reports every committed edit through `editorChanged`, and Dart
+/// mirrors that value back on each rebuild. Echoing an unchanged document
+/// would serialize the whole buffer, ship it over the JavaScript bridge and
+/// walk the DOM again on every keystroke only to discover it already matches.
+/// Returning `null` tells the DOM to keep what it has.
+String? webEditorTextPush({required String text, required String? domText}) {
+  return text == domText ? null : text;
 }
 
 const _editorHtml = r'''<!doctype html>
@@ -1502,8 +1456,15 @@ window.devOrbitExpandAll = () => {
   rerenderPreservingSelection(text, selection[0], selection[1]);
 };
 window.devOrbitSetState = next => {
-  const changedText = next.text !== readText();
+  // `text` is null when Flutter only refreshes appearance or selection: the DOM
+  // already holds that exact document, because every committed edit is reported
+  // to Dart first. Walking the DOM here would re-read the whole buffer on each
+  // keystroke, so an absent text skips the comparison and the re-render.
+  const hasText = typeof next.text === 'string';
+  const domText = hasText ? readText() : null;
+  const changedText = hasText && next.text !== domText;
   const changedSyntax = state.syntax !== next.syntax;
+  if (!hasText) delete next.text;
   state = Object.assign(state, next);
   editorShell.classList.toggle('json', state.syntax === 'json');
   editorShell.classList.toggle('dark', !!state.isDark);
@@ -1524,23 +1485,26 @@ window.devOrbitSetState = next => {
   document.documentElement.style.colorScheme = next.isDark ? 'dark' : 'light';
   editor.contentEditable = next.readOnly ? 'false' : 'true';
   if (changedText || changedSyntax) {
-    const previousText = readText();
+    // Without pushed text the DOM already holds the document, so only the
+    // render is needed: read what is there instead of rendering `undefined`.
+    const rendered = changedText ? next.text : readText();
+    const previousText = changedText ? domText : rendered;
     const previousSelection = currentSelection();
-    render(next.text, next.baseOffset, next.extentOffset, false);
+    render(rendered, next.baseOffset, next.extentOffset, false);
     if (changedSyntax) {
-      resetHistory(next.text, next.baseOffset, next.extentOffset);
+      resetHistory(rendered, next.baseOffset, next.extentOffset);
     } else {
       // An external rewrite (format, minify, sort, file load) is a normal edit
       // as far as the user is concerned, so keep the pre-replace state on the
       // stack. Resetting the history here made Cmd+Z unable to undo a format.
       pendingEditState = selectionState(previousText, previousSelection);
-      recordEdit(next.text, [next.baseOffset, next.extentOffset]);
+      recordEdit(rendered, [next.baseOffset, next.extentOffset]);
     }
   } else if (next.forceRender) {
     const selection = document.activeElement === editor
       ? currentSelection()
       : lastSelection;
-    render(next.text, selection[0], selection[1], false);
+    render(hasText ? next.text : readText(), selection[0], selection[1], false);
   } else if (document.activeElement !== editor) {
     // Flutter rebuilds can arrive while a clipboard picker owns the native
     // focus. Do not move the DOM caret, or overwrite its saved range, with a

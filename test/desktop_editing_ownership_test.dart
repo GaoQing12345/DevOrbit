@@ -1,6 +1,4 @@
 import 'package:dev_orbit/core/desktop/desktop_clipboard_focus_restorer.dart';
-import 'package:dev_orbit/core/desktop/desktop_clipboard_reader.dart';
-import 'package:dev_orbit/core/desktop/web_text_editor.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -12,139 +10,6 @@ import 'support/json_formatter_fixture.dart';
 /// and the paste destination. A Flutter overlay field (a find input) and a
 /// WebView editor must never both hold it.
 void main() {
-  Future<_OwnershipFixture> pumpOwnershipFixture(WidgetTester tester) async {
-    final queryController = TextEditingController(text: 'needle');
-    final queryFocusNode = FocusNode();
-    final editorController = DesktopWebTextEditorController();
-    final restorer = DesktopClipboardFocusRestorer(
-      targets: [
-        TextEditingClipboardTarget(
-          controller: queryController,
-          focusNode: queryFocusNode,
-        ),
-      ],
-    );
-    addTearDown(() {
-      restorer.dispose();
-      queryController.dispose();
-      queryFocusNode.dispose();
-    });
-
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(
-          body: Column(
-            children: [
-              TextField(
-                key: const ValueKey('query-field'),
-                controller: queryController,
-                focusNode: queryFocusNode,
-              ),
-              DesktopWebTextEditor(
-                controller: editorController,
-                text: '',
-                onChanged: (_) {},
-                debugLabel: 'ownership-editor',
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-    restorer.active = true;
-    return _OwnershipFixture(
-      restorer: restorer,
-      queryController: queryController,
-      queryFocusNode: queryFocusNode,
-      editorController: editorController,
-    );
-  }
-
-  testWidgets('editor activation takes the caret away from the query field', (
-    tester,
-  ) async {
-    debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
-    addTearDown(() => debugDefaultTargetPlatformOverride = null);
-    final fixture = await pumpOwnershipFixture(tester);
-
-    fixture.queryFocusNode.requestFocus();
-    await tester.pump();
-    expect(fixture.queryFocusNode.hasFocus, isTrue);
-
-    // Opening find hands ownership to the overlay field and hides the caret.
-    DesktopWebTextEditor.suspendActiveEditorFocus();
-    await tester.pump();
-    expect(DesktopWebTextEditor.debugActiveEditorSession, isFalse);
-
-    // A click inside the WebView only reaches Flutter through the DOM bridge.
-    fixture.editorController.debugHandleEditorActivation();
-    await tester.pump();
-
-    expect(fixture.queryFocusNode.hasFocus, isFalse);
-    expect(DesktopWebTextEditor.debugActiveEditorLabel, 'ownership-editor');
-    expect(DesktopWebTextEditor.debugActiveEditorSession, isTrue);
-    expect(fixture.restorer.shouldReleaseTargetOnFocusExit, isTrue);
-    debugDefaultTargetPlatformOverride = null;
-    await tester.pumpWidget(const SizedBox.shrink());
-  });
-
-  testWidgets(
-    'editor ownership keeps a captured paste out of the query field',
-    (tester) async {
-      debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
-      addTearDown(() => debugDefaultTargetPlatformOverride = null);
-      final fixture = await pumpOwnershipFixture(tester);
-
-      fixture.queryFocusNode.requestFocus();
-      await tester.pump();
-      // The editor takes the session back while the overlay field still holds
-      // Flutter focus. Restoring the caret must release that field as well.
-      fixture.editorController.restoreFocus();
-      await tester.pump();
-      expect(DesktopWebTextEditor.editorOwnsEditingSession, isTrue);
-
-      // The macOS runner captured Command+V and delivered the text natively.
-      DesktopClipboardReader.debugDeliverPasteRequest(text: 'captured-text');
-      await tester.pump(const Duration(milliseconds: 80));
-
-      expect(fixture.queryController.text, 'needle');
-      debugDefaultTargetPlatformOverride = null;
-      await tester.pumpWidget(const SizedBox.shrink());
-    },
-  );
-
-  testWidgets('a captured paste is never dropped when no target claims it', (
-    tester,
-  ) async {
-    debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
-    addTearDown(() => debugDefaultTargetPlatformOverride = null);
-    final controller = TextEditingController();
-    final focusNode = FocusNode();
-    addTearDown(controller.dispose);
-    addTearDown(focusNode.dispose);
-
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(
-          body: TextField(
-            key: const ValueKey('unregistered-field'),
-            controller: controller,
-            focusNode: focusNode,
-          ),
-        ),
-      ),
-    );
-    focusNode.requestFocus();
-    await tester.pump();
-
-    DesktopClipboardReader.debugDeliverPasteRequest(text: 'rescued');
-    await tester.pump();
-
-    expect(controller.text, 'rescued');
-    debugDefaultTargetPlatformOverride = null;
-    await tester.pumpWidget(const SizedBox.shrink());
-  });
-
   testWidgets('Command+V does not revive the previously focused field', (
     tester,
   ) async {
@@ -199,54 +64,6 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
-  testWidgets('an app switch keeps the caret in the open find panel', (
-    tester,
-  ) async {
-    debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
-    addTearDown(() => debugDefaultTargetPlatformOverride = null);
-    final fixture = await pumpOwnershipFixture(tester);
-
-    // The user was editing inside the WebView.
-    fixture.editorController.debugHandleEditorActivation();
-    await tester.pump();
-    expect(DesktopWebTextEditor.editorOwnsEditingSession, isTrue);
-
-    // Command+F opens the find overlay and hands the caret to its field.
-    DesktopWebTextEditor.suspendActiveEditorFocus();
-    fixture.queryFocusNode.requestFocus();
-    await tester.pump();
-    expect(fixture.queryFocusNode.hasFocus, isTrue);
-
-    // A clipboard picker steals the application, then returns to it. The
-    // find field is a Flutter widget, so AppKit never moved the first
-    // responder away from the WKWebView: on window activation WebKit focuses
-    // its contenteditable again and reports a DOM focus event. That event is
-    // not a user interaction with the editor.
-    fixture.editorController.debugSimulateAppInactive();
-    fixture.editorController.debugSimulateWindowBlur();
-    fixture.editorController.debugSimulateWindowFocus();
-    await tester.pump();
-    fixture.editorController.debugHandleEditorFocusEvent();
-    await tester.pump();
-    await tester.pump();
-
-    expect(fixture.queryFocusNode.hasFocus, isTrue);
-    expect(DesktopWebTextEditor.editorOwnsEditingSession, isFalse);
-    // Nothing may be armed to reclaim the caret, and the window shell must
-    // not treat this as an editor session to restore.
-    expect(DesktopWebTextEditor.debugEditorArmedForWindowRestore, isFalse);
-    expect(DesktopWebTextEditor.hasActiveEditor, isFalse);
-    expect(fixture.restorer.shouldReleaseTargetOnFocusExit, isTrue);
-
-    // The picked clipboard entry must land in the field the user left.
-    DesktopClipboardReader.debugDeliverPasteRequest(text: 'picked');
-    await tester.pump(const Duration(milliseconds: 80));
-    expect(fixture.queryController.text, contains('picked'));
-
-    debugDefaultTargetPlatformOverride = null;
-    await tester.pumpWidget(const SizedBox.shrink());
-  });
-
   testWidgets('closing the find panel releases its query field', (
     tester,
   ) async {
@@ -278,18 +95,4 @@ void main() {
     expect(field.focusNode!.hasFocus, isFalse);
     await disposeEditor(tester);
   });
-}
-
-class _OwnershipFixture {
-  const _OwnershipFixture({
-    required this.restorer,
-    required this.queryController,
-    required this.queryFocusNode,
-    required this.editorController,
-  });
-
-  final DesktopClipboardFocusRestorer restorer;
-  final TextEditingController queryController;
-  final FocusNode queryFocusNode;
-  final DesktopWebTextEditorController editorController;
 }

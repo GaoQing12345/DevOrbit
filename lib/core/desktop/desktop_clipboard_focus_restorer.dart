@@ -1,6 +1,5 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:re_editor/re_editor.dart';
@@ -163,21 +162,6 @@ class DesktopClipboardFocusRestorer with WindowListener {
   // workflow while still bounding genuinely abandoned sessions.
   static const _clipboardSessionLimit = Duration(minutes: 30);
   static const _resumedCaptureLimit = Duration(seconds: 3);
-  static const _pasteCaptureObservationRetryDelays = <Duration>[
-    Duration(milliseconds: 4),
-    Duration(milliseconds: 8),
-    Duration(milliseconds: 16),
-    Duration(milliseconds: 32),
-    Duration(milliseconds: 64),
-    Duration(milliseconds: 128),
-    Duration(milliseconds: 256),
-  ];
-  static const _newPasteCaptureObservationRetryDelays = <Duration>[
-    Duration(milliseconds: 4),
-    Duration(milliseconds: 8),
-    Duration(milliseconds: 16),
-    Duration(milliseconds: 32),
-  ];
   static const _pasteCaptureTextRetryDelays = <Duration>[
     Duration(milliseconds: 4),
     Duration(milliseconds: 8),
@@ -221,8 +205,8 @@ class DesktopClipboardFocusRestorer with WindowListener {
     if (value) {
       _trackFocus();
     } else {
-      // Hidden pages and prewarmed helper windows must not keep a native
-      // clipboard session alive or consume paste events for the visible page.
+      // Hidden pages must not keep a native clipboard session alive or consume
+      // paste events for the visible page.
       _lastTarget = null;
       _cancelRestore();
     }
@@ -470,9 +454,9 @@ class DesktopClipboardFocusRestorer with WindowListener {
     request.markHandled();
     _pasteFallbackArmed = false;
     if (_pasteOperationInFlight) {
-      // Windows can report that the paste key was pressed before the selected
-      // clipboard text becomes readable. Wake the in-flight retry immediately
-      // instead of dropping the native notification behind the operation lock.
+      // The paste key can arrive before the selected clipboard text is
+      // readable. Wake the in-flight retry immediately instead of dropping the
+      // native notification behind the operation lock.
       _cancelCaptureRetry();
       return;
     }
@@ -532,24 +516,8 @@ class DesktopClipboardFocusRestorer with WindowListener {
   bool _handleKeyEvent(KeyEvent event) {
     if (!_active || event is! KeyDownEvent) return false;
     final keyboard = HardwareKeyboard.instance;
-    final isMacOS = defaultTargetPlatform == TargetPlatform.macOS;
     final isV = event.logicalKey == LogicalKeyboardKey.keyV;
-    if (!isMacOS && isV && keyboard.isMetaPressed) {
-      if (_hasExternalEditableFocus()) {
-        _cancelRestore();
-      } else {
-        _suspendFocus();
-      }
-      return false;
-    }
-    final isPasteShortcut = isMacOS
-        ? isV && keyboard.isMetaPressed
-        : (isV && keyboard.isControlPressed) ||
-              (event.logicalKey == LogicalKeyboardKey.insert &&
-                  keyboard.isShiftPressed);
-    if (!isPasteShortcut) {
-      return false;
-    }
+    if (!isV || !keyboard.isMetaPressed) return false;
     DesktopClipboardDiagnostics.write('paste_key', {
       'session': _snapshot?.sessionId,
       'fallback_armed': _pasteFallbackArmed,
@@ -666,34 +634,6 @@ class DesktopClipboardFocusRestorer with WindowListener {
       observedChange = await _clipboardReader.didPasteCaptureObserveChange(
         snapshot.sessionId,
       );
-
-      // The injected paste key can reach Flutter before Windows posts the first
-      // WM_CLIPBOARDUPDATE for a clipboard manager. Give the native capture a
-      // short observation window before falling back to the system clipboard;
-      // otherwise the fallback can read the value that QuickClipboard has just
-      // restored and insert the wrong item.
-      if (!observedChange &&
-          nativeCaptureAvailable &&
-          defaultTargetPlatform == TargetPlatform.windows) {
-        final retryDelays = nativeCapturePrearmed
-            ? _pasteCaptureObservationRetryDelays
-            : _newPasteCaptureObservationRetryDelays;
-        for (final delay in retryDelays) {
-          await _waitForCaptureRetry(delay);
-          if (!_canPaste(snapshot)) return;
-          text = await _clipboardReader.readCapturedPasteText(
-            snapshot.sessionId,
-          );
-          if (text != null) {
-            observedChange = true;
-            break;
-          }
-          observedChange = await _clipboardReader.didPasteCaptureObserveChange(
-            snapshot.sessionId,
-          );
-          if (observedChange) break;
-        }
-      }
     }
 
     if (text == null && observedChange) {
