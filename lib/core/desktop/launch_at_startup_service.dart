@@ -34,7 +34,8 @@ class LaunchAtStartupService {
         buildMacOSLaunchAgent(label: _packageName!, bundlePath: bundlePath),
         flush: true,
       );
-      return file.exists();
+      // Awaited so a failure here lands in the same `catch` as the write.
+      return await file.exists();
     } catch (_) {
       return false;
     }
