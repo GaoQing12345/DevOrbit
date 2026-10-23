@@ -9,7 +9,7 @@ void main() {
   test(
     'native pending paste avoids a competing system clipboard read',
     () async {
-      debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+      debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
       addTearDown(() => debugDefaultTargetPlatformOverride = null);
       var systemClipboardReads = 0;
       const nativeChannel = MethodChannel('dev_orbit/clipboard');
@@ -37,56 +37,29 @@ void main() {
     },
   );
 
-  test(
-    'system clipboard read retries a transient unavailable result',
-    () async {
-      debugDefaultTargetPlatformOverride = TargetPlatform.windows;
-      addTearDown(() => debugDefaultTargetPlatformOverride = null);
-      var reads = 0;
-      final messenger =
-          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
-      messenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
-        if (call.method != 'Clipboard.getData') return null;
-        reads++;
-        if (reads < 3) return null;
-        return {'text': 'eventual clipboard text'};
-      });
-      addTearDown(
-        () => messenger.setMockMethodCallHandler(SystemChannels.platform, null),
-      );
+  test('system clipboard read is a single attempt', () async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    var reads = 0;
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
+      if (call.method != 'Clipboard.getData') return null;
+      reads++;
+      return reads == 1 ? null : {'text': 'late text'};
+    });
+    addTearDown(
+      () => messenger.setMockMethodCallHandler(SystemChannels.platform, null),
+    );
 
-      expect(
-        await const DesktopClipboardReader().readSystemText(),
-        'eventual clipboard text',
-      );
-      expect(reads, 3);
-    },
-  );
-
-  test(
-    'macOS system clipboard read does not use Windows retry backoff',
-    () async {
-      debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
-      addTearDown(() => debugDefaultTargetPlatformOverride = null);
-      var reads = 0;
-      final messenger =
-          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
-      messenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
-        if (call.method != 'Clipboard.getData') return null;
-        reads++;
-        return reads == 1 ? null : {'text': 'late text'};
-      });
-      addTearDown(
-        () => messenger.setMockMethodCallHandler(SystemChannels.platform, null),
-      );
-
-      expect(await const DesktopClipboardReader().readSystemText(), isNull);
-      expect(reads, 1);
-    },
-  );
+    // A retry chain here would keep the paste alive for half a second while
+    // the native capture already delivered the text.
+    expect(await const DesktopClipboardReader().readSystemText(), isNull);
+    expect(reads, 1);
+  });
 
   test('an old discard cannot clear a newer capture session', () async {
-    debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+    debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
     addTearDown(() => debugDefaultTargetPlatformOverride = null);
     int? activeSession;
     String? pendingText;

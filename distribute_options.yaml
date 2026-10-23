@@ -7,10 +7,8 @@ releases:
         package:
           platform: macos
           target: dmg
-
-  - name: windows
-    jobs:
-      - name: dev-orbit-windows-exe
-        package:
-          platform: windows
-          target: exe
+          # Both hooks are no-ops when the signing/notary secrets are absent, so
+          # a local `fastforge release --name macos` keeps working unsigned.
+          hooks:
+            pre: "bash macos/packaging/sign_app.sh"
+            post: "bash macos/packaging/notarize_dmg.sh"

@@ -1,28 +1,29 @@
 import 'package:dev_orbit/core/desktop/desktop_window_effects.dart';
-import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  test('sends radial mode changes to the Windows native runner', () async {
-    const channel = MethodChannel('dev_orbit/window_effects-test');
-    final calls = <MethodCall>[];
+  const channel = MethodChannel('dev_orbit/window_effects-test');
+  late List<MethodCall> calls;
+
+  setUp(() {
+    calls = [];
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, (call) async {
           calls.add(call);
           return null;
         });
-    addTearDown(() {
-      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-          .setMockMethodCallHandler(channel, null);
-    });
-    final effects = NativeDesktopWindowEffects(
-      channel: channel,
-      isWindows: true,
-      isMacOS: false,
-    );
+  });
+
+  tearDown(() {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, null);
+  });
+
+  test('forwards radial mode changes to the native window', () async {
+    final effects = NativeDesktopWindowEffects(channel: channel);
 
     await effects.setRadialMode(true);
     await effects.setRadialMode(false);
@@ -37,50 +38,13 @@ void main() {
     ]);
   });
 
-  test('sends radial mode changes to the macOS native runner', () async {
-    const channel = MethodChannel('dev_orbit/window_effects-macos');
-    final calls = <MethodCall>[];
-    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-        .setMockMethodCallHandler(channel, (call) async {
-          calls.add(call);
-          return null;
-        });
-    addTearDown(() {
-      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-          .setMockMethodCallHandler(channel, null);
-    });
-    final effects = NativeDesktopWindowEffects(
-      channel: channel,
-      isWindows: false,
-      isMacOS: true,
-    );
+  test('restores the opaque backdrop when the radial launcher closes', () async {
+    final effects = NativeDesktopWindowEffects(channel: channel);
 
-    // macOS restores the opaque window backdrop that keeps the native titlebar
-    // visible once the radial launcher is done.
+    // A clear window background leaves the native titlebar transparent, so the
+    // tool window must explicitly switch the backdrop back.
     await effects.setRadialMode(false);
-    await effects.setRadialMode(true);
 
-    expect(calls.map((call) => call.arguments), [
-      {'enabled': false},
-      {'enabled': true},
-    ]);
-  });
-
-  test('does not use the native channel outside Windows and macOS', () async {
-    const channel = MethodChannel('dev_orbit/window_effects-non-windows');
-    final effects = NativeDesktopWindowEffects(
-      channel: channel,
-      isWindows: false,
-      isMacOS: false,
-    );
-
-    await effects.setRadialMode(true);
-  });
-
-  test('macOS tool windows keep an opaque window background', () {
-    // A clear window background leaves the native titlebar transparent, which
-    // is exactly the regression reported after a macOS update.
-    expect(desktopToolWindowBackground(isWindows: false), isNull);
-    expect(desktopToolWindowBackground(isWindows: true), Colors.transparent);
+    expect(calls.single.arguments, {'enabled': false});
   });
 }

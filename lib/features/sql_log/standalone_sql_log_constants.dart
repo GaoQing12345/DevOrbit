@@ -1,3 +1,3 @@
 const standaloneSqlLogFlag = '--sql-log-window';
-const standaloneSqlLogPrewarmFlag = '--sql-log-prewarm';
+const standaloneSqlLogTitle = 'SQL 日志还原 - DevOrbit';
 const sqlLogInstanceName = 'dev-orbit-sql-log';

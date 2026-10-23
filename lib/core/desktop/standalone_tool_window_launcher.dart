@@ -1,13 +1,12 @@
-import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/services.dart';
 
-import '../../features/sql_log/standalone_sql_log_constants.dart';
 import '../../features/json_formatter/standalone_json_formatter_constants.dart';
-import '../../features/translator/standalone_translator_constants.dart';
+import '../../features/sql_log/standalone_sql_log_constants.dart';
 import '../../features/text_compare/standalone_text_compare_constants.dart';
 import '../../features/timestamp/standalone_timestamp_constants.dart';
+import '../../features/translator/standalone_translator_constants.dart';
 import 'process_window_activator.dart';
 import 'single_instance_registry.dart';
 
@@ -18,11 +17,15 @@ typedef DetachedProcessStarter =
 typedef ProcessTerminator = bool Function(int processId);
 
 abstract interface class StandaloneToolWindowLauncher {
-  Future<void> warmUp();
   Future<bool> openTool(String toolId);
   Future<void> closeAllTools();
 }
 
+/// Launches every tool as its own process and keeps it to a single window.
+///
+/// macOS names the process per tool `.app` bundle, so a tool window is a real
+/// application window owned by the main app: it is always started on demand and
+/// never prewarmed, which would keep five hidden processes alive.
 class NativeStandaloneToolWindowLauncher
     implements StandaloneToolWindowLauncher {
   NativeStandaloneToolWindowLauncher({
@@ -35,27 +38,42 @@ class NativeStandaloneToolWindowLauncher
     SingleInstanceRegistry? sqlLogInstanceRegistry,
     SingleInstanceRegistry? jsonFormatterInstanceRegistry,
     String? executable,
-    bool? enableToolPrewarming,
   }) : _processStarter = processStarter ?? _startDetached,
        _processTerminator = processTerminator ?? _terminateProcess,
        _windowActivator = windowActivator ?? NativeProcessWindowActivator(),
-       _translatorInstanceRegistry =
-           translatorInstanceRegistry ??
-           FileSingleInstanceRegistry(translatorInstanceName),
-       _textCompareInstanceRegistry =
-           textCompareInstanceRegistry ??
-           FileSingleInstanceRegistry(textCompareInstanceName),
-       _timestampInstanceRegistry =
-           timestampInstanceRegistry ??
-           FileSingleInstanceRegistry(timestampInstanceName),
-       _sqlLogInstanceRegistry =
-           sqlLogInstanceRegistry ??
-           FileSingleInstanceRegistry(sqlLogInstanceName),
-       _jsonFormatterInstanceRegistry =
-           jsonFormatterInstanceRegistry ??
-           FileSingleInstanceRegistry(jsonFormatterInstanceName),
        _executable = executable ?? Platform.resolvedExecutable,
-       _enableToolPrewarming = enableToolPrewarming ?? Platform.isWindows;
+       _specs = {
+         jsonFormatterId: _ToolSpec(
+           flag: standaloneJsonFormatterFlag,
+           registry:
+               jsonFormatterInstanceRegistry ??
+               FileSingleInstanceRegistry(jsonFormatterInstanceName),
+         ),
+         translatorId: _ToolSpec(
+           flag: standaloneTranslatorFlag,
+           registry:
+               translatorInstanceRegistry ??
+               FileSingleInstanceRegistry(translatorInstanceName),
+         ),
+         textCompareId: _ToolSpec(
+           flag: standaloneTextCompareFlag,
+           registry:
+               textCompareInstanceRegistry ??
+               FileSingleInstanceRegistry(textCompareInstanceName),
+         ),
+         timestampId: _ToolSpec(
+           flag: standaloneTimestampFlag,
+           registry:
+               timestampInstanceRegistry ??
+               FileSingleInstanceRegistry(timestampInstanceName),
+         ),
+         sqlLogId: _ToolSpec(
+           flag: standaloneSqlLogFlag,
+           registry:
+               sqlLogInstanceRegistry ??
+               FileSingleInstanceRegistry(sqlLogInstanceName),
+         ),
+       };
 
   static const jsonFormatterId = 'json-formatter';
   static const translatorId = 'translator';
@@ -66,100 +84,20 @@ class NativeStandaloneToolWindowLauncher
   final DetachedProcessStarter _processStarter;
   final ProcessTerminator _processTerminator;
   final ProcessWindowActivator _windowActivator;
-  final SingleInstanceRegistry _translatorInstanceRegistry;
-  final SingleInstanceRegistry _textCompareInstanceRegistry;
-  final SingleInstanceRegistry _timestampInstanceRegistry;
-  final SingleInstanceRegistry _sqlLogInstanceRegistry;
-  final SingleInstanceRegistry _jsonFormatterInstanceRegistry;
   final String _executable;
-  final bool _enableToolPrewarming;
+  final Map<String, _ToolSpec> _specs;
   final Map<String, int> _singletonProcessIds = {};
   final Map<String, Future<bool>> _singletonOpens = {};
   final Set<int> _processIds = {};
   final Set<Future<int>> _pendingStarts = {};
-  final Map<String, Future<void>> _warmUps = {};
-  final Map<String, int> _prewarmedProcessIds = {};
   bool _closing = false;
 
   @override
-  Future<void> warmUp() async {
-    if (!_enableToolPrewarming || _closing) return;
-    await Future.wait([
-      _warmUpTool(
-        toolId: jsonFormatterId,
-        flag: standaloneJsonFormatterFlag,
-        prewarmFlag: standaloneJsonFormatterPrewarmFlag,
-        registry: _jsonFormatterInstanceRegistry,
-      ),
-      _warmUpToolAfterDelay(
-        delay: const Duration(milliseconds: 80),
-        toolId: translatorId,
-        flag: standaloneTranslatorFlag,
-        prewarmFlag: standaloneTranslatorPrewarmFlag,
-        registry: _translatorInstanceRegistry,
-      ),
-      _warmUpToolAfterDelay(
-        delay: const Duration(milliseconds: 160),
-        toolId: textCompareId,
-        flag: standaloneTextCompareFlag,
-        prewarmFlag: standaloneTextComparePrewarmFlag,
-        registry: _textCompareInstanceRegistry,
-      ),
-      _warmUpToolAfterDelay(
-        delay: const Duration(milliseconds: 240),
-        toolId: timestampId,
-        flag: standaloneTimestampFlag,
-        prewarmFlag: standaloneTimestampPrewarmFlag,
-        registry: _timestampInstanceRegistry,
-      ),
-      _warmUpToolAfterDelay(
-        delay: const Duration(milliseconds: 320),
-        toolId: sqlLogId,
-        flag: standaloneSqlLogFlag,
-        prewarmFlag: standaloneSqlLogPrewarmFlag,
-        registry: _sqlLogInstanceRegistry,
-      ),
-    ]);
-  }
-
-  @override
   Future<bool> openTool(String toolId) async {
-    if (_closing) return false;
+    final spec = _specs[toolId];
+    if (_closing || spec == null) return false;
     try {
-      switch (toolId) {
-        case jsonFormatterId:
-          return await _openJsonFormatter();
-        case translatorId:
-          return await _openSingleton(
-            toolId: translatorId,
-            flag: standaloneTranslatorFlag,
-            prewarmFlag: standaloneTranslatorPrewarmFlag,
-            registry: _translatorInstanceRegistry,
-          );
-        case textCompareId:
-          return await _openSingleton(
-            toolId: textCompareId,
-            flag: standaloneTextCompareFlag,
-            prewarmFlag: standaloneTextComparePrewarmFlag,
-            registry: _textCompareInstanceRegistry,
-          );
-        case timestampId:
-          return await _openSingleton(
-            toolId: timestampId,
-            flag: standaloneTimestampFlag,
-            prewarmFlag: standaloneTimestampPrewarmFlag,
-            registry: _timestampInstanceRegistry,
-          );
-        case sqlLogId:
-          return await _openSingleton(
-            toolId: sqlLogId,
-            flag: standaloneSqlLogFlag,
-            prewarmFlag: standaloneSqlLogPrewarmFlag,
-            registry: _sqlLogInstanceRegistry,
-          );
-        default:
-          return false;
-      }
+      return await _openSingleton(toolId, spec);
     } on ProcessException {
       return false;
     } on FileSystemException {
@@ -167,84 +105,40 @@ class NativeStandaloneToolWindowLauncher
     }
   }
 
-  Future<void> _warmUpToolAfterDelay({
-    required Duration delay,
-    required String toolId,
-    required String flag,
-    required String prewarmFlag,
-    SingleInstanceRegistry? registry,
-  }) async {
-    await Future<void>.delayed(delay);
-    await _warmUpTool(
-      toolId: toolId,
-      flag: flag,
-      prewarmFlag: prewarmFlag,
-      registry: registry,
-    );
-  }
-
-  Future<void> _warmUpTool({
-    required String toolId,
-    required String flag,
-    required String prewarmFlag,
-    SingleInstanceRegistry? registry,
-  }) async {
-    if (!_enableToolPrewarming ||
-        _closing ||
-        _prewarmedProcessIds.containsKey(toolId) ||
-        _singletonProcessIds.containsKey(toolId)) {
-      return;
-    }
-    final pending = _warmUps[toolId];
-    if (pending != null) return pending;
-    final warmUp = _startToolWarmUp(
-      toolId: toolId,
-      flag: flag,
-      prewarmFlag: prewarmFlag,
-      registry: registry,
-    );
-    _warmUps[toolId] = warmUp;
+  Future<bool> _openSingleton(String toolId, _ToolSpec spec) async {
+    final pendingOpen = _singletonOpens[toolId];
+    if (pendingOpen != null) return pendingOpen;
+    final open = _activateOrStart(toolId, spec);
+    _singletonOpens[toolId] = open;
     try {
-      await warmUp;
-    } on ProcessException {
-      return;
-    } on FileSystemException {
-      return;
+      return await open;
     } finally {
-      if (identical(_warmUps[toolId], warmUp)) _warmUps.remove(toolId);
+      if (identical(_singletonOpens[toolId], open)) {
+        _singletonOpens.remove(toolId);
+      }
     }
   }
 
-  Future<void> _startToolWarmUp({
-    required String toolId,
-    required String flag,
-    required String prewarmFlag,
-    SingleInstanceRegistry? registry,
-  }) async {
-    final registeredProcessId = await registry?.findProcessId();
-    if (_closing) return;
-    if (registeredProcessId != null) {
-      _prewarmedProcessIds[toolId] = registeredProcessId;
+  Future<bool> _activateOrStart(String toolId, _ToolSpec spec) async {
+    final trackedProcessId = _singletonProcessIds[toolId];
+    if (trackedProcessId != null) {
+      if (await _activate(trackedProcessId)) {
+        _processIds.add(trackedProcessId);
+        return true;
+      }
+      _singletonProcessIds.remove(toolId);
+    }
+    // A window left over from an earlier app run still owns the registry entry.
+    final registeredProcessId = await spec.registry.findProcessId();
+    if (registeredProcessId != null &&
+        await _activateWithRetry(registeredProcessId)) {
+      _singletonProcessIds[toolId] = registeredProcessId;
       _processIds.add(registeredProcessId);
-      return;
+      return true;
     }
-    final processId = await _startProcess([flag, prewarmFlag]);
-    if (_closing) return;
-    if (!_prewarmedProcessIds.containsKey(toolId) &&
-        !_singletonProcessIds.containsKey(toolId)) {
-      _prewarmedProcessIds[toolId] = processId;
-      return;
-    }
-    _terminateTrackedProcess(processId);
-  }
-
-  Future<bool> _openJsonFormatter() async {
-    return _openSingleton(
-      toolId: jsonFormatterId,
-      flag: standaloneJsonFormatterFlag,
-      prewarmFlag: standaloneJsonFormatterPrewarmFlag,
-      registry: _jsonFormatterInstanceRegistry,
-    );
+    if (_closing) return false;
+    _singletonProcessIds[toolId] = await _startProcess([spec.flag]);
+    return true;
   }
 
   Future<bool> _activateWithRetry(int processId) async {
@@ -257,73 +151,6 @@ class NativeStandaloneToolWindowLauncher
     return false;
   }
 
-  Future<bool> _openSingleton({
-    required String toolId,
-    required String flag,
-    required String prewarmFlag,
-    required SingleInstanceRegistry registry,
-  }) async {
-    final pendingOpen = _singletonOpens[toolId];
-    if (pendingOpen != null) return await pendingOpen;
-    final open = _activateOrStartSingleton(
-      toolId: toolId,
-      flag: flag,
-      prewarmFlag: prewarmFlag,
-      registry: registry,
-    );
-    _singletonOpens[toolId] = open;
-    try {
-      return await open;
-    } finally {
-      if (identical(_singletonOpens[toolId], open)) {
-        _singletonOpens.remove(toolId);
-      }
-    }
-  }
-
-  Future<bool> _activateOrStartSingleton({
-    required String toolId,
-    required String flag,
-    required String prewarmFlag,
-    required SingleInstanceRegistry registry,
-  }) async {
-    final trackedProcessId = _singletonProcessIds[toolId];
-    if (trackedProcessId != null && await _activate(trackedProcessId)) {
-      _processIds.add(trackedProcessId);
-      return true;
-    }
-    if (trackedProcessId != null) {
-      _singletonProcessIds.remove(toolId);
-    }
-    await _warmUpTool(
-      toolId: toolId,
-      flag: flag,
-      prewarmFlag: prewarmFlag,
-      registry: registry,
-    );
-    final prewarmedProcessId = _prewarmedProcessIds.remove(toolId);
-    if (prewarmedProcessId != null &&
-        await _activateWithRetry(prewarmedProcessId)) {
-      _singletonProcessIds[toolId] = prewarmedProcessId;
-      _processIds.add(prewarmedProcessId);
-      return true;
-    }
-    if (prewarmedProcessId != null) {
-      _terminateTrackedProcess(prewarmedProcessId);
-    }
-    final registeredProcessId = await registry.findProcessId();
-    if (registeredProcessId != null &&
-        registeredProcessId != prewarmedProcessId &&
-        await _activateWithRetry(registeredProcessId)) {
-      _singletonProcessIds[toolId] = registeredProcessId;
-      _processIds.add(registeredProcessId);
-      return true;
-    }
-    if (_closing) return false;
-    _singletonProcessIds[toolId] = await _startProcess([flag]);
-    return true;
-  }
-
   Future<int> _startProcess(List<String> arguments) async {
     final pending = _processStarter(_executable, arguments);
     _pendingStarts.add(pending);
@@ -333,6 +160,14 @@ class NativeStandaloneToolWindowLauncher
       return processId;
     } finally {
       _pendingStarts.remove(pending);
+    }
+  }
+
+  Future<bool> _activate(int processId) async {
+    try {
+      return await _windowActivator.activate(processId);
+    } on PlatformException {
+      return false;
     }
   }
 
@@ -354,47 +189,23 @@ class NativeStandaloneToolWindowLauncher
         // Failed starts remove themselves from the pending set.
       }
     }
-    await _trackRegisteredProcess(_translatorInstanceRegistry);
-    await _trackRegisteredProcess(_textCompareInstanceRegistry);
-    await _trackRegisteredProcess(_timestampInstanceRegistry);
-    await _trackRegisteredProcess(_sqlLogInstanceRegistry);
-    await _trackRegisteredProcess(_jsonFormatterInstanceRegistry);
+    for (final spec in _specs.values) {
+      try {
+        final processId = await spec.registry.findProcessId();
+        if (processId != null) _processIds.add(processId);
+      } on Object {
+        // In-memory tracking is still sufficient for the current app session.
+      }
+    }
     final processIds = _processIds.toList();
     _processIds.clear();
     _singletonProcessIds.clear();
-    _prewarmedProcessIds.clear();
     for (final processId in processIds) {
       try {
         _processTerminator(processId);
       } on Object {
         // Continue closing the other standalone windows.
       }
-    }
-  }
-
-  Future<void> _trackRegisteredProcess(SingleInstanceRegistry registry) async {
-    try {
-      final processId = await registry.findProcessId();
-      if (processId != null) _processIds.add(processId);
-    } on Object {
-      // In-memory tracking is still sufficient for the current app session.
-    }
-  }
-
-  Future<bool> _activate(int processId) async {
-    try {
-      return await _windowActivator.activate(processId);
-    } on PlatformException {
-      return false;
-    }
-  }
-
-  void _terminateTrackedProcess(int processId) {
-    _processIds.remove(processId);
-    try {
-      _processTerminator(processId);
-    } on Object {
-      // A failed cleanup must not prevent a fallback window from opening.
     }
   }
 
@@ -411,4 +222,12 @@ class NativeStandaloneToolWindowLauncher
   }
 
   static bool _terminateProcess(int processId) => Process.killPid(processId);
+}
+
+class _ToolSpec {
+  const _ToolSpec({required this.flag, required this.registry});
+
+  /// Command line flag that turns the shared executable into this tool window.
+  final String flag;
+  final SingleInstanceRegistry registry;
 }

@@ -105,7 +105,7 @@ void main() {
   testWidgets(
     'QuickClipboard paste uses text captured before clipboard restoration',
     (tester) async {
-      debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+      debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
       addTearDown(() => debugDefaultTargetPlatformOverride = null);
       final fixture = await JsonFormatterFixture.create(text: 'abcdef');
       mockClipboard(tester, initialText: 'restored clipboard');
@@ -120,7 +120,7 @@ void main() {
       await _blurEditor(tester, editor.focusNode!);
       nativeClipboard.pendingPasteText = 'QuickClipboard item';
       await _focusWindow(tester);
-      await _pasteWithControl(tester);
+      await _pasteWithMeta(tester);
 
       expect(fixture.controller.text, 'abcQuickClipboard itemdef');
       await tester.pump(const Duration(milliseconds: 350));
@@ -132,7 +132,7 @@ void main() {
   testWidgets(
     'QuickClipboard double-click uses the first native clipboard update',
     (tester) async {
-      debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+      debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
       addTearDown(() => debugDefaultTargetPlatformOverride = null);
       final fixture = await JsonFormatterFixture.create(text: 'abcdef');
       mockClipboard(tester, initialText: 'restored clipboard');
@@ -148,7 +148,7 @@ void main() {
       nativeClipboard.pendingPasteText = 'QuickClipboard item';
       nativeClipboard.revision += 2;
       await _focusWindow(tester);
-      await _pasteWithControl(tester);
+      await _pasteWithMeta(tester);
 
       expect(fixture.controller.text, 'abcQuickClipboard itemdef');
       await tester.pump(const Duration(milliseconds: 350));
@@ -160,7 +160,7 @@ void main() {
   testWidgets('clipboard changes do not insert without a paste action', (
     tester,
   ) async {
-    debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+    debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
     addTearDown(() => debugDefaultTargetPlatformOverride = null);
     final fixture = await JsonFormatterFixture.create(text: 'abcdef');
     mockClipboard(tester, initialText: 'copied text');
@@ -186,7 +186,7 @@ void main() {
   testWidgets(
     'QuickClipboard selection notification pastes the selected item',
     (tester) async {
-      debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+      debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
       addTearDown(() => debugDefaultTargetPlatformOverride = null);
       final fixture = await JsonFormatterFixture.create(text: 'abcdef');
       mockClipboard(tester, initialText: 'restored previous value');
@@ -217,7 +217,7 @@ void main() {
   testWidgets(
     'QuickClipboard paste survives its delayed hide animation and native event',
     (tester) async {
-      debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+      debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
       addTearDown(() => debugDefaultTargetPlatformOverride = null);
       final fixture = await JsonFormatterFixture.create(text: 'abcdef');
       mockClipboard(tester, initialText: 'old clipboard');
@@ -249,7 +249,7 @@ void main() {
   testWidgets(
     'QuickClipboard capture survives more than thirty seconds of selection',
     (tester) async {
-      debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+      debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
       addTearDown(() => debugDefaultTargetPlatformOverride = null);
       final fixture = await JsonFormatterFixture.create(text: 'abcdef');
       mockClipboard(tester, initialText: 'restored clipboard');
@@ -277,45 +277,9 @@ void main() {
   );
 
   testWidgets(
-    'QuickClipboard paste waits when the key arrives before clipboard text',
-    (tester) async {
-      debugDefaultTargetPlatformOverride = TargetPlatform.windows;
-      addTearDown(() => debugDefaultTargetPlatformOverride = null);
-      final fixture = await JsonFormatterFixture.create(text: 'abcdef');
-      mockClipboard(tester, initialText: 'restored previous value');
-      final nativeClipboard = mockClipboardRevision(tester);
-      await tester.pumpWidget(fixture.widget);
-      final editor = tester.widget<CodeEditor>(find.byType(CodeEditor));
-      editor.controller!.selection = const CodeLineSelection.collapsed(
-        index: 0,
-        offset: 3,
-      );
-
-      await _blurEditor(tester, editor.focusNode!);
-      final sessionId = nativeClipboard.armedSessionId!;
-      await _focusWindow(tester);
-      await _pasteWithControl(tester);
-      await tester.pump(const Duration(milliseconds: 80));
-
-      expect(fixture.controller.text, 'abcdef');
-
-      nativeClipboard.pendingPasteText = 'late QuickClipboard item';
-      nativeClipboard.observedChange = true;
-      await _sendNativePasteRequested(sessionId: sessionId);
-      await tester.pump(const Duration(milliseconds: 32));
-      await tester.pump();
-
-      expect(fixture.controller.text, 'abclate QuickClipboard itemdef');
-      await tester.pump(const Duration(milliseconds: 350));
-      await disposeEditor(tester);
-      debugDefaultTargetPlatformOverride = null;
-    },
-  );
-
-  testWidgets(
     'QuickClipboard Shift+Insert is suppressed after native insertion',
     (tester) async {
-      debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+      debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
       addTearDown(() => debugDefaultTargetPlatformOverride = null);
       final fixture = await JsonFormatterFixture.create(text: 'abcdef');
       mockClipboard(tester, initialText: 'QuickClipboard item');
@@ -346,39 +310,10 @@ void main() {
     },
   );
 
-  testWidgets(
-    'sessionless Windows native paste beats the restored system clipboard',
-    (tester) async {
-      debugDefaultTargetPlatformOverride = TargetPlatform.windows;
-      addTearDown(() => debugDefaultTargetPlatformOverride = null);
-      final fixture = await JsonFormatterFixture.create(text: 'abcdef');
-      mockClipboard(tester, initialText: 'restored old value');
-      final nativeClipboard = mockClipboardRevision(tester);
-      nativeClipboard.pasteCapturePrearmed = false;
-      await tester.pumpWidget(fixture.widget);
-      final editor = tester.widget<CodeEditor>(find.byType(CodeEditor));
-      editor.controller!.selection = const CodeLineSelection.collapsed(
-        index: 0,
-        offset: 3,
-      );
-      editor.focusNode!.requestFocus();
-      await tester.pump();
-
-      await _pasteWithControl(tester);
-      await _sendNativePasteRequested(text: 'selected clipboard item');
-      await tester.pump();
-
-      expect(fixture.controller.text, 'abcselected clipboard itemdef');
-      await tester.pump(const Duration(milliseconds: 350));
-      await disposeEditor(tester);
-      debugDefaultTargetPlatformOverride = null;
-    },
-  );
-
   testWidgets('QuickClipboard paste restores the previous find cursor', (
     tester,
   ) async {
-    debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+    debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
     addTearDown(() => debugDefaultTargetPlatformOverride = null);
     final fixture = await JsonFormatterFixture.create();
     mockClipboard(tester, initialText: 'restored clipboard');
@@ -400,7 +335,7 @@ void main() {
     await _blurEditor(tester, field.focusNode!);
     nativeClipboard.pendingPasteText = 'QuickClipboard item';
     await _focusWindow(tester);
-    await _pasteWithControl(tester);
+    await _pasteWithMeta(tester);
 
     expect(field.controller!.text, 'abQuickClipboard itemcd');
     await disposeEditor(tester);
@@ -410,7 +345,7 @@ void main() {
   testWidgets(
     'automatic paste never falls back to a restored system clipboard value',
     (tester) async {
-      debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+      debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
       addTearDown(() => debugDefaultTargetPlatformOverride = null);
       final fixture = await JsonFormatterFixture.create(text: 'abcdef');
       final clipboard = mockClipboard(tester, initialText: 'old clipboard');
@@ -438,7 +373,7 @@ void main() {
   testWidgets(
     'a missed native capture never pastes the restored previous value',
     (tester) async {
-      debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+      debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
       addTearDown(() => debugDefaultTargetPlatformOverride = null);
       final fixture = await JsonFormatterFixture.create(text: 'abcdef');
       mockClipboard(tester, initialText: 'restored previous value');
@@ -453,7 +388,7 @@ void main() {
       await _blurEditor(tester, editor.focusNode!);
       nativeClipboard.observedChange = true;
       await _focusWindow(tester);
-      await _pasteWithControl(tester);
+      await _pasteWithMeta(tester);
       await tester.pump(const Duration(milliseconds: 80));
 
       expect(fixture.controller.text, 'abcdef');
@@ -477,10 +412,10 @@ Future<void> _focusWindow(WidgetTester tester) async {
   await tester.pump();
 }
 
-Future<void> _pasteWithControl(WidgetTester tester) async {
-  await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+Future<void> _pasteWithMeta(WidgetTester tester) async {
+  await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
   await tester.sendKeyEvent(LogicalKeyboardKey.keyV);
-  await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+  await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
   await tester.pump();
 }
 

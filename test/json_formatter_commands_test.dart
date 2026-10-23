@@ -8,34 +8,6 @@ import 'package:re_editor/re_editor.dart';
 import 'support/json_formatter_fixture.dart';
 
 void main() {
-  testWidgets('Control+V pastes clipboard text into the find input', (
-    tester,
-  ) async {
-    debugDefaultTargetPlatformOverride = TargetPlatform.windows;
-    addTearDown(() => debugDefaultTargetPlatformOverride = null);
-    final fixture = await JsonFormatterFixture.create();
-    await tester.pumpWidget(fixture.widget);
-    mockClipboard(tester, initialText: 'clipboard-keyword');
-
-    await tester.tap(find.byTooltip('查找'));
-    await tester.pump();
-    await tester.tap(find.byKey(const ValueKey('json-find-input')));
-    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
-    await tester.sendKeyEvent(LogicalKeyboardKey.keyV);
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
-    await tester.pump();
-
-    final field = tester.widget<TextField>(
-      find.descendant(
-        of: find.byKey(const ValueKey('json-find-input')),
-        matching: find.byType(TextField),
-      ),
-    );
-    expect(field.controller!.text, 'clipboard-keyword');
-    await disposeEditor(tester);
-    debugDefaultTargetPlatformOverride = null;
-  });
-
   testWidgets('Command+V pastes clipboard text into the find input on macOS', (
     tester,
   ) async {
@@ -67,7 +39,7 @@ void main() {
   testWidgets('find input restores focus after the clipboard panel closes', (
     tester,
   ) async {
-    debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+    debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
     addTearDown(() => debugDefaultTargetPlatformOverride = null);
     final fixture = await JsonFormatterFixture.create();
     await tester.pumpWidget(fixture.widget);
@@ -90,9 +62,9 @@ void main() {
     expect(editor.focusNode!.hasFocus, isTrue);
 
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
-    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
     await tester.sendKeyEvent(LogicalKeyboardKey.keyV);
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
     await tester.pump();
     expect(field.focusNode!.hasFocus, isTrue);
     expect(field.controller!.text, 'restored-clipboard');
@@ -104,7 +76,7 @@ void main() {
   testWidgets('JSON editor restores focus after the clipboard panel closes', (
     tester,
   ) async {
-    debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+    debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
     addTearDown(() => debugDefaultTargetPlatformOverride = null);
     final fixture = await JsonFormatterFixture.create();
     await tester.pumpWidget(fixture.widget);
@@ -121,37 +93,15 @@ void main() {
     expect(editor.focusNode!.hasFocus, isFalse);
 
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
-    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
     await tester.sendKeyEvent(LogicalKeyboardKey.keyV);
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
     await tester.pump();
     await tester.pump();
 
     expect(editor.focusNode!.hasFocus, isTrue);
     expect(fixture.controller.text, '{"from":"clipboard"}');
     await tester.pump(const Duration(milliseconds: 350));
-    await disposeEditor(tester);
-    debugDefaultTargetPlatformOverride = null;
-  });
-
-  testWidgets('Windows+V remains available to clipboard history', (
-    tester,
-  ) async {
-    debugDefaultTargetPlatformOverride = TargetPlatform.windows;
-    addTearDown(() => debugDefaultTargetPlatformOverride = null);
-    final fixture = await JsonFormatterFixture.create();
-    await tester.pumpWidget(fixture.widget);
-    mockClipboard(tester, initialText: '{"source":"history"}');
-
-    final editor = tester.widget<CodeEditor>(find.byType(CodeEditor));
-    editor.focusNode!.requestFocus();
-    await tester.pump();
-    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
-    await tester.sendKeyEvent(LogicalKeyboardKey.keyV);
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
-    await tester.pump();
-
-    expect(fixture.controller.text, isEmpty);
     await disposeEditor(tester);
     debugDefaultTargetPlatformOverride = null;
   });

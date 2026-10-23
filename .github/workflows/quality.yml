@@ -6,7 +6,7 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v5
       - uses: subosito/flutter-action@v2
@@ -17,3 +17,6 @@ jobs:
       - run: dart format --output=none --set-exit-if-changed lib test
       - run: flutter analyze
       - run: flutter test
+      # Compiles the Swift runner as well. Without it a broken native change is
+      # only discovered when a release tag is pushed.
+      - run: flutter build macos --debug

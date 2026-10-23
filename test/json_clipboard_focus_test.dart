@@ -11,7 +11,7 @@ void main() {
   testWidgets('window focus restores the JSON editor before automatic paste', (
     tester,
   ) async {
-    debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+    debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
     addTearDown(() => debugDefaultTargetPlatformOverride = null);
     final fixture = await JsonFormatterFixture.create();
     await tester.pumpWidget(fixture.widget);
@@ -25,7 +25,7 @@ void main() {
     await tester.pump();
 
     await sendWindowEvent('focus');
-    await pasteWithControl(tester);
+    await pasteWithMeta(tester);
     await tester.pump();
 
     expect(editor.focusNode!.hasFocus, isTrue);
@@ -38,7 +38,7 @@ void main() {
   testWidgets('window focus restores the find input before automatic paste', (
     tester,
   ) async {
-    debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+    debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
     addTearDown(() => debugDefaultTargetPlatformOverride = null);
     final fixture = await JsonFormatterFixture.create();
     await tester.pumpWidget(fixture.widget);
@@ -57,7 +57,7 @@ void main() {
     await tester.pump();
 
     await sendWindowEvent('focus');
-    await pasteWithControl(tester);
+    await pasteWithMeta(tester);
     await tester.pump();
 
     expect(field.focusNode!.hasFocus, isTrue);
@@ -66,67 +66,13 @@ void main() {
     debugDefaultTargetPlatformOverride = null;
   });
 
-  testWidgets('automatic paste survives a delayed window focus event', (
+  testWidgets('Command+V pastes the focused target without window events', (
     tester,
   ) async {
-    debugDefaultTargetPlatformOverride = TargetPlatform.windows;
-    addTearDown(() => debugDefaultTargetPlatformOverride = null);
-    final fixture = await JsonFormatterFixture.create();
-    await tester.pumpWidget(fixture.widget);
-    mockClipboard(tester, initialText: '{"paste":"before-focus-event"}');
-
-    final editor = tester.widget<CodeEditor>(find.byType(CodeEditor));
-    editor.focusNode!.requestFocus();
-    await tester.pump();
-    await sendWindowEvent('blur');
-    editor.focusNode!.unfocus();
-    await tester.pump();
-
-    await pasteWithControl(tester);
-    await sendWindowEvent('focus');
-    await tester.pump();
-    await tester.pump();
-
-    expect(fixture.controller.text, '{"paste":"before-focus-event"}');
-    await tester.pump(const Duration(milliseconds: 350));
-    await disposeEditor(tester);
-    debugDefaultTargetPlatformOverride = null;
-  });
-
-  testWidgets('Windows+V arms paste when no window events are emitted', (
-    tester,
-  ) async {
-    debugDefaultTargetPlatformOverride = TargetPlatform.windows;
-    addTearDown(() => debugDefaultTargetPlatformOverride = null);
-    final fixture = await JsonFormatterFixture.create();
-    await tester.pumpWidget(fixture.widget);
-    mockClipboard(tester, initialText: '{"paste":"after-Windows-V"}');
-
-    final editor = tester.widget<CodeEditor>(find.byType(CodeEditor));
-    editor.focusNode!.requestFocus();
-    await tester.pump();
-    await pasteWithMeta(tester);
-    editor.focusNode!.unfocus();
-    await tester.pump();
-
-    await pasteWithControl(tester);
-    await tester.pump();
-    await tester.pump();
-
-    expect(editor.focusNode!.hasFocus, isTrue);
-    expect(fixture.controller.text, '{"paste":"after-Windows-V"}');
-    await tester.pump(const Duration(milliseconds: 350));
-    await disposeEditor(tester);
-    debugDefaultTargetPlatformOverride = null;
-  });
-
-  testWidgets('Ctrl+V pastes the focused target without window events', (
-    tester,
-  ) async {
-    debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+    debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
     addTearDown(() => debugDefaultTargetPlatformOverride = null);
     final fixture = await JsonFormatterFixture.create(text: 'abcdef');
-    mockClipboard(tester, initialText: 'direct-control-v');
+    mockClipboard(tester, initialText: 'direct-command-v');
     final nativeClipboard = mockClipboardRevision(tester);
     nativeClipboard.pasteCapturePrearmed = false;
     await tester.pumpWidget(fixture.widget);
@@ -139,10 +85,10 @@ void main() {
     editor.focusNode!.requestFocus();
     await tester.pump();
 
-    await pasteWithControl(tester);
+    await pasteWithMeta(tester);
     await tester.pump(const Duration(milliseconds: 80));
 
-    expect(fixture.controller.text, 'abcdirect-control-vdef');
+    expect(fixture.controller.text, 'abcdirect-command-vdef');
     await tester.pump(const Duration(milliseconds: 350));
     await disposeEditor(tester);
     debugDefaultTargetPlatformOverride = null;
@@ -151,7 +97,7 @@ void main() {
   testWidgets('find paste survives a delayed window focus event', (
     tester,
   ) async {
-    debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+    debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
     addTearDown(() => debugDefaultTargetPlatformOverride = null);
     final fixture = await JsonFormatterFixture.create();
     await tester.pumpWidget(fixture.widget);
@@ -169,7 +115,7 @@ void main() {
     field.focusNode!.unfocus();
     await tester.pump();
 
-    await pasteWithControl(tester);
+    await pasteWithMeta(tester);
     await sendWindowEvent('focus');
     await tester.pump();
 
@@ -179,7 +125,7 @@ void main() {
   });
 
   testWidgets('find focus exit releases stale paste ownership', (tester) async {
-    debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+    debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
     addTearDown(() => debugDefaultTargetPlatformOverride = null);
     final fixture = await JsonFormatterFixture.create();
     await tester.pumpWidget(fixture.widget);
@@ -204,7 +150,7 @@ void main() {
 
     field.focusNode!.unfocus();
     await tester.pump();
-    await pasteWithControl(tester);
+    await pasteWithMeta(tester);
     await tester.pump(const Duration(milliseconds: 80));
 
     expect(field.controller!.text, 'needle');
@@ -212,95 +158,7 @@ void main() {
     debugDefaultTargetPlatformOverride = null;
   });
 
-  testWidgets('Windows+V arms find paste without window events', (
-    tester,
-  ) async {
-    debugDefaultTargetPlatformOverride = TargetPlatform.windows;
-    addTearDown(() => debugDefaultTargetPlatformOverride = null);
-    final fixture = await JsonFormatterFixture.create();
-    await tester.pumpWidget(fixture.widget);
-    mockClipboard(tester, initialText: 'after-Windows-V');
-
-    await tester.tap(find.byTooltip('查找'));
-    await tester.pump();
-    final field = tester.widget<TextField>(
-      find.descendant(
-        of: find.byKey(const ValueKey('json-find-input')),
-        matching: find.byType(TextField),
-      ),
-    );
-    await pasteWithMeta(tester);
-    field.focusNode!.unfocus();
-    await tester.pump();
-
-    await pasteWithControl(tester);
-    await tester.pump();
-
-    expect(field.focusNode!.hasFocus, isTrue);
-    expect(field.controller!.text, 'after-Windows-V');
-    await disposeEditor(tester);
-    debugDefaultTargetPlatformOverride = null;
-  });
-
-  testWidgets('Windows+V stays available while focus restoration is pending', (
-    tester,
-  ) async {
-    debugDefaultTargetPlatformOverride = TargetPlatform.windows;
-    addTearDown(() => debugDefaultTargetPlatformOverride = null);
-    final fixture = await JsonFormatterFixture.create();
-    await tester.pumpWidget(fixture.widget);
-    mockClipboard(tester, initialText: '{"must":"not-paste"}');
-
-    final editor = tester.widget<CodeEditor>(find.byType(CodeEditor));
-    editor.focusNode!.requestFocus();
-    await tester.pump();
-    await sendWindowEvent('blur');
-    editor.focusNode!.unfocus();
-    await tester.pump();
-
-    await pasteWithMeta(tester);
-    await sendWindowEvent('focus');
-    await tester.pump();
-
-    expect(fixture.controller.text, isEmpty);
-    await disposeEditor(tester);
-    debugDefaultTargetPlatformOverride = null;
-  });
-
-  testWidgets('Windows+V in another input does not arm JSON paste', (
-    tester,
-  ) async {
-    debugDefaultTargetPlatformOverride = TargetPlatform.windows;
-    addTearDown(() => debugDefaultTargetPlatformOverride = null);
-    final otherController = TextEditingController();
-    addTearDown(otherController.dispose);
-    final fixture = await JsonFormatterFixture.create(
-      sibling: TextField(
-        key: const ValueKey('other-input'),
-        controller: otherController,
-      ),
-      showSibling: true,
-    );
-    await tester.pumpWidget(fixture.widget);
-    mockClipboard(tester, initialText: 'other-input-text');
-
-    await tester.tap(find.byKey(const ValueKey('other-input')));
-    await tester.pump();
-
-    await pasteWithMeta(tester);
-    await pasteWithControl(tester);
-    await tester.pump();
-    await tester.pump();
-
-    expect(fixture.controller.text, isEmpty);
-    expect(otherController.text, 'other-input-text');
-    await disposeEditor(tester);
-    debugDefaultTargetPlatformOverride = null;
-  });
-
-  testWidgets('macOS automatic paste survives a delayed focus event', (
-    tester,
-  ) async {
+  testWidgets('automatic paste survives a delayed focus event', (tester) async {
     debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
     addTearDown(() => debugDefaultTargetPlatformOverride = null);
     final fixture = await JsonFormatterFixture.create();
@@ -324,12 +182,6 @@ void main() {
     await disposeEditor(tester);
     debugDefaultTargetPlatformOverride = null;
   });
-}
-
-Future<void> pasteWithControl(WidgetTester tester) async {
-  await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
-  await tester.sendKeyEvent(LogicalKeyboardKey.keyV);
-  await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
 }
 
 Future<void> pasteWithMeta(WidgetTester tester) async {

@@ -1,9 +1,13 @@
 import 'dart:io';
 
-import 'package:launch_at_startup/launch_at_startup.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path/path.dart' as path;
 
+/// Registers DevOrbit as a login item through a per-user LaunchAgent.
+///
+/// The app ships outside the App Store and without a sandbox, so a plain
+/// `~/Library/LaunchAgents` plist is enough and keeps the setting auditable by
+/// the user.
 class LaunchAtStartupService {
   String? _appPath;
   String? _packageName;
@@ -12,51 +16,31 @@ class LaunchAtStartupService {
     final info = await PackageInfo.fromPlatform();
     _appPath = Platform.resolvedExecutable;
     _packageName = info.packageName;
-
-    if (Platform.isWindows) {
-      launchAtStartup.setup(
-        appName: info.appName,
-        appPath: '"${Platform.resolvedExecutable}"',
-        packageName: info.packageName,
-        args: const ['--hidden'],
-      );
-    }
   }
 
   Future<bool> setEnabled(bool enabled) async {
     try {
-      if (Platform.isMacOS) return await _setMacOSEnabled(enabled);
-      if (Platform.isWindows) {
-        return enabled
-            ? await launchAtStartup.enable()
-            : await launchAtStartup.disable();
+      final file = _launchAgentFile();
+      if (file == null) return false;
+      if (!enabled) {
+        if (await file.exists()) await file.delete();
+        return !await file.exists();
       }
-      return false;
+
+      final bundlePath = path.dirname(path.dirname(path.dirname(_appPath!)));
+      if (!bundlePath.endsWith('.app')) return false;
+      await file.parent.create(recursive: true);
+      await file.writeAsString(
+        buildMacOSLaunchAgent(label: _packageName!, bundlePath: bundlePath),
+        flush: true,
+      );
+      return file.exists();
     } catch (_) {
       return false;
     }
   }
 
-  Future<bool> _setMacOSEnabled(bool enabled) async {
-    final file = _macOSLaunchAgentFile();
-    if (file == null) return false;
-    if (!enabled) {
-      if (await file.exists()) await file.delete();
-      return !await file.exists();
-    }
-
-    final appPath = _appPath!;
-    final bundlePath = path.dirname(path.dirname(path.dirname(appPath)));
-    if (!bundlePath.endsWith('.app')) return false;
-    await file.parent.create(recursive: true);
-    await file.writeAsString(
-      buildMacOSLaunchAgent(label: _packageName!, bundlePath: bundlePath),
-      flush: true,
-    );
-    return file.exists();
-  }
-
-  File? _macOSLaunchAgentFile() {
+  File? _launchAgentFile() {
     final home = Platform.environment['HOME'];
     final packageName = _packageName;
     if (home == null || !path.isAbsolute(home) || packageName == null) {

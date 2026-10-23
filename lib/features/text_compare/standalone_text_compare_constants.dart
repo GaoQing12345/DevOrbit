@@ -1,3 +1,3 @@
 const standaloneTextCompareFlag = '--text-compare-window';
-const standaloneTextComparePrewarmFlag = '--text-compare-prewarm';
+const standaloneTextCompareTitle = '文本比对 - DevOrbit';
 const textCompareInstanceName = 'dev-orbit-text-compare';

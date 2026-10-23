@@ -1,4 +1,4 @@
-name: Desktop Release
+name: macOS Release
 
 on:
   workflow_dispatch:
@@ -8,17 +8,7 @@ on:
 
 jobs:
   package:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: macos-latest
-            release_name: macos
-            artifact_name: DevOrbit-macOS
-          - os: windows-latest
-            release_name: windows
-            artifact_name: DevOrbit-Windows
-    runs-on: ${{ matrix.os }}
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v5
       - uses: subosito/flutter-action@v2
@@ -30,28 +20,37 @@ jobs:
       - run: flutter test
       - run: dart pub global activate fastforge 0.6.12
       - name: Install appdmg
-        if: runner.os == 'macOS'
         run: npm install --global appdmg
-      - name: Install Inno Setup
-        if: runner.os == 'Windows'
-        run: choco install innosetup --no-progress --yes
-      - run: dart pub global run fastforge:main release --name ${{ matrix.release_name }}
+      # The signing and notarization hooks live in distribute_options.yaml and
+      # read these variables. Unset secrets (forks, local runs) leave the DMG
+      # ad-hoc signed instead of failing the build.
+      - name: Package, sign and notarize
+        env:
+          MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+          MACOS_NOTARY_APPLE_ID: ${{ secrets.MACOS_NOTARY_APPLE_ID }}
+          MACOS_NOTARY_PASSWORD: ${{ secrets.MACOS_NOTARY_PASSWORD }}
+          MACOS_NOTARY_TEAM_ID: ${{ secrets.MACOS_NOTARY_TEAM_ID }}
+        run: dart pub global run fastforge:main release --name macos
+      - name: Verify signature
+        # Fails loudly if a signed build silently lost its Developer ID, which is
+        # exactly the state that makes Gatekeeper reject the app on other Macs.
+        env:
+          MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+        run: |
+          if [[ -z "${MACOS_CERTIFICATE_P12:-}" ]]; then
+            echo "No signing certificate configured, DMG stays ad-hoc signed."
+            exit 0
+          fi
+          APP="$(ls -d build/macos/Build/Products/Release/*.app | head -1)"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          codesign -dv --verbose=4 "$APP" 2>&1 | grep -q "Authority=Developer ID Application"
       - name: Create checksums
-        if: runner.os == 'macOS'
         run: |
           find dist -type f -exec shasum -a 256 {} \; > "$RUNNER_TEMP/SHA256SUMS.txt"
           mv "$RUNNER_TEMP/SHA256SUMS.txt" dist/SHA256SUMS.txt
-      - name: Create checksums
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $checksumPath = Join-Path $env:RUNNER_TEMP "SHA256SUMS.txt"
-          Get-ChildItem dist -File -Recurse | ForEach-Object {
-            $hash = Get-FileHash $_.FullName -Algorithm SHA256
-            "$($hash.Hash)  $($_.Name)" | Add-Content $checksumPath
-          }
-          Move-Item $checksumPath dist/SHA256SUMS.txt
       - uses: actions/upload-artifact@v5
         with:
-          name: ${{ matrix.artifact_name }}
+          name: DevOrbit-macOS
           path: dist/**

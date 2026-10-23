@@ -1,4 +1,3 @@
-import 'package:dev_orbit/app/app_theme.dart';
 import 'package:dev_orbit/core/desktop/desktop_window_shell.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -83,7 +82,7 @@ void main() {
     expect(closeCount, 1);
   });
 
-  testWidgets('Escape focus is restored when a prewarmed window is activated', (
+  testWidgets('Escape focus is restored when the window is activated again', (
     tester,
   ) async {
     var closeCount = 0;
@@ -111,37 +110,6 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pump();
 
-    expect(closeCount, 1);
-  });
-
-  testWidgets('Windows window controls are visible before hover', (
-    tester,
-  ) async {
-    var minimizeCount = 0;
-    var closeCount = 0;
-    await tester.pumpWidget(
-      MaterialApp(
-        theme: AppTheme.light(),
-        home: Scaffold(
-          body: WindowsWindowTitleBar(
-            title: 'DevOrbit',
-            onMinimize: () => minimizeCount++,
-            onClose: () => closeCount++,
-          ),
-        ),
-      ),
-    );
-
-    final context = tester.element(find.byType(WindowsWindowTitleBar));
-    final expectedColor = Theme.of(context).colorScheme.onSurface;
-    final minimizeIcon = tester.widget<Icon>(find.byIcon(Icons.remove_rounded));
-    final closeIcon = tester.widget<Icon>(find.byIcon(Icons.close_rounded));
-    expect(minimizeIcon.color, expectedColor);
-    expect(closeIcon.color, expectedColor);
-
-    await tester.tap(find.byTooltip('最小化'));
-    await tester.tap(find.byTooltip('关闭'));
-    expect(minimizeCount, 1);
     expect(closeCount, 1);
   });
 }

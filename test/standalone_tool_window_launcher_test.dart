@@ -15,7 +15,6 @@ void main() {
     var nextProcessId = 100;
     final launcher = NativeStandaloneToolWindowLauncher(
       executable: '/Applications/DevOrbit',
-      enableToolPrewarming: false,
       processStarter: (executable, arguments) async {
         calls.add((executable, arguments));
         return nextProcessId++;
@@ -33,54 +32,11 @@ void main() {
     expect(calls.single.$2, [standaloneJsonFormatterFlag]);
   });
 
-  test('prewarms and activates every Windows tool', () async {
-    final calls = <(String, List<String>)>[];
-    var nextProcessId = 901;
-    final activator = _FakeWindowActivator(
-      activeProcessIds: {901, 902, 903, 904, 905},
-    );
-    final launcher = NativeStandaloneToolWindowLauncher(
-      executable: 'DevOrbit.exe',
-      enableToolPrewarming: true,
-      processStarter: (executable, arguments) async {
-        calls.add((executable, arguments));
-        return nextProcessId++;
-      },
-      processTerminator: (_) => true,
-      windowActivator: activator,
-      jsonFormatterInstanceRegistry: _FakeSingleInstanceRegistry(),
-      translatorInstanceRegistry: _FakeSingleInstanceRegistry(),
-      textCompareInstanceRegistry: _FakeSingleInstanceRegistry(),
-      timestampInstanceRegistry: _FakeSingleInstanceRegistry(),
-      sqlLogInstanceRegistry: _FakeSingleInstanceRegistry(),
-    );
-
-    await launcher.warmUp();
-    expect(calls.map((call) => call.$2), [
-      [standaloneJsonFormatterFlag, standaloneJsonFormatterPrewarmFlag],
-      [standaloneTranslatorFlag, standaloneTranslatorPrewarmFlag],
-      [standaloneTextCompareFlag, standaloneTextComparePrewarmFlag],
-      [standaloneTimestampFlag, standaloneTimestampPrewarmFlag],
-      [standaloneSqlLogFlag, standaloneSqlLogPrewarmFlag],
-    ]);
-
-    expect(await launcher.openTool('json-formatter'), isTrue);
-    await Future<void>.delayed(Duration.zero);
-    expect(await launcher.openTool('translator'), isTrue);
-    expect(await launcher.openTool('text-compare'), isTrue);
-    expect(await launcher.openTool('timestamp-converter'), isTrue);
-    expect(await launcher.openTool('sql-log-converter'), isTrue);
-
-    expect(calls, hasLength(5));
-    expect(activator.processIds, [901, 902, 903, 904, 905]);
-  });
-
   test('reuses the existing standalone translator window', () async {
     final calls = <(String, List<String>)>[];
     final activator = _FakeWindowActivator(activeProcessIds: {301});
     final launcher = NativeStandaloneToolWindowLauncher(
       executable: '/Applications/DevOrbit',
-      enableToolPrewarming: false,
       processStarter: (executable, arguments) async {
         calls.add((executable, arguments));
         return 301;
@@ -100,7 +56,6 @@ void main() {
     var nextProcessId = 401;
     final activator = _FakeWindowActivator();
     final launcher = NativeStandaloneToolWindowLauncher(
-      enableToolPrewarming: false,
       processStarter: (_, _) async => nextProcessId++,
       windowActivator: activator,
       translatorInstanceRegistry: _FakeSingleInstanceRegistry(),
@@ -117,7 +72,6 @@ void main() {
     final launchCompleter = Completer<int>();
     var launchCount = 0;
     final launcher = NativeStandaloneToolWindowLauncher(
-      enableToolPrewarming: false,
       processStarter: (_, _) {
         launchCount++;
         return launchCompleter.future;
@@ -140,7 +94,6 @@ void main() {
     final registry = _FakeSingleInstanceRegistry(601);
     var launchCount = 0;
     final launcher = NativeStandaloneToolWindowLauncher(
-      enableToolPrewarming: false,
       processStarter: (_, _) async {
         launchCount++;
         return 602;
@@ -161,7 +114,6 @@ void main() {
     final activator = _FakeWindowActivator(activeProcessIds: {651});
     final launcher = NativeStandaloneToolWindowLauncher(
       executable: '/Applications/DevOrbit',
-      enableToolPrewarming: false,
       processStarter: (executable, arguments) async {
         calls.add((executable, arguments));
         return 651;
@@ -182,7 +134,6 @@ void main() {
     final launchCompleter = Completer<int>();
     var launchCount = 0;
     final launcher = NativeStandaloneToolWindowLauncher(
-      enableToolPrewarming: false,
       processStarter: (_, _) {
         launchCount++;
         return launchCompleter.future;
@@ -206,7 +157,6 @@ void main() {
     final activator = _FakeWindowActivator(activeProcessIds: {691});
     final launcher = NativeStandaloneToolWindowLauncher(
       executable: '/Applications/DevOrbit',
-      enableToolPrewarming: false,
       processStarter: (executable, arguments) async {
         calls.add((executable, arguments));
         return 691;
@@ -229,7 +179,6 @@ void main() {
     final launchCompleter = Completer<int>();
     var launchCount = 0;
     final launcher = NativeStandaloneToolWindowLauncher(
-      enableToolPrewarming: false,
       processStarter: (_, _) {
         launchCount++;
         return launchCompleter.future;
@@ -255,7 +204,6 @@ void main() {
     final activator = _FakeWindowActivator(activeProcessIds: {696});
     final launcher = NativeStandaloneToolWindowLauncher(
       executable: '/Applications/DevOrbit',
-      enableToolPrewarming: false,
       processStarter: (executable, arguments) async {
         calls.add((executable, arguments));
         return 696;
@@ -278,7 +226,6 @@ void main() {
     final launchCompleter = Completer<int>();
     var launchCount = 0;
     final launcher = NativeStandaloneToolWindowLauncher(
-      enableToolPrewarming: false,
       processStarter: (_, _) {
         launchCount++;
         return launchCompleter.future;
@@ -303,13 +250,13 @@ void main() {
     var nextProcessId = 701;
     final terminated = <int>[];
     final launcher = NativeStandaloneToolWindowLauncher(
-      enableToolPrewarming: false,
       processStarter: (_, _) async => nextProcessId++,
       processTerminator: (processId) {
         terminated.add(processId);
         return true;
       },
       windowActivator: _FakeWindowActivator(),
+      jsonFormatterInstanceRegistry: _FakeSingleInstanceRegistry(),
       translatorInstanceRegistry: _FakeSingleInstanceRegistry(),
       textCompareInstanceRegistry: _FakeSingleInstanceRegistry(),
       timestampInstanceRegistry: _FakeSingleInstanceRegistry(),
@@ -324,70 +271,12 @@ void main() {
     expect(terminated, [701, 702, 703]);
   });
 
-  test('quit closes every unused prewarmed tool process', () async {
-    final terminated = <int>[];
-    var nextProcessId = 751;
-    final launcher = NativeStandaloneToolWindowLauncher(
-      enableToolPrewarming: true,
-      processStarter: (_, _) async => nextProcessId++,
-      processTerminator: (processId) {
-        terminated.add(processId);
-        return true;
-      },
-      windowActivator: _FakeWindowActivator(),
-      translatorInstanceRegistry: _FakeSingleInstanceRegistry(),
-      textCompareInstanceRegistry: _FakeSingleInstanceRegistry(),
-      timestampInstanceRegistry: _FakeSingleInstanceRegistry(),
-      sqlLogInstanceRegistry: _FakeSingleInstanceRegistry(),
-    );
-
-    await launcher.warmUp();
-    await launcher.closeAllTools();
-
-    expect(terminated, [751, 752, 753, 754, 755]);
-  });
-
-  test('quit cancels tool prewarming that has not started yet', () async {
-    final calls = <List<String>>[];
-    final firstStart = Completer<void>();
-    final terminated = <int>[];
-    var nextProcessId = 801;
-    final launcher = NativeStandaloneToolWindowLauncher(
-      enableToolPrewarming: true,
-      processStarter: (_, arguments) async {
-        calls.add(arguments);
-        if (!firstStart.isCompleted) firstStart.complete();
-        return nextProcessId++;
-      },
-      processTerminator: (processId) {
-        terminated.add(processId);
-        return true;
-      },
-      windowActivator: _FakeWindowActivator(),
-      translatorInstanceRegistry: _FakeSingleInstanceRegistry(),
-      textCompareInstanceRegistry: _FakeSingleInstanceRegistry(),
-      timestampInstanceRegistry: _FakeSingleInstanceRegistry(),
-      sqlLogInstanceRegistry: _FakeSingleInstanceRegistry(),
-    );
-
-    final warming = launcher.warmUp();
-    await firstStart.future;
-    await launcher.closeAllTools();
-    await warming;
-
-    expect(calls, [
-      [standaloneJsonFormatterFlag, standaloneJsonFormatterPrewarmFlag],
-    ]);
-    expect(terminated, [801]);
-  });
-
   test(
     'quit also closes a standalone process that is still starting',
     () async {
       final processStarted = Completer<int>();
       final terminated = <int>[];
       final launcher = NativeStandaloneToolWindowLauncher(
-        enableToolPrewarming: false,
         processStarter: (_, _) => processStarted.future,
         processTerminator: (processId) {
           terminated.add(processId);

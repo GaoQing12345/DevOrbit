@@ -1,80 +1,39 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:window_manager/window_manager.dart';
 
 import '../../app/app_theme.dart';
-import '../../core/desktop/process_window_activator.dart';
-import '../../core/desktop/desktop_window_effects.dart';
 import '../../core/desktop/desktop_window_shell.dart';
 import '../../core/desktop/single_instance_registry.dart';
 import '../../core/desktop/standalone_window_activation.dart';
+import '../../core/desktop/standalone_window_bootstrap.dart';
 import '../../core/settings/settings_store.dart';
 import 'json_document_controller.dart';
 import 'json_formatter_page.dart';
 import 'json_initial_clipboard_import.dart';
 import 'standalone_json_formatter_constants.dart';
 
-Future<void> runStandaloneJsonFormatter({bool prewarmed = false}) async {
-  final instanceRegistry = FileSingleInstanceRegistry(
-    jsonFormatterInstanceName,
-  );
-  final lease = await instanceRegistry.tryAcquire(pid);
-  if (lease == null) {
-    try {
-      final processId = await instanceRegistry.findProcessId();
-      if (processId != null) {
-        await NativeProcessWindowActivator().activate(processId);
-      }
-    } finally {
-      exit(0);
-    }
-  }
+Future<void> runStandaloneJsonFormatter() async {
+  final lease = await acquireStandaloneInstance(jsonFormatterInstanceName);
   final settingsFuture = SettingsStore.load();
-  await windowManager.ensureInitialized();
-  final useCustomWindowsTitleBar = Platform.isWindows;
-  final titleBarHeight = useCustomWindowsTitleBar
-      ? WindowsWindowTitleBar.height
-      : 0.0;
-  await windowManager.waitUntilReadyToShow(
-    WindowOptions(
-      size: Size(960, 700 + titleBarHeight),
-      minimumSize: Size(720, 520 + titleBarHeight),
-      center: true,
-      // Standalone tools are helper windows owned by the main app. Keep each
-      // helper process out of the macOS Dock, including after window_manager
-      // applies the WindowOptions.
-      skipTaskbar: true,
-      backgroundColor: desktopToolWindowBackground(),
-      title: 'JSON 格式化 - DevOrbit',
-      titleBarStyle: useCustomWindowsTitleBar
-          ? TitleBarStyle.hidden
-          : TitleBarStyle.normal,
-      windowButtonVisibility: !useCustomWindowsTitleBar,
-    ),
+  await prepareStandaloneWindow(
+    size: const Size(960, 700),
+    minimumSize: const Size(720, 520),
+    title: standaloneJsonFormatterTitle,
   );
   final settings = await settingsFuture;
-  runApp(
-    _StandaloneJsonFormatterApp(
-      settings: settings,
-      instanceLease: lease,
-      prewarmed: prewarmed,
-    ),
-  );
+  runApp(_StandaloneJsonFormatterApp(settings: settings, instanceLease: lease));
 }
 
 class _StandaloneJsonFormatterApp extends StatefulWidget {
   const _StandaloneJsonFormatterApp({
     required this.settings,
     required this.instanceLease,
-    required this.prewarmed,
   });
 
   final SettingsStore settings;
   final SingleInstanceLease instanceLease;
-  final bool prewarmed;
 
   @override
   State<_StandaloneJsonFormatterApp> createState() =>
@@ -92,10 +51,6 @@ class _StandaloneJsonFormatterAppState
     super.initState();
     _controller = JsonDocumentController();
     _windowActivation = StandaloneWindowActivation(
-      prewarmed: widget.prewarmed,
-      // Building WebView2 while the native HWND is still hidden turns Windows
-      // prewarming into real editor prewarming instead of only process startup.
-      renderWhilePrewarmed: widget.prewarmed && Platform.isWindows,
       onActivated: _importClipboard,
     );
     WidgetsBinding.instance.addPostFrameCallback(
@@ -126,7 +81,7 @@ class _StandaloneJsonFormatterAppState
     return AnimatedBuilder(
       animation: widget.settings,
       builder: (context, child) => MaterialApp(
-        title: 'JSON 格式化 - DevOrbit',
+        title: standaloneJsonFormatterTitle,
         debugShowCheckedModeBanner: false,
         theme: AppTheme.light(),
         darkTheme: AppTheme.dark(),
@@ -134,7 +89,6 @@ class _StandaloneJsonFormatterAppState
         home: StandaloneWindowVisibility(
           activation: _windowActivation,
           child: StandaloneWindowShell(
-            title: 'JSON 格式化 - DevOrbit',
             child: Scaffold(
               body: JsonFormatterPage(
                 controller: _controller,

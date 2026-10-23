@@ -44,7 +44,7 @@ void main() {
   testWidgets('clipboard double-click inserts at the previous find cursor', (
     tester,
   ) async {
-    debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+    debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
     addTearDown(() => debugDefaultTargetPlatformOverride = null);
     final fixture = await JsonFormatterFixture.create();
     final clipboard = mockClipboard(tester, initialText: 'old clipboard');
@@ -72,7 +72,7 @@ void main() {
     revision.pendingPasteText = 'XX';
     revision.revision++;
     await sendWindowEvent('focus');
-    await pasteWithControl(tester);
+    await pasteWithMeta(tester);
 
     expect(field.controller!.text, 'abXXcd');
     await disposeEditor(tester);
@@ -82,7 +82,7 @@ void main() {
   testWidgets('clipboard revision pastes an item with unchanged text', (
     tester,
   ) async {
-    debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+    debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
     addTearDown(() => debugDefaultTargetPlatformOverride = null);
     final fixture = await JsonFormatterFixture.create(text: 'abcdef');
     mockClipboard(tester, initialText: 'same');
@@ -103,7 +103,7 @@ void main() {
     revision.pendingPasteText = 'same';
     revision.revision++;
     await sendWindowEvent('focus');
-    await pasteWithControl(tester);
+    await pasteWithMeta(tester);
 
     expect(fixture.controller.text, 'abcsamedef');
     await tester.pump(const Duration(milliseconds: 350));
@@ -114,15 +114,15 @@ void main() {
   testWidgets('clipboard double-click inserts at the previous replace cursor', (
     tester,
   ) async {
-    debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+    debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
     addTearDown(() => debugDefaultTargetPlatformOverride = null);
     final fixture = await JsonFormatterFixture.create();
     final clipboard = mockClipboard(tester, initialText: 'old clipboard');
     final revision = mockClipboardRevision(tester);
     await tester.pumpWidget(fixture.widget);
-    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
-    await tester.sendKeyEvent(LogicalKeyboardKey.keyH);
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyR);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
     await tester.pump();
     final field = tester.widget<TextField>(
       find.descendant(
@@ -144,7 +144,7 @@ void main() {
     revision.pendingPasteText = 'YY';
     revision.revision++;
     await sendWindowEvent('focus');
-    await pasteWithControl(tester);
+    await pasteWithMeta(tester);
 
     expect(field.controller!.text, 'abYYcd');
     await disposeEditor(tester);
@@ -214,12 +214,6 @@ Future<void> pasteWithMeta(WidgetTester tester) async {
   await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
   await tester.sendKeyEvent(LogicalKeyboardKey.keyV);
   await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
-}
-
-Future<void> pasteWithControl(WidgetTester tester) async {
-  await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
-  await tester.sendKeyEvent(LogicalKeyboardKey.keyV);
-  await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
 }
 
 Future<void> sendWindowEvent(String eventName) async {

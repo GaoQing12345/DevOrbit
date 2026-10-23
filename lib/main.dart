@@ -25,33 +25,23 @@ import 'features/translator/translator_module.dart';
 Future<void> main(List<String> arguments) async {
   WidgetsFlutterBinding.ensureInitialized();
   if (arguments.contains(standaloneJsonFormatterFlag)) {
-    await runStandaloneJsonFormatter(
-      prewarmed: arguments.contains(standaloneJsonFormatterPrewarmFlag),
-    );
+    await runStandaloneJsonFormatter();
     return;
   }
   if (arguments.contains(standaloneTranslatorFlag)) {
-    await runStandaloneTranslator(
-      prewarmed: arguments.contains(standaloneTranslatorPrewarmFlag),
-    );
+    await runStandaloneTranslator();
     return;
   }
   if (arguments.contains(standaloneTextCompareFlag)) {
-    await runStandaloneTextCompare(
-      prewarmed: arguments.contains(standaloneTextComparePrewarmFlag),
-    );
+    await runStandaloneTextCompare();
     return;
   }
   if (arguments.contains(standaloneTimestampFlag)) {
-    await runStandaloneTimestamp(
-      prewarmed: arguments.contains(standaloneTimestampPrewarmFlag),
-    );
+    await runStandaloneTimestamp();
     return;
   }
   if (arguments.contains(standaloneSqlLogFlag)) {
-    await runStandaloneSqlLog(
-      prewarmed: arguments.contains(standaloneSqlLogPrewarmFlag),
-    );
+    await runStandaloneSqlLog();
     return;
   }
   await hotKeyManager.unregisterAll();

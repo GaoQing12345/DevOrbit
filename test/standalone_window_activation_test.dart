@@ -6,22 +6,14 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   const windowChannel = MethodChannel('window_manager');
-  const processWindowChannel = MethodChannel('dev_orbit/process_window');
   final windowCalls = <MethodCall>[];
-  final processWindowCalls = <MethodCall>[];
 
   setUp(() {
     windowCalls.clear();
-    processWindowCalls.clear();
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(windowChannel, (call) async {
           windowCalls.add(call);
           if (call.method == 'isMinimized') return false;
-          return null;
-        });
-    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-        .setMockMethodCallHandler(processWindowChannel, (call) async {
-          processWindowCalls.add(call);
           return null;
         });
   });
@@ -29,103 +21,17 @@ void main() {
   tearDown(() {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(windowChannel, null);
-    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-        .setMockMethodCallHandler(processWindowChannel, null);
   });
 
-  test('prewarmed native focus only runs activation work', () async {
+  test('window is shown and focused before activation work', () async {
     var activationCount = 0;
     final activation = StandaloneWindowActivation(
-      prewarmed: true,
-      onActivated: () async => activationCount++,
-    );
-
-    expect(activation.visible, isFalse);
-    await activation.initialize();
-    expect(activation.visible, isFalse);
-    expect(processWindowCalls.map((call) => call.method), [
-      'markReadyForActivation',
-    ]);
-    expect(windowCalls, isEmpty);
-
-    activation.onWindowFocus();
-    await Future<void>.delayed(Duration.zero);
-
-    expect(activationCount, 1);
-    expect(activation.visible, isTrue);
-    expect(windowCalls, isEmpty);
-    activation.dispose();
-    expect(activation.visible, isFalse);
-  });
-
-  test(
-    'native activation reveals a prewarmed frame before window focus',
-    () async {
-      var activationCount = 0;
-      final activation = StandaloneWindowActivation(
-        prewarmed: true,
-        onActivated: () async => activationCount++,
-      );
-      await activation.initialize();
-
-      expect(activation.visible, isFalse);
-      await _sendProcessWindowCall('prepareForActivation');
-
-      expect(activation.visible, isTrue);
-      expect(activationCount, 0);
-      expect(windowCalls, isEmpty);
-
-      await _sendProcessWindowCall('activationComplete');
-      await Future<void>.delayed(Duration.zero);
-      expect(activationCount, 1);
-      activation.dispose();
-    },
-  );
-
-  test(
-    'prewarmed content can render behind the hidden native window',
-    () async {
-      var activationCount = 0;
-      final activation = StandaloneWindowActivation(
-        prewarmed: true,
-        renderWhilePrewarmed: true,
-        onActivated: () async => activationCount++,
-      );
-
-      expect(activation.visible, isTrue);
-      await activation.initialize();
-      expect(activation.visible, isTrue);
-      expect(processWindowCalls.map((call) => call.method), [
-        'markReadyForActivation',
-      ]);
-
-      var frameRequestCount = 0;
-      activation.addListener(() => frameRequestCount++);
-      await _sendProcessWindowCall('prepareForActivation');
-      expect(activation.visible, isTrue);
-      expect(activationCount, 0);
-      expect(frameRequestCount, 1);
-
-      await _sendProcessWindowCall('activationComplete');
-      await Future<void>.delayed(Duration.zero);
-      expect(activationCount, 1);
-      activation.dispose();
-    },
-  );
-
-  test('cold window is shown and focused before activation work', () async {
-    var activationCount = 0;
-    final activation = StandaloneWindowActivation(
-      prewarmed: false,
       onActivated: () async => activationCount++,
     );
 
     expect(activation.visible, isTrue);
     await activation.initialize();
 
-    expect(processWindowCalls.map((call) => call.method), [
-      'markReadyForActivation',
-    ]);
     expect(windowCalls.map((call) => call.method), [
       'isMinimized',
       'show',
@@ -135,10 +41,23 @@ void main() {
     activation.dispose();
   });
 
+  test('activation work runs once per activation cycle', () async {
+    var activationCount = 0;
+    final activation = StandaloneWindowActivation(
+      onActivated: () async => activationCount++,
+    );
+
+    await activation.initialize();
+    await activation.initialize();
+    await Future<void>.delayed(Duration.zero);
+
+    expect(activationCount, 1);
+    activation.dispose();
+  });
+
   test('reusable window runs activation work again only after close', () async {
     var activationCount = 0;
     final activation = StandaloneWindowActivation(
-      prewarmed: true,
       reactivateAfterClose: true,
       onActivated: () async => activationCount++,
     );
@@ -158,12 +77,20 @@ void main() {
     expect(activation.visible, isTrue);
     activation.dispose();
   });
-}
 
-Future<void> _sendProcessWindowCall(String method) async {
-  final message = const StandardMethodCodec().encodeMethodCall(
-    MethodCall(method),
-  );
-  await TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-      .handlePlatformMessage('dev_orbit/process_window', message, (_) {});
+  test('a single-use window ignores window focus events', () async {
+    var activationCount = 0;
+    final activation = StandaloneWindowActivation(
+      onActivated: () async => activationCount++,
+    );
+
+    await activation.initialize();
+    activation.onWindowClose();
+    activation.onWindowFocus();
+    await Future<void>.delayed(Duration.zero);
+
+    expect(activationCount, 1);
+    expect(activation.visible, isFalse);
+    activation.dispose();
+  });
 }
