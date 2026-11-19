@@ -47,6 +47,13 @@ class _JsonFormatterPageState extends State<JsonFormatterPage> {
   bool _findFieldSessionActive = false;
   String? _lastCaretLabel;
 
+  /// Mirror of the document that is actually on screen.
+  ///
+  /// `CodeLineEditingController.text` rebuilds the whole string from its line
+  /// models on every read, and the build path reads it several times per frame.
+  /// On a multi-megabyte document that alone made each caret move stall.
+  String _text = '';
+
   bool get _usesWebEditor =>
       Platform.isMacOS &&
       !kIsWeb &&
@@ -54,7 +61,8 @@ class _JsonFormatterPageState extends State<JsonFormatterPage> {
   @override
   void initState() {
     super.initState();
-    _editor = CodeLineEditingController.fromText(widget.controller.text);
+    _text = widget.controller.text;
+    _editor = CodeLineEditingController.fromText(_text);
     _findController = CodeFindController(_editor);
     _findController.addListener(_onFindChanged);
     _findController.findInputFocusNode.addListener(_onFindFieldFocusChanged);
@@ -80,18 +88,21 @@ class _JsonFormatterPageState extends State<JsonFormatterPage> {
   }
 
   void _syncFromDocument() {
-    if (_editor.text == widget.controller.text) {
+    if (_text == widget.controller.text) {
       if (mounted) setState(() {});
       return;
     }
     _syncing = true;
-    _editor.text = widget.controller.text;
+    _text = widget.controller.text;
+    _editor.text = _text;
     _syncing = false;
     if (mounted) setState(() {});
   }
 
   void _onEditorChanged() {
-    if (!_syncing) widget.controller.userEdit(_editor.text);
+    if (_syncing) return;
+    _text = _editor.text;
+    widget.controller.userEdit(_text);
   }
 
   int get _indentSize => widget.settings.value.indentSize;
@@ -104,6 +115,13 @@ class _JsonFormatterPageState extends State<JsonFormatterPage> {
     if (index < 0 || index >= lines.length) return null;
     return '行 ${index + 1}，列 ${_editor.selection.baseOffset + 1}';
   }
+
+  /// Explains the missing colours once a document is past the size where the
+  /// editor stops highlighting it.
+  String? get _largeDocumentHint =>
+      _usesWebEditor && _text.length > webEditorRichTextLimit
+      ? '大文件：已关闭高亮'
+      : null;
 
   /// The status bar mirrors the caret, so a moved caret has to repaint it. The
   /// label is compared first to keep a drag from rebuilding on every frame.
@@ -270,7 +288,7 @@ class _JsonFormatterPageState extends State<JsonFormatterPage> {
   }
 
   int _lineStartOffset(int lineIndex) {
-    final text = _editor.text;
+    final text = _text;
     if (lineIndex <= 0) return 0;
     var offset = 0;
     for (var line = 0; line < lineIndex; line++) {
@@ -283,7 +301,7 @@ class _JsonFormatterPageState extends State<JsonFormatterPage> {
 
   /// Moves the caret to [offset] and scrolls it into view on either editor.
   void _revealOffset(int offset, {int? endOffset}) {
-    final text = _editor.text;
+    final text = _text;
     final start = offset.clamp(0, text.length);
     final end = (endOffset ?? offset).clamp(start, text.length);
     final selection = _selectionFromOffset(start, end);
@@ -301,6 +319,7 @@ class _JsonFormatterPageState extends State<JsonFormatterPage> {
 
   void _onNativeEditorChanged(String text) {
     _syncing = true;
+    _text = text;
     _editor.text = text;
     _syncing = false;
     widget.controller.userEdit(text);
@@ -351,17 +370,19 @@ class _JsonFormatterPageState extends State<JsonFormatterPage> {
   }
 
   int _lineIndexFromOffset(int offset) {
-    final safeOffset = offset.clamp(0, _editor.text.length);
+    final text = _text;
+    final safeOffset = offset.clamp(0, text.length);
     var lineIndex = 0;
     for (var index = 0; index < safeOffset; index++) {
-      if (_editor.text.codeUnitAt(index) == 10) lineIndex++;
+      if (text.codeUnitAt(index) == 10) lineIndex++;
     }
     return lineIndex;
   }
 
   int _lineOffsetFromOffset(int offset) {
-    final safeOffset = offset.clamp(0, _editor.text.length);
-    final lineStart = _editor.text.lastIndexOf('\n', safeOffset - 1);
+    final text = _text;
+    final safeOffset = offset.clamp(0, text.length);
+    final lineStart = text.lastIndexOf('\n', safeOffset - 1);
     return safeOffset - lineStart - 1;
   }
 
@@ -583,6 +604,7 @@ class _JsonFormatterPageState extends State<JsonFormatterPage> {
               controller: widget.controller,
               caretLabel: _caretLabel,
               indentLabel: _useTabs ? 'Tab' : '$_indentSize 空格',
+              hint: _largeDocumentHint,
               onJumpToError: _jumpToError,
             ),
           ],
@@ -635,7 +657,7 @@ class _JsonFormatterPageState extends State<JsonFormatterPage> {
         fit: StackFit.expand,
         children: [
           DesktopWebTextEditor(
-            text: _editor.text,
+            text: _text,
             selection: _nativeSelection(),
             onChanged: _onNativeEditorChanged,
             onSelectionChanged: _onNativeSelectionChanged,

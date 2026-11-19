@@ -11,6 +11,13 @@ import 'package:window_manager/window_manager.dart';
 import 'desktop_clipboard_diagnostics.dart';
 import 'desktop_text_selection.dart';
 
+/// Document size above which the WebView editor stops highlighting.
+///
+/// Mirrors `RICH_TEXT_LIMIT` in the page script: one span per token and one
+/// element per line are rebuilt on every edit, which stops fitting in a frame
+/// past a hundred kilobytes or so.
+const int webEditorRichTextLimit = 120000;
+
 class DesktopWebTextEditorController {
   _DesktopWebTextEditorState? _state;
 
@@ -1058,6 +1065,22 @@ let restoreAfterWindowFocus = false;
 let collapsedFolds = [];
 let scrollReportScheduled = false;
 let scrollReportSuppressed = false;
+// A highlighted buffer costs one span per token and one element per line, and
+// every committed edit replaces all of them. Past this size the rebuild stops
+// fitting into a frame — a multi-megabyte paste froze the window for tens of
+// seconds — so the editor degrades to a plain text surface: no token spans, no
+// fold controls, no gutter.
+const RICH_TEXT_LIMIT = 120000;
+const LINE_NUMBER_LIMIT = 5000;
+// Undo history stores whole documents. Without a character budget a long
+// session on a large file keeps hundreds of full copies alive.
+const HISTORY_CHAR_BUDGET = 8 * 1024 * 1024;
+let foldCacheText = null;
+let foldCacheRanges = [];
+let gutterSignature = '';
+// Set while the editor shows the plain large-document surface, so hit testing
+// and caret moves can skip the fold scan entirely.
+let plainSurface = false;
 const bridge = (name, args) => {
   if (window.flutter_inappwebview) window.flutter_inappwebview.callHandler(name, ...args);
 };
@@ -1150,6 +1173,18 @@ function recordEdit(text, selection) {
     historyStates.shift();
     historyIndex--;
   }
+  trimHistoryBySize();
+}
+// Every entry is a full document snapshot, so the entry count alone is a poor
+// bound: two hundred states of a 2 MiB file is 400 MiB of live strings.
+function trimHistoryBySize() {
+  let total = 0;
+  for (const entry of historyStates) total += entry.text.length;
+  while (historyStates.length > 2 && total > HISTORY_CHAR_BUDGET) {
+    total -= historyStates[0].text.length;
+    historyStates.shift();
+    if (historyIndex > 0) historyIndex--;
+  }
 }
 function applyHistoryState(entry) {
   if (!entry || historyApplying) return;
@@ -1228,11 +1263,19 @@ function revealSelection(base, extent) {
 // stable while a JSON block is collapsed. When everything is expanded, keep
 // innerText's normal handling of browser-created block elements (for example
 // from a rich clipboard paste).
+//
+// `textContent` is preferred whenever the DOM holds no block elements: it
+// returns the newlines this page writes into text nodes directly, while
+// `innerText` has to lay the whole buffer out, which is the expensive part of
+// every commit on a large document.
 function readText() {
   const value = state.syntax === 'json' && collapsedFolds.length
     ? readTreeText(editor)
-    : editor.innerText;
+    : hasBlockElements() ? editor.innerText : editor.textContent;
   return value.replace(/\r/g, '');
+}
+function hasBlockElements() {
+  return editor.querySelector('div, p, br') !== null;
 }
 function readTreeText(node) {
   if (node.nodeType === Node.TEXT_NODE) return node.nodeValue;
@@ -1248,7 +1291,17 @@ function readTreeText(node) {
   });
   return value;
 }
+// Whether this surface still gets token spans, fold controls and a gutter.
+// Only the JSON buffer is degraded: a plain document (the text comparison
+// panes) is rendered from its diff highlights and is not rebuilt per keystroke.
+function isRichText(text) {
+  return state.syntax !== 'json' || text.length <= RICH_TEXT_LIMIT;
+}
+// Fold ranges are recomputed by the renderer, the gutter and the fold actions.
+// A single-entry cache keeps that to one scan per document revision: the scan
+// allocates one object per collapsible block, which is not free at 100k lines.
 function jsonFoldRanges(text) {
+  if (text === foldCacheText) return foldCacheRanges;
   const pairs = { '{': '}', '[': ']' };
   const closing = { '}': true, ']': true };
   const stack = [];
@@ -1265,7 +1318,7 @@ function jsonFoldRanges(text) {
     }
     if (character === '"') { inString = true; continue; }
     if (pairs[character]) {
-      stack.push({ character, index });
+      stack.push({ character, index, depth: stack.length });
       continue;
     }
     if (!closing[character] || !stack.length) continue;
@@ -1274,12 +1327,14 @@ function jsonFoldRanges(text) {
       if (pairs[opening.character] !== character) continue;
       stack.splice(stackIndex, 1);
       if (index > opening.index + 1 && text.slice(opening.index + 1, index).includes('\n')) {
-        ranges.push({ start: opening.index, end: index, close: character });
+        ranges.push({ start: opening.index, end: index, close: character, depth: opening.depth });
       }
       break;
     }
   }
-  return ranges.sort((a, b) => a.start - b.start);
+  foldCacheText = text;
+  foldCacheRanges = ranges.sort((a, b) => a.start - b.start);
+  return foldCacheRanges;
 }
 function foldRangeAt(text, offset) {
   const ranges = jsonFoldRanges(text);
@@ -1290,17 +1345,26 @@ function foldMarker(start) {
   return `<span class="fold-toggle${collapsed}" data-fold-start="${start}" contenteditable="false" aria-label="折叠或展开"></span>`;
 }
 function updateLineNumbers(text) {
-  if (state.syntax !== 'json') {
+  const lineCount = countLines(text);
+  const showGutter = state.syntax === 'json' && lineCount <= LINE_NUMBER_LIMIT;
+  // A 100k-line document needs 100k elements here, and rebuilding them on
+  // every keystroke costs more than the numbers are worth.
+  lineNumbers.style.display = showGutter ? 'block' : 'none';
+  if (!showGutter) {
+    gutterSignature = '';
     lineNumbersContent.innerHTML = '';
     return;
   }
-  const ranges = jsonFoldRanges(text);
+  const signature = `${lineCount}|${collapsedFolds.join(',')}`;
+  if (signature === gutterSignature) return;
+  gutterSignature = signature;
+  const ranges = collapsedFolds.length ? jsonFoldRanges(text) : [];
   const lineStarts = [0];
   for (let index = 0; index < text.length; index++) {
     if (text[index] === '\n') lineStarts.push(index + 1);
   }
   lineNumbersContent.innerHTML = lineStarts.map((start, index) => {
-    const hidden = ranges.some(range =>
+    const hidden = ranges.length > 0 && ranges.some(range =>
       collapsedFolds.includes(range.start) &&
       start > range.start && start <= range.end
     );
@@ -1308,15 +1372,32 @@ function updateLineNumbers(text) {
   }).join('');
   lineNumbers.scrollTop = editor.scrollTop;
 }
-function escapeWithFoldMarkers(value, start, ranges) {
-  let html = '';
-  for (let index = 0; index < value.length; index++) {
-    const absolute = start + index;
-    const range = ranges.find(candidate => candidate.start === absolute);
-    if (range) html += foldMarker(absolute);
-    html += escapeHtml(value[index]);
+function countLines(text) {
+  if (text.length === 0) return 0;
+  let count = 1;
+  for (let index = 0; index < text.length; index++) {
+    if (text.charCodeAt(index) === 10) count++;
   }
-  return html;
+  return count;
+}
+// Emits the HTML for one slice of the document, placing a fold toggle before
+// every collapsible block that starts inside it.
+//
+// The naive form scanned the whole fold list for every character, which is
+// quadratic in the document length. Both inputs only move forward, so a cursor
+// walks the fold list once instead and the slice is escaped in a few calls.
+function escapeWithFoldMarkers(value, start, foldStarts, cursor) {
+  let html = '';
+  let local = 0;
+  while (cursor.index < foldStarts.length) {
+    const at = foldStarts[cursor.index] - start;
+    if (at < local) { cursor.index++; continue; }
+    if (at >= value.length) break;
+    html += escapeHtml(value.slice(local, at)) + foldMarker(start + at);
+    local = at;
+    cursor.index++;
+  }
+  return html + escapeHtml(value.slice(local));
 }
 function highlightedRanges(text) {
   const ranges = Array.isArray(state.highlights) ? state.highlights : [];
@@ -1336,21 +1417,35 @@ function highlightedRanges(text) {
 }
 function highlighted(text) {
   if (state.syntax !== 'json') return highlightedRanges(text);
+  if (!isRichText(text)) return escapeHtml(text);
   const folds = jsonFoldRanges(text);
+  const foldStarts = folds.map(range => range.start);
+  const cursor = { index: 0 };
   const token = /("(?:\\.|[^"\\])*")|(-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?)|\b(true|false|null)\b/g;
   let html = '', last = 0, match;
   while ((match = token.exec(text))) {
-    html += escapeWithFoldMarkers(text.slice(last, match.index), last, folds);
-    const value = match[0], after = text.slice(token.lastIndex);
+    html += escapeWithFoldMarkers(text.slice(last, match.index), last, foldStarts, cursor);
+    const value = match[0];
     let cls = 'json-string';
     if (match[2]) cls = 'json-number';
     if (match[3] === 'null') cls = 'json-null';
     if (match[3] && match[3] !== 'null') cls = 'json-literal';
-    if (match[1] && /^\s*:/.test(after)) cls = 'json-key';
-    html += '<span class="' + cls + '">' + escapeWithFoldMarkers(value, match.index, folds) + '</span>';
+    if (match[1] && followsColon(text, token.lastIndex)) cls = 'json-key';
+    html += '<span class="' + cls + '">' + escapeWithFoldMarkers(value, match.index, foldStarts, cursor) + '</span>';
     last = token.lastIndex;
   }
-  return html + escapeWithFoldMarkers(text.slice(last), last, folds);
+  return html + escapeWithFoldMarkers(text.slice(last), last, foldStarts, cursor);
+}
+// Tests whether the next non-space character is a colon, which is what tells a
+// member key apart from a string value. Slicing the remainder per token would
+// copy the rest of the document once per token.
+function followsColon(text, index) {
+  for (let cursor = index; cursor < text.length; cursor++) {
+    const character = text[cursor];
+    if (character === ' ' || character === '\n' || character === '\r' || character === '\t') continue;
+    return character === ':';
+  }
+  return false;
 }
 function applyCollapsedFolds(text) {
   if (state.syntax !== 'json' || !collapsedFolds.length) return;
@@ -1408,10 +1503,15 @@ function textOffsetAtPoint(x, y) {
   return null;
 }
 function rerenderPreservingSelection(text, base, extent) {
+  if (!isRichText(text)) {
+    renderPlainText(text, base, extent);
+    return;
+  }
+  plainSurface = false;
   editor.innerHTML = highlighted(text);
   applyCollapsedFolds(text);
   updateLineNumbers(text);
-  const ranges = jsonFoldRanges(text);
+  const ranges = collapsedFolds.length ? jsonFoldRanges(text) : [];
   const visibleOffset = offset => {
     for (const range of ranges) {
       if (collapsedFolds.includes(range.start) &&
@@ -1422,6 +1522,23 @@ function rerenderPreservingSelection(text, base, extent) {
     return offset;
   };
   restoreSelection(visibleOffset(base), visibleOffset(extent));
+}
+// The large-document surface: one text node, no spans, no fold controls.
+//
+// Assigning `textContent` also normalises a paste that WebKit handled itself,
+// so the markup it may have inserted (coloured spans, block elements) does not
+// survive into the next commit.
+function renderPlainText(text, base, extent) {
+  collapsedFolds = [];
+  plainSurface = true;
+  editor.textContent = text;
+  updateLineNumbers(text);
+  restoreSelection(base, extent);
+}
+// True while the DOM still carries markup (token spans, fold controls, pasted
+// blocks) that the plain surface would otherwise keep showing.
+function needsPlainNormalisation() {
+  return editor.querySelector('span, div, p, br') !== null;
 }
 function render(text, base, extent, preserve) {
   const saved = preserve ? currentSelection() : [base, extent];
@@ -1434,6 +1551,7 @@ function render(text, base, extent, preserve) {
 function toggleFoldAt(offset) {
   if (state.syntax !== 'json' || state.readOnly) return;
   const text = readText();
+  if (!isRichText(text)) return;
   const range = foldRangeAt(text, offset);
   if (!range) return;
   const selection = currentSelection();
@@ -1443,13 +1561,20 @@ function toggleFoldAt(offset) {
   rerenderPreservingSelection(text, selection[0], selection[1]);
 }
 window.devOrbitCollapseAll = () => {
-  if (state.syntax !== 'json') return;
-  collapsedFolds = jsonFoldRanges(readText()).map(range => range.start);
+  if (state.syntax !== 'json' || plainSurface) return;
+  const text = readText();
+  if (!isRichText(text)) return;
   const selection = currentSelection();
-  rerenderPreservingSelection(readText(), selection[0], selection[1]);
+  // Collapsing every nested block wraps the buffer once per block, and each of
+  // those DOM range operations is linear in document size. The outermost
+  // blocks already hide everything under them, and there are only a few.
+  collapsedFolds = jsonFoldRanges(text)
+    .filter(range => range.depth === 0)
+    .map(range => range.start);
+  rerenderPreservingSelection(text, selection[0], selection[1]);
 };
 window.devOrbitExpandAll = () => {
-  if (state.syntax !== 'json') return;
+  if (state.syntax !== 'json' || plainSurface) return;
   const text = readText();
   const selection = currentSelection();
   collapsedFolds = [];
@@ -1535,7 +1660,9 @@ window.devOrbitInsertText = value => {
   insertPlainText(value);
 };
 window.devOrbitRevealSelection = (base, extent) => {
-  const ranges = jsonFoldRanges(readText());
+  // A plain surface has no fold spans to open, and scanning for them would
+  // walk the whole document on what should be an instant caret move.
+  const ranges = plainSurface ? [] : jsonFoldRanges(readText());
   const hidden = ranges.filter(range =>
     collapsedFolds.includes(range.start) &&
     Math.max(base, extent) > range.start &&
@@ -1641,7 +1768,14 @@ function scheduleInputCommit() {
     collapsedFolds = [];
     recordEdit(text, selection);
     lastSelection = selection;
-    render(text, selection[0], selection[1], false);
+    // Re-rendering a large buffer is the expensive half of a paste: tokenizing
+    // it and replacing the DOM takes seconds. The DOM already holds the text,
+    // so only normalise it when a paste left markup behind.
+    if (!isRichText(text) && !needsPlainNormalisation()) {
+      updateLineNumbers(text);
+    } else {
+      render(text, selection[0], selection[1], false);
+    }
     // Text and selection cross the bridge as one committed edit. Flutter
     // never observes the temporary marked text used by an IME.
     bridge('editorChanged', [text, selection[0], selection[1]]);
@@ -1696,7 +1830,7 @@ editor.addEventListener('click', event => {
     toggleFoldAt(Number(placeholder.dataset.foldStart));
     return;
   }
-  if (state.syntax !== 'json' || state.readOnly) return;
+  if (state.syntax !== 'json' || state.readOnly || plainSurface) return;
   // Hit-test the actual glyph. A caret offset alone only identifies the gap
   // beside a character, which made clicks to the right of a brace fold it.
   const offset = textOffsetAtPoint(event.clientX, event.clientY);

@@ -1,9 +1,34 @@
 import 'dart:async';
-import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 
 import 'json_transformer.dart';
+
+/// UTF-8 size of [value] without materialising the encoded bytes: the size
+/// check runs on every paste, and a multi-megabyte temporary list costs more
+/// than the count it produces.
+int _utf8Length(String value) {
+  var bytes = 0;
+  for (var index = 0; index < value.length; index++) {
+    final unit = value.codeUnitAt(index);
+    if (unit < 0x80) {
+      bytes += 1;
+    } else if (unit < 0x800) {
+      bytes += 2;
+    } else if (unit >= 0xD800 &&
+        unit <= 0xDBFF &&
+        index + 1 < value.length &&
+        value.codeUnitAt(index + 1) >= 0xDC00 &&
+        value.codeUnitAt(index + 1) <= 0xDFFF) {
+      // A surrogate pair is one four-byte code point, not two three-byte ones.
+      bytes += 4;
+      index++;
+    } else {
+      bytes += 3;
+    }
+  }
+  return bytes;
+}
 
 enum JsonDocumentStatus { empty, validating, valid, invalid }
 
@@ -23,6 +48,8 @@ class JsonDocumentController extends ChangeNotifier {
   JsonIssue? _issue;
   JsonDocumentStatus _status = JsonDocumentStatus.empty;
   int _revision = 0;
+  int? _lineCount;
+  int? _byteCount;
 
   String get text => _text;
   String? get filePath => _filePath;
@@ -32,13 +59,35 @@ class JsonDocumentController extends ChangeNotifier {
   JsonIssue? get issue => _issue;
   JsonDocumentStatus get status => _status;
 
+  /// Line and byte counts are shown in the status bar, which rebuilds on every
+  /// caret move. Counting them there meant walking the whole document several
+  /// times per frame, so they are measured once per revision instead.
+  int get lineCount => _lineCount ??= _measureLines();
+  int get byteCount => _byteCount ??= _utf8Length(_text);
+
+  int _measureLines() {
+    if (_text.isEmpty) return 0;
+    var lines = 1;
+    for (var index = 0; index < _text.length; index++) {
+      if (_text.codeUnitAt(index) == 0x0A) lines++;
+    }
+    return lines;
+  }
+
+  /// Assigns the document and drops the metrics that described the old one.
+  void _setText(String value) {
+    _text = value;
+    _lineCount = null;
+    _byteCount = null;
+  }
+
   /// Whether the current text only passed validation after an automatic repair,
   /// which means the content on screen no longer matches what was pasted.
   bool get repaired => _repaired;
 
   void userEdit(String value) {
     if (value == _text) return;
-    _text = value;
+    _setText(value);
     _isDirty = true;
     _revision++;
     // The repaired marker belongs to the content that produced it.
@@ -48,11 +97,11 @@ class JsonDocumentController extends ChangeNotifier {
   }
 
   Future<bool> loadText(String value, {String? filePath}) async {
-    if (utf8.encode(value).length > maxJsonBytes) {
+    if (_utf8Length(value) > maxJsonBytes) {
       _setIssue(const JsonIssue(message: '内容超过 10 MiB 限制', line: 1, column: 1));
       return false;
     }
-    _text = value;
+    _setText(value);
     _filePath = filePath;
     _isDirty = false;
     _repaired = false;
@@ -68,7 +117,7 @@ class JsonDocumentController extends ChangeNotifier {
     bool useTabs = false,
   }) async {
     if (_isDirty || value.trim().isEmpty || value == _text) return false;
-    if (utf8.encode(value).length > maxJsonBytes) {
+    if (_utf8Length(value) > maxJsonBytes) {
       // Silently ignoring this left the window looking broken, so surface the
       // same message a manual load would.
       _setIssue(const JsonIssue(message: '内容超过 10 MiB 限制', line: 1, column: 1));
@@ -81,7 +130,7 @@ class JsonDocumentController extends ChangeNotifier {
       useTabs: useTabs,
     );
     if (result.output == null) return false;
-    _text = result.output!;
+    _setText(result.output!);
     _filePath = null;
     _isDirty = false;
     _repaired = result.repaired;
@@ -121,7 +170,7 @@ class JsonDocumentController extends ChangeNotifier {
       if (mode != JsonTransformMode.validate &&
           result.output != null &&
           result.output != source) {
-        _text = result.output!;
+        _setText(result.output!);
         _isDirty = true;
         _revision++;
       }
@@ -130,7 +179,7 @@ class JsonDocumentController extends ChangeNotifier {
       return false;
     }
     if (mode != JsonTransformMode.validate) {
-      _text = result.output!;
+      _setText(result.output!);
       _isDirty = true;
       _revision++;
     }
@@ -175,7 +224,7 @@ class JsonDocumentController extends ChangeNotifier {
     try {
       final next = await transform(source);
       if (revision != _revision || next == source) return null;
-      _text = next;
+      _setText(next);
       _isDirty = true;
       _repaired = false;
       _revision++;
@@ -265,7 +314,7 @@ class JsonDocumentController extends ChangeNotifier {
 
   void clear() {
     _validationTimer?.cancel();
-    _text = '';
+    _setText('');
     _filePath = null;
     _isDirty = false;
     _isBusy = false;

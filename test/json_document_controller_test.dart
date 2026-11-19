@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:dev_orbit/features/json_formatter/json_document_controller.dart';
 import 'package:dev_orbit/features/json_formatter/json_transformer.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -179,5 +181,33 @@ void main() {
 
     expect(offset, isNotNull);
     expect(controller.text.substring(offset!), startsWith('}'));
+  });
+
+  test('line and byte counts describe the current revision', () {
+    final controller = JsonDocumentController();
+
+    expect(controller.lineCount, 0);
+    expect(controller.byteCount, 0);
+
+    controller.userEdit('{\n  "名称": "DevOrbit"\n}');
+    expect(controller.lineCount, 3);
+    // Two header lines are ASCII, the CJK value is three bytes per character.
+    expect(controller.byteCount, utf8.encode(controller.text).length);
+
+    controller.userEdit('{ "a": 1 }');
+    expect(controller.lineCount, 1);
+    expect(controller.byteCount, utf8.encode(controller.text).length);
+
+    controller.clear();
+    expect(controller.lineCount, 0);
+    expect(controller.byteCount, 0);
+  });
+
+  test('byte count matches UTF-8 for surrogate pairs', () {
+    final controller = JsonDocumentController();
+
+    controller.userEdit('{\n  "emoji": "🚀🚀"\n}');
+
+    expect(controller.byteCount, utf8.encode(controller.text).length);
   });
 }

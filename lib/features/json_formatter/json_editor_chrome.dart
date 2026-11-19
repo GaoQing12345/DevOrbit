@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as path;
 
@@ -288,6 +286,7 @@ class JsonEditorStatusBar extends StatelessWidget {
     required this.controller,
     this.caretLabel,
     this.indentLabel,
+    this.hint,
     this.onJumpToError,
   });
 
@@ -296,6 +295,10 @@ class JsonEditorStatusBar extends StatelessWidget {
   /// Caret position such as `行 12，列 5`, or null while the editor has none.
   final String? caretLabel;
   final String? indentLabel;
+
+  /// A short note about the current editing surface, such as the large-document
+  /// mode that drops syntax highlighting.
+  final String? hint;
 
   /// Called when the error text is clicked, to reveal the offending character.
   final VoidCallback? onJumpToError;
@@ -318,14 +321,15 @@ class JsonEditorStatusBar extends StatelessWidget {
         : isValid
         ? theme.colorScheme.primary
         : theme.colorScheme.onSurfaceVariant;
-    final text = controller.text;
-    final lineCount = text.isEmpty ? 0 : '\n'.allMatches(text).length + 1;
+    // Both metrics are cached per revision: walking the document here would
+    // repeat on every caret move.
     final meta = [
       if (controller.repaired) '已自动修复',
-      '$lineCount 行',
+      ?hint,
+      '${controller.lineCount} 行',
       ?indentLabel,
       ?caretLabel,
-      '${utf8.encode(text).length} B',
+      '${controller.byteCount} B',
     ].join(' · ');
     return DecoratedBox(
       decoration: BoxDecoration(
