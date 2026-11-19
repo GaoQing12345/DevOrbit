@@ -1,7 +1,8 @@
+import 'package:dev_orbit/app/app_theme.dart';
 import 'package:flutter/foundation.dart';
-import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:re_editor/re_editor.dart';
 
 import 'support/json_formatter_fixture.dart';
@@ -15,6 +16,22 @@ void main() {
     final editor = tester.widget<CodeEditor>(find.byType(CodeEditor));
     expect(fixture.controller.text, isEmpty);
     expect(editor.hint, isNull);
+    await disposeEditor(tester);
+  });
+
+  testWidgets('code editor colours come from the app theme', (tester) async {
+    final fixture = await JsonFormatterFixture.create();
+    await tester.pumpWidget(fixture.widget);
+
+    final editor = tester.widget<CodeEditor>(find.byType(CodeEditor));
+    final scheme = AppTheme.light().colorScheme;
+
+    // re_editor is built against the bundled material library, so it never sees
+    // this app's MaterialUi theme and would otherwise paint the light default
+    // over a dark background. Every colour has to be handed to it.
+    expect(editor.style?.textColor, scheme.onSurface);
+    expect(editor.style?.cursorColor, scheme.primary);
+    expect(editor.style?.selectionColor, isNotNull);
     await disposeEditor(tester);
   });
 

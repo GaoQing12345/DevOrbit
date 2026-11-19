@@ -1,5 +1,5 @@
-import 'package:flutter/material.dart';
 import 'package:hotkey_manager/hotkey_manager.dart';
+import 'package:material_ui/material_ui.dart';
 
 import 'app/app_controller.dart';
 import 'app/dev_orbit_app.dart';

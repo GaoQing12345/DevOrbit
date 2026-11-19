@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:re_editor/re_editor.dart';
 import 'package:re_highlight/languages/json.dart';
 import 'package:re_highlight/styles/atom-one-dark.dart';
@@ -20,7 +20,10 @@ final jsonAtomOneLightTheme = <String, TextStyle>{
 
 CodeEditorStyle buildJsonEditorStyle({
   required bool isDark,
+  required Color textColor,
   required Color cursorLineColor,
+  Color? selectionColor,
+  Color? cursorColor,
   Color? backgroundColor,
 }) {
   return CodeEditorStyle(
@@ -31,6 +34,13 @@ CodeEditorStyle buildJsonEditorStyle({
     backgroundColor:
         backgroundColor ??
         (isDark ? const Color(0xFF111715) : const Color(0xFFFBFCFC)),
+    // re_editor still builds against the bundled material library, so its own
+    // `Theme.of` never sees this app's MaterialUi theme and would fall back to
+    // a light default. Every colour the editor draws with is passed in
+    // explicitly instead.
+    textColor: textColor,
+    selectionColor: selectionColor ?? cursorColor,
+    cursorColor: cursorColor,
     cursorLineColor: cursorLineColor,
     codeTheme: CodeHighlightTheme(
       languages: {'json': CodeHighlightThemeMode(mode: langJson)},

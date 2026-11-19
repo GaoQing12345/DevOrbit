@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 import '../core/desktop/desktop_window_shell.dart';
 import '../core/modules/tool_registry.dart';

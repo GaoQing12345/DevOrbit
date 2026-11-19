@@ -5,12 +5,12 @@ import 'package:dev_orbit/core/desktop/desktop_shell.dart';
 import 'package:dev_orbit/core/desktop/standalone_tool_window_launcher.dart';
 import 'package:dev_orbit/core/modules/tool_module.dart';
 import 'package:dev_orbit/core/modules/tool_registry.dart';
-import 'package:dev_orbit/features/launcher/orbit_ring_painter.dart';
 import 'package:dev_orbit/core/settings/settings_store.dart';
+import 'package:dev_orbit/features/launcher/orbit_ring_painter.dart';
 import 'package:dev_orbit/features/launcher/radial_launcher.dart';
-import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hotkey_manager/hotkey_manager.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {

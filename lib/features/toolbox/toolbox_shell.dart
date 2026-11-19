@@ -1,10 +1,10 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 import '../../app/app_controller.dart';
 import '../../core/modules/tool_registry.dart';
 import '../../core/settings/settings_store.dart';
-import '../../core/widgets/mac_ui.dart';
 import '../../core/widgets/lazy_indexed_stack.dart';
+import '../../core/widgets/mac_ui.dart';
 import '../settings/settings_page.dart';
 import 'toolbox_home.dart';
 

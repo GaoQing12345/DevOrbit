@@ -7,10 +7,10 @@ import 'package:dev_orbit/features/text_compare/text_compare_page.dart';
 import 'package:dev_orbit/features/text_compare/text_compare_pane.dart';
 import 'package:dev_orbit/features/text_compare/text_compare_service.dart';
 import 'package:flutter/foundation.dart';
-import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:re_editor/re_editor.dart';
 import 'package:window_manager/window_manager.dart';
 

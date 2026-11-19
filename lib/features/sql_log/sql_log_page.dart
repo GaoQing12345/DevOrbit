@@ -2,12 +2,12 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
-import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:material_ui/material_ui.dart';
 
+import '../../app/app_theme.dart';
 import '../../core/desktop/desktop_clipboard_focus_restorer.dart';
 import '../../core/desktop/desktop_text_selection.dart';
-import '../../app/app_theme.dart';
 import '../../core/desktop/web_text_editor.dart';
 import '../../core/widgets/mac_ui.dart';
 import 'sql_log_controller.dart';

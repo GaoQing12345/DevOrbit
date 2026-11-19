@@ -2,9 +2,9 @@ import 'package:dev_orbit/app/app_theme.dart';
 import 'package:dev_orbit/features/sql_log/sql_log_controller.dart';
 import 'package:dev_orbit/features/sql_log/sql_log_page.dart';
 import 'package:flutter/foundation.dart';
-import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'support/inline_sql_log_conversion_service.dart';

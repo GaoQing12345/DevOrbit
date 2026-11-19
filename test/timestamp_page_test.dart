@@ -2,9 +2,9 @@ import 'package:dev_orbit/app/app_theme.dart';
 import 'package:dev_orbit/features/timestamp/timestamp_converter.dart';
 import 'package:dev_orbit/features/timestamp/timestamp_page.dart';
 import 'package:flutter/foundation.dart';
-import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'support/json_formatter_fixture.dart';

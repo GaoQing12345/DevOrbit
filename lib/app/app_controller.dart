@@ -1,7 +1,7 @@
 import 'dart:async';
 
-import 'package:flutter/material.dart';
 import 'package:hotkey_manager/hotkey_manager.dart';
+import 'package:material_ui/material_ui.dart';
 
 import '../core/desktop/desktop_shell.dart';
 import '../core/desktop/standalone_tool_window_launcher.dart';

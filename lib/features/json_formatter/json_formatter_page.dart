@@ -5,21 +5,21 @@ import 'dart:io';
 import 'package:desktop_drop/desktop_drop.dart';
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/foundation.dart';
-import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:path/path.dart' as path;
 import 'package:re_editor/re_editor.dart';
 
-import '../../core/settings/settings_store.dart';
 import '../../core/desktop/desktop_text_selection.dart';
 import '../../core/desktop/web_text_editor.dart';
+import '../../core/settings/settings_store.dart';
 import 'json_code_indicator.dart';
 import 'json_document_controller.dart';
 import 'json_editor_chrome.dart';
 import 'json_find_panel.dart';
-import 'json_fold_controller.dart';
 import 'json_focus_restorer.dart';
+import 'json_fold_controller.dart';
 import 'json_formatter_shortcuts.dart';
 import 'json_highlight_theme.dart';
 import 'json_transformer.dart';
@@ -705,6 +705,9 @@ class _JsonFormatterPageState extends State<JsonFormatterPage> {
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       style: buildJsonEditorStyle(
         isDark: isDark,
+        textColor: theme.colorScheme.onSurface,
+        selectionColor: theme.colorScheme.primary.withAlpha(64),
+        cursorColor: theme.colorScheme.primary,
         cursorLineColor: theme.colorScheme.primary.withAlpha(20),
         backgroundColor: theme.colorScheme.surfaceContainerLowest,
       ),

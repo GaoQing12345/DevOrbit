@@ -1,6 +1,6 @@
 import 'dart:convert';
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:re_editor/re_editor.dart';
 
 import '../../core/desktop/desktop_text_selection.dart';
@@ -153,6 +153,12 @@ class CompareTextPane extends StatelessWidget {
                 fontFamily: 'Menlo',
                 fontFamilyFallback: const ['Consolas', 'monospace'],
                 backgroundColor: scheme.surfaceContainerLowest,
+                // re_editor still builds against the bundled material library,
+                // so its own `Theme.of` never sees this app's MaterialUi theme
+                // and would fall back to a light default. Every colour the
+                // editor draws with is passed in explicitly instead.
+                textColor: scheme.onSurface,
+                selectionColor: scheme.primary.withAlpha(64),
                 cursorColor: scheme.primary,
                 cursorLineColor: scheme.primary.withAlpha(24),
               ),

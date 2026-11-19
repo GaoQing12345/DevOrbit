@@ -2,9 +2,9 @@ import 'package:dev_orbit/core/settings/settings_store.dart';
 import 'package:dev_orbit/features/json_formatter/json_document_controller.dart';
 import 'package:dev_orbit/features/json_formatter/json_formatter_page.dart';
 import 'package:flutter/foundation.dart';
-import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
